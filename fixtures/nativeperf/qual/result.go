@@ -225,6 +225,12 @@ type QualificationResult struct {
 	Runtimes         []RuntimeColumn   `json:"runtime_columns,omitempty"`
 	NegativeControls []NegativeControl `json:"negative_controls,omitempty"`
 	NotRun           []NotRunItem      `json:"not_run,omitempty"`
+
+	// Scenarios are the operational scenarios beyond the nine required rows (cpu_hotplug, container_modes, pid_reuse,
+	// python_trampolines, ...): each is a Row under the same state rules, written by an acceptance run that was asked to
+	// exercise it (host-changing scenarios are opt-in). The manifest's required_scenarios decide which of them a release
+	// gate needs; an unrequired scenario that did not run is only reported.
+	Scenarios map[string]Row `json:"scenarios,omitempty"`
 }
 
 // Rows returns the named required rows.
@@ -246,6 +252,16 @@ func (r *QualificationResult) Validate() error {
 			if err := row.Validate(c.Runtime + "." + suffix); err != nil {
 				errs = append(errs, err)
 			}
+		}
+	}
+	names := make([]string, 0, len(r.Scenarios))
+	for name := range r.Scenarios {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := r.Scenarios[name].Validate("scenario " + name); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -272,6 +288,11 @@ func (r *QualificationResult) UnqualifiedRequired() []string {
 func (r *QualificationResult) ExitCode() int {
 	if r.Validate() != nil {
 		return ExitFail
+	}
+	for _, row := range r.Scenarios {
+		if row.State == StateFailed || row.State == StateError {
+			return ExitFail
+		}
 	}
 	rows := r.Rows()
 	unexercised := false

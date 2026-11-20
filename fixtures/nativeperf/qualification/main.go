@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -36,6 +37,13 @@ type manifest struct {
 	Rows               []qual.ManifestRow `json:"rows"`
 	AdvertisedFixtures []string           `json:"advertised_fixtures"`
 	RequiredRuntimes   []string           `json:"required_runtimes"`
+	// RequiredScenarios are the operational scenarios (qual.QualificationResult.Scenarios) every qualifying result must
+	// have exercised to a supported row; empty means none is required.
+	RequiredScenarios []string `json:"required_scenarios"`
+	// ReleasePlatforms lists the os/arch pairs the release contains (decision D10: linux/amd64). A matrix row of another
+	// architecture is reported as out_of_release_scope with that decision as its reason, never as qualified, and is not a
+	// required row; empty means every row is in scope.
+	ReleasePlatforms []string `json:"release_platforms"`
 }
 
 type overheadFixture struct {
@@ -71,12 +79,16 @@ type matrixRow struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
+// outOfScopeReason is the reason an out-of-release row carries (decision D10).
+const outOfScopeReason = "out_of_release_scope: decision D10 limits this release to linux/amd64; this row is not exercised and not claimed"
+
 type combined struct {
 	Manifest    string                      `json:"manifest"`
 	Mode        string                      `json:"mode"`
 	Results     []*qual.QualificationResult `json:"results"`
 	Matrix      []matrixRow                 `json:"matrix"`
 	Unqualified []string                    `json:"unqualified_required_rows"`
+	OutOfScope  []matrixRow                 `json:"out_of_release_scope_rows,omitempty"`
 	Problems    []string                    `json:"report_problems,omitempty"`
 	ExitCode    int                         `json:"exit_code"`
 }
@@ -155,24 +167,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	for _, r := range c.Results {
+		var reports []overheadReport
 		for _, o := range overheads {
-			if o.KernelBuild != r.KernelBuild || o.Arch != r.Arch {
-				continue
+			if o.KernelBuild == r.KernelBuild && o.Arch == r.Arch {
+				reports = append(reports, o)
 			}
-			if problem := mergeOverhead(r, o, m.AdvertisedFixtures); problem != "" {
-				c.Problems = append(c.Problems, r.KernelBuild+"/"+r.Arch+": overhead report not bound to this result: "+problem)
-			}
+		}
+		for _, problem := range mergeOverheads(r, reports, m.AdvertisedFixtures) {
+			c.Problems = append(c.Problems, r.KernelBuild+"/"+r.Arch+": overhead report not bound to this result: "+problem)
 		}
 		for _, p := range qual.ReleaseProblems(r) {
 			c.Problems = append(c.Problems, r.KernelBuild+"/"+r.Arch+": "+p)
 		}
 	}
-	missing := qual.MatrixVerdict(m.Rows, c.Results)
+	inScope := make([]qual.ManifestRow, 0, len(m.Rows))
+	for _, row := range m.Rows {
+		if len(m.ReleasePlatforms) > 0 && strings.HasSuffix(row.KernelSeries, "LTS") && !slices.Contains(m.ReleasePlatforms, "linux/"+row.Arch) {
+			c.OutOfScope = append(c.OutOfScope, matrixRow{KernelSeries: row.KernelSeries, Arch: row.Arch, Reason: outOfScopeReason})
+			continue
+		}
+		inScope = append(inScope, row)
+	}
+	missing := qual.MatrixVerdict(inScope, c.Results)
 	missingSet := map[string]bool{}
 	for _, line := range missing {
 		missingSet[line] = true
 	}
-	for _, row := range m.Rows {
+	for _, row := range inScope {
 		if !strings.HasSuffix(row.KernelSeries, "LTS") {
 			continue
 		}
@@ -192,6 +213,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			c.Unqualified = append(c.Unqualified, label+" "+line)
 		}
 		for _, line := range qual.RuntimeRequirements(r, m.RequiredRuntimes) {
+			c.Unqualified = append(c.Unqualified, label+" "+line)
+		}
+		for _, line := range qual.ScenarioRequirements(r, m.RequiredScenarios) {
 			c.Unqualified = append(c.Unqualified, label+" "+line)
 		}
 		switch r.ExitCode() {
@@ -248,6 +272,53 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return qual.ExitFail
 	}
 	return qual.ExitOK
+}
+
+// mergeOverheads folds every overhead report measured for one result into its Overhead row. The CPU capture mode and the
+// scheduler (off-CPU) capture mode are separate runs of the overhead runner and so separate reports: each must be bound to
+// the result on its own (host, kernel build pin, run digest; an unbound one is refused and listed, it never supplies a
+// fixture), and together they must measure every advertised fixture once. A fixture present in two reports is refused:
+// the gate does not pick the better of two measurements.
+func mergeOverheads(r *qual.QualificationResult, reports []overheadReport, advertised []string) []string {
+	var problems []string
+	var bound []overheadReport
+	for _, o := range reports {
+		if problem := overheadUnbound(r, o); problem != "" {
+			problems = append(problems, problem)
+			continue
+		}
+		bound = append(bound, o)
+	}
+	if len(bound) == 0 {
+		return problems
+	}
+	pooled := bound[0]
+	pooled.Fixtures = nil
+	pooled.FullRun = true
+	var commands, digests []string
+	seen := map[string]bool{}
+	for _, o := range bound {
+		commands = append(commands, o.Command)
+		digests = append(digests, o.RunDigest)
+		pooled.FullRun = pooled.FullRun && o.FullRun
+		for _, f := range o.Fixtures {
+			if seen[f.Fixture] {
+				problems = append(problems, "fixture "+f.Fixture+" measured in two reports")
+				continue
+			}
+			seen[f.Fixture] = true
+			pooled.Fixtures = append(pooled.Fixtures, f)
+		}
+	}
+	pooled.Command = strings.Join(commands, "; ")
+	pooled.RunDigest = overheadDigest(pooled)
+	if problem := mergeOverhead(r, pooled, advertised); problem != "" {
+		problems = append(problems, problem)
+	}
+	if r.Overhead.Detail != nil {
+		r.Overhead.Detail["report_run_digests"] = digests
+	}
+	return problems
 }
 
 // mergeOverhead folds a measured overhead report into the acceptance result it is bound to (same host identity, kernel

@@ -7,7 +7,9 @@
 // as root: the helper accepts only a root-owned policy at /etc/soundpost/perf-policy.json and the policy UID is the
 // helper's euid. It builds nothing itself (the helper, the smoke and the controlled workload are built beforehand).
 //
-// Phase 1 starts the helper with its normal limits and runs authorized, denied, expired, cancel and capture. Phase 2
+// Phase 1 starts the helper with its normal limits and runs authorized, denied, expired, cancel and capture (and, when asked
+// with --scenarios, offcpu: the same target signed for the CPU + system-wide scheduler mode, whose refusal by tracefs, a
+// missing capability or another operator layer is reported as that scenario's closed status). Phase 2
 // starts a second helper, in the same installation, under a finite RLIMIT_NOFILE that cannot fit the request and runs
 // fd-cap, whose own checks bind the limit to the helper peer by SO_PEERCRED and /proc/<pid>/limits. The operator key is
 // the documented public fixture key of helper-e2e (never a production key). Everything this run created is removed.
@@ -175,19 +177,11 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	cg, e := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.Process.Pid))
+	id, e := nativeperf.ResolveCgroupID(child.Process.Pid)
 	if e != nil {
 		return e
 	}
-	group, e := cgroupV2Path(string(cg))
-	if e != nil {
-		return e
-	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
-	if e != nil {
-		return e
-	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	build, e := workloadBuildID(*workload)
 	if e != nil {
 		return e
@@ -218,15 +212,20 @@ func run() error {
 	base := filepath.Join(private, "base.json")
 	expired := filepath.Join(private, "expired.json")
 	fdcap := filepath.Join(private, "fdcap.json")
+	offcpu := filepath.Join(private, "offcpu.json")
 	for path, expires := range map[string]int64{base: now.Add(10 * time.Minute).Unix(), expired: now.Add(-time.Minute).Unix(), fdcap: now.Add(10 * time.Minute).Unix()} {
-		if e = writeRequest(path, key, tmpl, target, expires, l); e != nil {
+		if e = writeRequest(path, key, tmpl, target, expires, l, nativeperf.ModeCPU); e != nil {
 			return e
 		}
+	}
+	// the same target and configuration asking for the CPU and system-wide scheduler (off-CPU) paths (scenario offcpu)
+	if e = writeRequest(offcpu, key, tmpl, target, now.Add(10*time.Minute).Unix(), l, nativeperf.ModeCPUOffCPU); e != nil {
+		return e
 	}
 
 	sum := summary{Kernel: strings.TrimSpace(readSmall("/proc/sys/kernel/osrelease")), Mode: mode, Failures: []string{}}
 	smokeArgs := func(extra ...string) []string {
-		return append([]string{"--target-pid", strconv.Itoa(child.Process.Pid), "--request", base}, extra...)
+		return append([]string{"--target-pid", strconv.Itoa(child.Process.Pid), "--request", base, "--offcpu-request", offcpu}, extra...)
 	}
 	phases := []struct {
 		name    string
@@ -553,15 +552,15 @@ func nofileLimit(pid int) string {
 	return ""
 }
 
-func writeRequest(path string, key ed25519.PrivateKey, tmpl nativeperf.OperatorPolicy, target nativeperf.Target, expires int64, l launcher) error {
+func writeRequest(path string, key ed25519.PrivateKey, tmpl nativeperf.OperatorPolicy, target nativeperf.Target, expires int64, l launcher, mode nativeperf.CaptureMode) error {
 	cfg := nativeperf.DefaultConfig(1)
 	targets := []nativeperf.Target{target}
 	grant, e := nativeperf.SignStart(nativeperf.StartAuthorization{Installation: tmpl.Installation, UID: tmpl.UID, Revision: tmpl.Revision,
-		Expires: expires, Targets: targets, Config: cfg, Mode: nativeperf.ModeCPU}, key)
+		Expires: expires, Targets: targets, Config: cfg, Mode: mode}, key)
 	if e != nil {
 		return e
 	}
-	b, e := json.Marshal(nativeperf.CaptureRequest{Authorization: grant, Targets: targets, Config: cfg, Mode: nativeperf.ModeCPU})
+	b, e := json.Marshal(nativeperf.CaptureRequest{Authorization: grant, Targets: targets, Config: cfg, Mode: mode})
 	if e != nil {
 		return e
 	}

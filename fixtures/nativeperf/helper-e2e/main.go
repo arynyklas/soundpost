@@ -25,7 +25,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,19 +121,11 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	cg, e := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.Process.Pid))
+	id, e := nativeperf.ResolveCgroupID(child.Process.Pid)
 	if e != nil {
 		return e
 	}
-	group, e := cgroupV2Path(string(cg))
-	if e != nil {
-		return e
-	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
-	if e != nil {
-		return e
-	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	build, e := workloadBuildID(*workload)
 	if e != nil {
 		return e

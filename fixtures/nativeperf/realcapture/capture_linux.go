@@ -102,11 +102,11 @@ func targetOf(child *os.Process, workload string) (nativeperf.Target, uint64, ui
 	if group == "" {
 		return target, 0, 0, cannot("cgroup v2 identity unavailable")
 	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := nativeperf.ResolveCgroupID(child.Pid)
 	if e != nil {
 		return target, 0, 0, cannot("cgroup %q not visible: %v", group, e)
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	executable, e := elf.Open(workload)
 	if e != nil {
 		return target, 0, 0, e

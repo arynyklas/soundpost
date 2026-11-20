@@ -111,6 +111,9 @@ func resolveTask(pid int, namespace NamespaceID) (TaskKey, error) {
 	if pid <= 0 || uint64(pid) > uint64(^uint32(0)) || namespace == 0 {
 		return TaskKey{}, ErrTargetIdentity
 	}
+	if e := procViewIsOwn(); e != nil {
+		return TaskKey{}, e
+	}
 	fd, e := syscall.Open("/proc/"+strconv.Itoa(pid), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if e != nil {
 		return TaskKey{}, ErrTargetIdentity

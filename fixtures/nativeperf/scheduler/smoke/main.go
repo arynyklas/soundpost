@@ -80,11 +80,11 @@ func run() error {
 			return errors.New("cgroup namespace not visible")
 		}
 	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := nativeperf.ResolveCgroupID(child.Process.Pid)
 	if e != nil {
 		return e
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	executable, e := elf.Open(*workload)
 	if e != nil {
 		return e

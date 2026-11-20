@@ -6,10 +6,13 @@
 package qual
 
 import (
+	"crypto/sha256"
 	"debug/elf"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -302,5 +305,45 @@ func TestParseStatusReadsTheResidentSplit(t *testing.T) {
 	own, err := ReadProc(0)
 	if err != nil || own.RSSKiB == 0 || own.AnonKiB == 0 || own.AnonKiB+own.FileKiB+own.ShmemKiB > own.RSSKiB+64 {
 		t.Errorf("own usage %+v, %v", own, err)
+	}
+}
+
+// FileSHA256 hashes the runtime executables of the columns (Node and Bun are 100 MB and more). It must stream them: reading one
+// whole puts its size on the Go heap, and the runtime keeps metadata for that heap resident long after the heap is released.
+// Every later capture's admission charge counts that as the client's resident size, which shrank the correlator's share of the
+// 64 MiB budget to 8.9 MB after the two Node columns and failed the scheduler `contend` row (l4w33 final run, 6.6.162).
+func TestFileSHA256StreamsTheFileInsteadOfHoldingItInMemory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big")
+	const size = 48 << 20
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 1<<20)
+	for i := range chunk {
+		chunk[i] = byte(i*7 + 1)
+	}
+	want := sha256.New()
+	for written := 0; written < size; written += len(chunk) {
+		if _, err := f.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+		want.Write(chunk)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	sum, n, err := FileSHA256(path)
+	runtime.ReadMemStats(&after)
+	if err != nil || n != size || sum != hex.EncodeToString(want.Sum(nil)) {
+		t.Fatalf("hash %s, %d bytes, %v; want %s, %d", sum, n, err, hex.EncodeToString(want.Sum(nil)), size)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 4<<20 {
+		t.Fatalf("hashing a %d byte file asked the heap for %d bytes: it must be streamed", size, grew)
+	}
+	if _, _, err := FileSHA256(path + ".missing"); err == nil {
+		t.Fatal("a missing file was hashed")
 	}
 }

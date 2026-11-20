@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -83,6 +84,45 @@ func TestPerfPermissionDimensions(t *testing.T) {
 		source, e := NewCPUAcquisition(context.Background(), AuthorizedTargets{targets: []Target{target}, mode: ModeCPU}, DefaultConfig(1), lease)
 		if source != nil || !errors.Is(e, ErrTargetIdentity) || len(lease.owned) != 0 {
 			t.Fatal("target refusal opened perf resources", e)
+		}
+	})
+	t.Run("tracefs-dac-denial-is-denied-and-absence-is-unsupported", func(t *testing.T) {
+		path := func(root string) *os.PathError { return &os.PathError{Op: "open", Path: root, Err: syscall.EACCES} }
+		cases := []struct {
+			name   string
+			read   func(string) ([]byte, error)
+			status Status
+			reason Reason
+		}{
+			{"both mounts refuse (root-only 0700 tracefs)", func(p string) ([]byte, error) { return nil, path(p) }, Denied, ReasonPermission},
+			{"EPERM from a policy", func(p string) ([]byte, error) { return nil, &os.PathError{Op: "open", Path: p, Err: syscall.EPERM} }, Denied, ReasonPermission},
+			{"one mount refuses, the other is absent", func(p string) ([]byte, error) {
+				if strings.HasPrefix(p, "/sys/kernel/tracing/") {
+					return nil, path(p)
+				}
+				return nil, &os.PathError{Op: "open", Path: p, Err: syscall.ENOENT}
+			}, Denied, ReasonPermission},
+			{"no tracefs at all", func(p string) ([]byte, error) { return nil, &os.PathError{Op: "open", Path: p, Err: syscall.ENOENT} }, Unsupported, ReasonTraceFS},
+		}
+		for _, c := range cases {
+			id, e := tracepointIDFrom(c.read, "sched_switch")
+			if id != 0 || e == nil {
+				t.Fatal(c.name, "lookup succeeded", id)
+			}
+			status, reason := tracefsLookupStatus(e)
+			if status != c.status || reason != c.reason {
+				t.Fatalf("%s: %s/%s, want %s/%s", c.name, status, reason, c.status, c.reason)
+			}
+		}
+		// A readable mount wins over a refusing one: the id is used, nothing is denied.
+		id, e := tracepointIDFrom(func(p string) ([]byte, error) {
+			if strings.HasPrefix(p, "/sys/kernel/tracing/") {
+				return nil, path(p)
+			}
+			return []byte("315\n"), nil
+		}, "sched_switch")
+		if e != nil || id != 315 {
+			t.Fatal("readable debug tracing mount was ignored", id, e)
 		}
 	})
 }

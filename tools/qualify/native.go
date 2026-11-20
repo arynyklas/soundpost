@@ -628,7 +628,7 @@ func (rc *runCtx) identityRow(build *Build, scenario string, res execResult) Row
 // nativeGaps are required native cases for which no harness exists or which
 // cannot be exercised without changing the host.
 var nativeGaps = map[string]string{
-	"cpu_hotplug":     "no committed harness hot-unplugs a CPU under a live capture, and offlining a CPU means writing /sys/devices/system/cpu/*/online, a host configuration change this qualification must not make",
+	"cpu_hotplug":     "the committed harness (fixtures/nativeperf/acceptance --host-scenarios cpu_hotplug, scenario_hotplug.go) takes a CPU offline and back online under live captures, which writes /sys/devices/system/cpu/cpuN/online, a host configuration change this qualification must not make; an operator who accepts that runs the harness as root on that host and its acceptance report is the evidence, not this run",
 	"container_modes": "no container/cgroup-restricted or seccomp-restricted capture fixture exists (design 13 requires audited Compose/Kubernetes recipes and denied-permission rows); only the host-process helper is exercised",
 }
 

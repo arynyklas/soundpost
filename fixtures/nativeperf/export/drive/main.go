@@ -147,25 +147,11 @@ func resolveTarget(pid int, exe string) (nativeperf.Target, error) {
 	if e != nil {
 		return target, e
 	}
-	cg, e := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
-	if e != nil {
-		return target, e
-	}
-	group := ""
-	for _, line := range strings.Split(string(cg), "\n") {
-		if strings.HasPrefix(line, "0::/") {
-			group = strings.TrimPrefix(line, "0::")
-			break
-		}
-	}
-	if group == "" {
-		return target, errors.New("cgroup v2 identity unavailable")
-	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := nativeperf.ResolveCgroupID(pid)
 	if e != nil {
 		return target, errors.New("cgroup identity not visible")
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	f, e := elf.Open(exe)
 	if e != nil {
 		return target, e

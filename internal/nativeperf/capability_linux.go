@@ -93,6 +93,9 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 			return c, &CapabilityError{Unsupported, ReasonAcquisition}
 		}
 		actual, e := ResolveLocalTarget(int(t.TGID))
+		if errors.Is(e, ErrPIDNamespaceUnproven) {
+			return c, e
+		}
 		if e != nil || actual.PIDNamespace != t.PIDNamespace || actual.ProcessStart != t.ProcessStart {
 			return c, ErrInvalid
 		}
@@ -121,8 +124,9 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 		}
 		id, e := tracepointID(event)
 		if e != nil {
-			c.OffCPU = Unsupported
-			c.Reasons = append(c.Reasons, ReasonTraceFS)
+			s, r := tracefsLookupStatus(e)
+			c.OffCPU = s
+			c.Reasons = append(c.Reasons, r)
 			break
 		}
 		s, r := probeStatus(probeOpen(2, id, -1, 0))
@@ -157,10 +161,17 @@ func reasonFor(s Status) Reason {
 	}
 	return ReasonEvent
 }
-func tracepointID(event string) (uint64, error) {
+func tracepointID(event string) (uint64, error) { return tracepointIDFrom(os.ReadFile, event) }
+
+// tracepointIDFrom reads the scheduler tracepoint id through read. A permission
+// refusal of tracefs is reported as the typed permission denial; only an absent
+// or unreadable-for-other-reasons tracefs is a lookup failure.
+func tracepointIDFrom(read func(string) ([]byte, error), event string) (uint64, error) {
+	refused := false
 	for _, root := range []string{"/sys/kernel/tracing/events/sched/", "/sys/kernel/debug/tracing/events/sched/"} {
-		b, e := os.ReadFile(root + event + "/id")
+		b, e := read(root + event + "/id")
 		if e != nil {
+			refused = refused || permissionDenied(e) != nil
 			continue
 		}
 		id, e := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
@@ -168,7 +179,20 @@ func tracepointID(event string) (uint64, error) {
 			return id, nil
 		}
 	}
+	if refused {
+		return 0, &CapabilityError{Denied, ReasonPermission}
+	}
 	return 0, ErrInvalid
+}
+
+// tracefsLookupStatus maps a failed tracepoint id lookup to the off-CPU status:
+// a permission denial stays denied, an absent tracefs is unsupported.
+func tracefsLookupStatus(err error) (Status, Reason) {
+	var capability *CapabilityError
+	if errors.As(err, &capability) {
+		return capability.Status, capability.Reason
+	}
+	return Unsupported, ReasonTraceFS
 }
 func Open(ctx context.Context, targets []Target, cfg Config) (*Session, error) {
 	if err := cfg.Validate(); err != nil {
@@ -183,6 +207,9 @@ func Open(ctx context.Context, targets []Target, cfg Config) (*Session, error) {
 func ResolveLocalTarget(pid int) (Target, error) {
 	if pid <= 0 || uint64(pid) > uint64(^uint32(0)) {
 		return Target{}, ErrInvalid
+	}
+	if e := procViewIsOwn(); e != nil {
+		return Target{}, e
 	}
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		return Target{}, &CapabilityError{Unsupported, ReasonPlatform}
@@ -236,6 +263,9 @@ func ResolveLocalTarget(pid int) (Target, error) {
 	}
 	if tgid != uint64(pid) {
 		return Target{}, fmt.Errorf("%w: target must be a process leader", ErrInvalid)
+	}
+	if e := checkNSpid(status, uint32(tgid), ns); e != nil {
+		return Target{}, e
 	}
 	t := Target{PIDNamespace: model.Uint64(ns), TGID: uint32(tgid), ProcessStart: model.MonoNano(ticks * 10000000)}
 	return t, t.Validate()

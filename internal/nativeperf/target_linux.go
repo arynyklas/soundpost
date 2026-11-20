@@ -54,6 +54,10 @@ func openCheckedTarget(t Target) (*TargetHandle, error) {
 		h.Close()
 		return nil, e
 	}
+	if errors.Is(e, ErrPIDNamespaceUnproven) {
+		h.Close()
+		return nil, e
+	}
 	if e != nil || before.PIDNamespace != t.PIDNamespace || before.ProcessStart != t.ProcessStart {
 		return fail()
 	}
@@ -141,7 +145,7 @@ func cgroupIdentity(b []byte) (uint64, error) {
 	if path == "" {
 		return 0, ErrAuthorization
 	}
-	fd, e := syscall.Open("/sys/fs/cgroup", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	fd, e := openCgroup2Root()
 	if e != nil {
 		return 0, e
 	}

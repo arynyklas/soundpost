@@ -190,14 +190,21 @@ func SnapshotPermissions(caps nativeperf.Capabilities) HostPermissions {
 	return p
 }
 
-// FileSHA256 hashes a file.
+// FileSHA256 hashes a file. It streams it: the runtime executables hashed for the columns are 100 MB and more, and reading one
+// whole puts its size on the Go heap, whose runtime metadata then stays resident (every capture's admission charge counts this
+// process's resident size, see TestFileSHA256StreamsTheFileInsteadOfHoldingItInMemory).
 func FileSHA256(path string) (string, int, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", 0, err
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), len(b), nil
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), int(n), nil
 }
 
 // BuildIDOf reads the GNU build ID of an ELF file.
@@ -506,25 +513,11 @@ func resolveTarget(pid int) (nativeperf.Target, error) {
 	if err != nil {
 		return t, err
 	}
-	cg, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
-	if err != nil {
-		return t, err
-	}
-	group := ""
-	for _, line := range strings.Split(string(cg), "\n") {
-		if strings.HasPrefix(line, "0::/") {
-			group = strings.TrimPrefix(line, "0::")
-			break
-		}
-	}
-	if group == "" {
-		return t, errors.New("cgroup v2 identity unavailable")
-	}
-	st, err := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, err := nativeperf.ResolveCgroupID(pid)
 	if err != nil {
 		return t, errors.New("cgroup identity not visible")
 	}
-	t.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	t.CgroupID = model.Uint64(id)
 	return t, nil
 }
 
@@ -978,7 +971,7 @@ type wireReply struct {
 	Proof    *nativeperf.AcquisitionProof
 	Complete bool `json:"complete"`
 	// ProvenThrough is the event-clock instant the helper last proved the identity of the targets (identity errors only).
-	ProvenThrough uint64 `json:"proven_through"`
+	ProvenThrough model.MonoNano `json:"proven_through"`
 }
 
 func writeFrame(c net.Conn, v any) error {
@@ -1131,7 +1124,7 @@ loop:
 			case reply.Error != "":
 				res.ErrorCode = reply.Error
 				if r, ok := o.Sink.(interface{ Revoke(provenThrough uint64) }); ok && IdentityErrorCode(reply.Error) {
-					r.Revoke(reply.ProvenThrough)
+					r.Revoke(uint64(reply.ProvenThrough))
 				}
 				break loop
 			case reply.Complete:

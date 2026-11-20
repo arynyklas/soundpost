@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/nativeperf"
@@ -24,7 +25,7 @@ func main() {
 	if runtime.GOOS == "linux" {
 		target, err := nativeperf.ResolveLocalTarget(*pid)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "target identity unavailable")
+			fmt.Fprintln(os.Stderr, identityFailure(err))
 			os.Exit(1)
 		}
 		targets = []nativeperf.Target{target}
@@ -43,4 +44,15 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
+}
+
+// identityFailure is the only text printed when the authorized target cannot be resolved. It carries the closed
+// capability code of a permission refusal (DAC, LSM, ptrace scope) and nothing else, so a refusal and an invisible
+// target (hidepid=2, another PID namespace, exited) stay distinguishable without exposing a path or an errno.
+func identityFailure(err error) string {
+	var capability *nativeperf.CapabilityError
+	if errors.As(err, &capability) {
+		return "target identity unavailable: " + string(capability.Status) + "/" + string(capability.Reason)
+	}
+	return "target identity unavailable: not_visible_or_invalid"
 }

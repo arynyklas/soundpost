@@ -15,7 +15,8 @@ import (
 // little more than that (the loop also does work). These are hand-made intervals, not scheduler evidence.
 func waitTruth(requests int) RuntimeWaitTruth {
 	return RuntimeWaitTruth{
-		TID: 4242, StartNs: 10_000_000_000, EndNs: 13_200_000_000,
+		Kind: WaitKindHTTP,
+		TID:  4242, StartNs: 10_000_000_000, EndNs: 13_200_000_000,
 		Requests: requests, ServerDelayNs: 50_000_000, WaitTotalNs: uint64(requests) * 56_000_000,
 	}
 }
@@ -166,5 +167,117 @@ func TestKeepWaitWindowDropsTheCPUPhaseAtTheSource(t *testing.T) {
 		if keep(tc.iv) != tc.want {
 			t.Errorf("%s: want %v", name, tc.want)
 		}
+	}
+}
+
+// A runtime that ran `requests` simple queries of `select pg_sleep(0.2)` against a real PostgreSQL server, one after
+// the other on one connection, inside a 3 s window: its event-loop thread (TID 4242) sat in a socket read for about
+// requests*200 ms of it. The server measured its own hold of every statement (clock_timestamp() - statement_timestamp()
+// after the sleep, in the same statement), and the client saw each round trip a little longer than that.
+func dbTruth(requests int) RuntimeWaitTruth {
+	return RuntimeWaitTruth{
+		Kind: WaitKindDatabase,
+		TID:  4242, StartNs: 10_000_000_000, EndNs: 13_000_000_000,
+		Requests: requests, ServerDelayNs: 200_000_000,
+		ServerReportedNs: uint64(requests) * 200_400_000, WaitTotalNs: uint64(requests) * 203_000_000,
+	}
+}
+
+// dbIntervals are the loop thread's intervals of one query each, `each` ns long, one every 210 ms.
+func dbIntervals(kind nativeperf.IntervalKind, tid uint32, requests int, each uint64) []nativeperf.Interval {
+	var out []nativeperf.Interval
+	start := uint64(10_000_000_000)
+	for range requests {
+		out = append(out, nativeperf.Interval{Kind: kind, Task: nativeperf.TaskKey{TID: tid}, Start: model.MonoNano(start), End: model.MonoNano(start + each)})
+		start += 210_000_000
+	}
+	return out
+}
+
+func TestCompareRuntimeWaitAcceptsTheBlockedTimeOfADatabaseWait(t *testing.T) {
+	for _, each := range []uint64{200_400_000, 202_000_000, 205_000_000} {
+		got := CompareRuntimeWait(dbTruth(12), dbIntervals(nativeperf.IntervalBlocked, 4242, 12, each))
+		if got.Verdict != VerdictPass {
+			t.Errorf("blocked %d ns per query: %s (%s)", each, got.Verdict, got.Reason)
+		}
+	}
+}
+
+func TestCompareRuntimeWaitRejectsCollectorsThatMisreportADatabaseWait(t *testing.T) {
+	truth := dbTruth(12)
+	for name, native := range map[string][]nativeperf.Interval{
+		"every query wait reported as run-queue delay": dbIntervals(nativeperf.IntervalRunnable, 4242, 12, 200_400_000),
+		"query waits cut to 30%":                       dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 60_000_000),
+		"query waits inflated 2x":                      dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 420_000_000),
+	} {
+		if got := CompareRuntimeWait(truth, native); got.Verdict != VerdictFail {
+			t.Errorf("%s: %s (%s), want fail", name, got.Verdict, got.Reason)
+		}
+	}
+}
+
+// The lower bound of a database wait is what the database itself reported holding each statement (it is measured by
+// the server, not assumed from the sleep that was asked for): a server that held its statements 230 ms each puts the
+// loop's idle time at 230 ms each, so 170 ms each is below the tolerance although it is above the 200 ms that were asked.
+func TestCompareRuntimeWaitDatabaseLowerBoundIsWhatTheServerReported(t *testing.T) {
+	truth := dbTruth(12)
+	truth.ServerReportedNs, truth.WaitTotalNs = 12*230_000_000, 12*233_000_000
+	truth.EndNs = 14_000_000_000
+	if got := CompareRuntimeWait(truth, dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 170_000_000)); got.Verdict != VerdictFail {
+		t.Errorf("170 ms blocked per statement the server held 230 ms: %s (%s), want fail", got.Verdict, got.Reason)
+	}
+	if got := CompareRuntimeWait(truth, dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 230_000_000)); got.Verdict != VerdictPass {
+		t.Errorf("230 ms blocked per statement the server held 230 ms: %s (%s), want pass", got.Verdict, got.Reason)
+	}
+}
+
+func TestCompareRuntimeWaitDatabaseIsUnknownWithoutTheServersAccount(t *testing.T) {
+	good := dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 202_000_000)
+	for name, mutate := range map[string]func(*RuntimeWaitTruth){
+		"fewer queries than a database wait needs":   func(w *RuntimeWaitTruth) { w.Requests = MinDatabaseWaitRequests - 1 },
+		"the server reported no hold at all":         func(w *RuntimeWaitTruth) { w.ServerReportedNs = 0 },
+		"the server held each statement for 40 ms":   func(w *RuntimeWaitTruth) { w.ServerReportedNs = uint64(w.Requests) * 40_000_000 },
+		"round trips shorter than the server's hold": func(w *RuntimeWaitTruth) { w.WaitTotalNs = w.ServerReportedNs - 1 },
+		"a database wait with no kind recorded":      func(w *RuntimeWaitTruth) { w.Kind = "" },
+	} {
+		truth := dbTruth(12)
+		mutate(&truth)
+		if got := CompareRuntimeWait(truth, good); got.Verdict != VerdictUnknown {
+			t.Errorf("%s: %s (%s), want unknown", name, got.Verdict, got.Reason)
+		}
+	}
+}
+
+// A wait of a kind nothing knows is not judged by the rules of another one, however many requests it claims.
+func TestCompareRuntimeWaitIsUnknownForAnUnknownKind(t *testing.T) {
+	good := loopIntervals(nativeperf.IntervalBlocked, 4242, 53, 52_000_000)
+	for _, kind := range []string{"", "file_read", "Loopback_HTTP"} {
+		truth := waitTruth(53)
+		truth.Kind = kind
+		if got := CompareRuntimeWait(truth, good); got.Verdict != VerdictUnknown {
+			t.Errorf("kind %q: %s (%s), want unknown", kind, got.Verdict, got.Reason)
+		}
+	}
+}
+
+// A database query holds the loop for 200 ms, so a dozen of them are as much evidence as the 20 loopback requests of
+// 50 ms a loopback HTTP wait needs: the minimum is per kind.
+func TestCompareRuntimeWaitMinimumRequestsIsPerKind(t *testing.T) {
+	http := waitTruth(12)
+	if got := CompareRuntimeWait(http, loopIntervals(nativeperf.IntervalBlocked, 4242, 12, 52_000_000)); got.Verdict != VerdictUnknown {
+		t.Errorf("12 loopback HTTP requests: %s (%s), want unknown", got.Verdict, got.Reason)
+	}
+	if got := CompareRuntimeWait(dbTruth(12), dbIntervals(nativeperf.IntervalBlocked, 4242, 12, 202_000_000)); got.Verdict != VerdictPass {
+		t.Errorf("12 database queries: %s (%s), want pass", got.Verdict, got.Reason)
+	}
+}
+
+// The server's own account is meaningless for a loopback HTTP wait (nothing independent measured it) and must not be
+// accepted in its place: a request-count and tolerance bound decide, as before.
+func TestCompareRuntimeWaitHTTPIgnoresAServerAccount(t *testing.T) {
+	truth := waitTruth(53)
+	truth.ServerReportedNs = 53 * 500_000_000 // would put the lower bound far above what the loop was idle for
+	if got := CompareRuntimeWait(truth, loopIntervals(nativeperf.IntervalBlocked, 4242, 53, 52_000_000)); got.Verdict != VerdictPass {
+		t.Errorf("%s (%s), want pass", got.Verdict, got.Reason)
 	}
 }

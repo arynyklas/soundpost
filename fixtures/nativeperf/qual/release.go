@@ -11,7 +11,7 @@ import (
 
 // RequiredNegativeControls are the contaminated captures every acceptance run
 // must have rejected before its real path ran.
-var RequiredNegativeControls = []string{
+var RequiredNegativeControls = append([]string{
 	"staged_acquisition_pending_session",
 	"staged_acquisition_pending_capability",
 	"successful_empty_session",
@@ -27,7 +27,7 @@ var RequiredNegativeControls = []string{
 	"scheduler_open_interval_without_evidence_is_not_a_pass",
 	"scheduler_injection_positive_controls_accepted",
 	"positive_control_plausible_capture_accepted",
-}
+}, HotplugControls...)
 
 // ReleaseProblems lists everything that makes a result unusable as release
 // evidence, independent of which rows are supported: a report that did not run
@@ -71,19 +71,49 @@ func ReleaseProblems(r *QualificationResult) []string {
 }
 
 // RuntimeRequirements lists the runtime columns a release needs and whether each
-// is qualified on its own evidence (the arch and build are part of the key).
+// is qualified on its own evidence (the arch and build are part of the key). A requirement is a runtime name ("bun": any
+// qualified build of it) or a runtime and a version prefix of whole components ("node@24", "python@3.13": a build whose
+// version, without a leading "v", is that prefix or continues it after a dot); another version never qualifies it.
 func RuntimeRequirements(r *QualificationResult, required []string) []string {
 	qualified := QualifiedRuntimes(r.Runtimes)
 	var out []string
-	for _, name := range required {
+	for _, requirement := range required {
+		name, want, _ := strings.Cut(requirement, "@")
 		ok := false
 		for key, q := range qualified {
-			if q && strings.HasPrefix(key, name+"/"+r.Arch+"/") {
+			version, found := strings.CutPrefix(key, name+"/"+r.Arch+"/")
+			if q && found && versionMatches(version, want) {
 				ok = true
 			}
 		}
 		if !ok {
-			out = append(out, fmt.Sprintf("runtime %s/%s: not qualified on its own evidence", name, r.Arch))
+			out = append(out, fmt.Sprintf("runtime %s/%s: not qualified on its own evidence", requirement, r.Arch))
+		}
+	}
+	return out
+}
+
+// versionMatches says whether a build version satisfies a version-prefix requirement ("" matches every version).
+func versionMatches(version, want string) bool {
+	if want == "" {
+		return true
+	}
+	version = strings.TrimPrefix(version, "v")
+	return version == want || strings.HasPrefix(version, want+".")
+}
+
+// ScenarioRequirements lists the scenarios a release needs (the manifest's required_scenarios) that this result did not
+// exercise to a supported row, as "scenario name: state (reason)" in the order given; a scenario the run never reported is
+// not_run.
+func ScenarioRequirements(r *QualificationResult, required []string) []string {
+	var out []string
+	for _, name := range required {
+		row, ok := r.Scenarios[name]
+		switch {
+		case !ok:
+			out = append(out, fmt.Sprintf("scenario %s: %s (this run did not report it; pass --host-scenarios %s)", name, StateNotRun, name))
+		case row.State != StateSupported:
+			out = append(out, fmt.Sprintf("scenario %s: %s (%s)", name, row.State, row.Reason))
 		}
 	}
 	return out

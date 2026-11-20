@@ -1,16 +1,16 @@
 <!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Native Linux collector qualification status
 
-Required matrix: kernel 6.1 and 6.6 x amd64 and arm64, each with CPU, off-CPU, runqueue split, frame coverage, loss, memory, FDs, privacy, identity (exit, exec, PID reuse, namespaces, no frame pointers), CPU hotplug and container modes. A row is exercised only by a genuine runner of that exact series and architecture. Windows/WSL does not implicitly qualify them (design section 13), so the WSL2 host (kernel 6.6.87.2, amd64, root) is recorded as separate functional rows `wsl2-linux-kernel` that qualify nothing.
+Required matrix: kernel 6.1 and 6.6 x amd64, each with CPU, off-CPU, runqueue split, frame coverage, loss, memory, FDs, privacy, identity (exit, exec, PID reuse, namespaces, no frame pointers), CPU hotplug and container modes. The arm64 rows are out of the release scope (decision D10: this release is linux/amd64): they are not exercised, not claimed and not required by the gate. A row is exercised only by a genuine runner of that exact series and architecture. Windows/WSL does not implicitly qualify them (design section 13), so the WSL2 host (kernel 6.6.87.2, amd64, root) is recorded as separate functional rows `wsl2-linux-kernel` that qualify nothing.
 
 Observed on the WSL2 host (functional evidence): software-clock CPU capture with real callchains, frame coverage (about 1.00 with frame pointers, partial without), explicit loss under a stalled reader, memory and FD bounds, capture privacy, exit/exec/namespace/no-frame-pointer identity scenarios. A helper without capabilities against a foreign-uid target is **denied** (`permission_denied`), kept distinct from unsupported.
 
-Not exercised or failed, with reasons:
+Not exercised or failed on the WSL2 host, with reasons (the 6.1 and 6.6 LTS amd64 runners below exercise most of these):
 - Off-CPU and runqueue split: `scheduler_pid_namespace_not_initial` (tracefs is readable as root, but the PID namespace is nested so raw scheduler PIDs cannot be attributed).
-- PID reuse: the kernel never reused a PID within the smoke's attempt budget (no `pid_max`/`ns_last_pid` writes): not exercised.
-- CPU hotplug (needs a host configuration change) and container/seccomp modes (no fixture): not exercised.
-- Node and Bun native columns: measured failures, helper refused with `resource_limit` (cause not investigated).
-- Kernel 6.1, arm64: no runner.
+- PID reuse: the kernel never reused a PID within the smoke's attempt budget (no `pid_max`/`ns_last_pid` writes): not exercised on this host (steered reuse ran on the LTS runners).
+- CPU hotplug (needs a host configuration change) and container/seccomp modes: not exercised on this host (see the wave 33 section).
+- Node and Bun native columns: measured failures, helper refused with `resource_limit` (cause not investigated on this host).
+- Kernel 6.1 and arm64: no runner on this host.
 
 Staged `acquisition_pending`, empty-success, synthetic and no-op samplers are rejected by `qual.CheckCapture` controls that run before any native row is trusted.
 
@@ -31,7 +31,27 @@ The release gate (`fixtures/nativeperf/qualification`) qualifies a matrix row on
 | Native overhead (`overhead --hz 99 --seconds 120 --repeats 5`, `cpu` fixture) | full run executed | full run executed |
 | `qualification --require-all` (wave 14, final tree) | exit 10: every native row (cpu, off_cpu, runqueue_split, frame_coverage, loss, overhead, memory, fds, privacy) supported on 6.1.0-54-amd64, matrix 6.1 LTS amd64 qualified; unqualified: runtime python/node/bun columns, the other series and arm64 | exit 10: the same on 6.6.162, matrix 6.6 LTS amd64 qualified; same unqualified runtime columns and other series |
 
-Not exercised on these hosts: the other kernel series (one per host), arm64 (out of release scope, D10), Chrome 142 / Edge / Firefox rows, journeys (no OCI runtime), PID reuse, CPU hotplug, container modes, the Node 22/24 and Python runtime columns of the native acceptance runner (python critical `jobs` rows fail in the VM, see the runtime suite report), single-host and distributed gates.
+Not exercised on these hosts (wave 13; the items that wave 33 exercised moved to the section below): the other kernel series (one per host), arm64 (out of release scope, D10), Chrome 142 / Edge / Firefox rows, journeys (no OCI runtime), single-host and distributed gates.
+
+## Final qualification of the linux/amd64 release (lane 4 wave 33, tasks 04.02, 04.04, 04.06, 04.09)
+
+Run on the final tree on two real KVM guests, root with sudo, one kernel series each, 8 CPUs, `perf_event_paranoid=1`, tracefs mounted, `GOMAXPROCS<=4`: the full 60 s acceptance (seed 451) with `--host-scenarios cpu_hotplug,container_modes,python_trampolines,runtime_db_wait` and every runtime column, the CPU-mode and scheduler-mode overhead runs, and one combined `qualification --require-all` over both hosts (raw reports and the gate output: `.superpowers/sdd/approved-product/l4w33-evidence/final/`; the arm64 rows are `out_of_release_scope`, decision D10, and are not claimed).
+
+| | Linux 6.1 amd64 | Linux 6.6 amd64 |
+|---|---|---|
+| `uname -r`, THP | 6.1.0-54-amd64 (Debian 6.1.190-1), `always` | 6.6.162-0606162-generic (mainline), `madvise` |
+| Acceptance native rows (`cpu`, `off_cpu`, `runqueue_split`, `frame_coverage`, `loss`, `memory`, `fds`, `privacy`) | all supported | all supported (cpu: 2260 real samples, hot function in 2257 chains; runqueue_split 100.1% of the ground truth) |
+| Runtime columns (engine, native CPU and wait rows, HTTP and database phase) | CPython 3.12.16, 3.13.18, 3.14.10, Node v22.21.1, Node v24.11.0, Bun 1.3.14: all supported | the same six: all supported |
+| `cpu_hotplug` | supported: 181 CPU samples before, 99 while CPU 7 was offline (none from it), 149 after | supported: 184 CPU samples before, 99 while CPU 7 was offline (none from it), 156 after; both scheduler captures ended `topology_changed` with the correlation revoked from an instant inside the window; helper descriptors 7 before and after; online set `0-7` before and after (both hosts) |
+| `container_modes` | supported (10 real-capture cases, 8 negative controls; the cgroup mode is `v2`) | supported (same) |
+| `python_trampolines` | supported for 3.12, 3.13 and 3.14 (trampoline off and on; native extension `spext_hot` leaf and `spext_mix` in the chains, one run per version: `chain_has_spext_mix` 237 in the first version's native-extension samples) | supported (3.12/3.13/3.14 on 477/477, 477/476, 477/477 samples off/on; `spext_hot` leaf in 238, 238 and 237 of 238 native-extension samples) |
+| `runtime_db_wait` (PostgreSQL 16.16, 12 x `pg_sleep(0.2)` per column) | supported for all six columns | supported for all six columns |
+| Overhead, CPU mode (120 s x 5, 3% budget; `cpu` / `fanout16` / `fanout64`) | 0.23 +- 0.91% / -0.22 +- 0.57% / -0.07 +- 0.63%; memory 29.8 / 38.8 / 58.2 MB of 64 MiB; throughput change -0.06 / -0.25 / +0.08% | 0.25 +- 0.87% / 0.07 +- 1.24% / -0.01 +- 0.87%; memory 29.5 / 35.2 / 49.1 MB; throughput -0.24 / -1.08 / -1.20% |
+| Overhead, scheduler mode on the final tree (120 s x 5; `cpu_offcpu` / `fanout16_offcpu`) | -0.64 +- 0.64% / 0.71 +- 0.42%; memory 39.2 / 49.9 MB; throughput 0.63 / -13.2% | 0.02 +- 0.84% / 1.13 +- 0.80%; memory 36.3 / 45.0 MB; throughput -0.01 / -14.5% |
+| `qualification --require-all` (one run over both hosts, manifest `required_scenarios`, versioned `required_runtimes`, `release_platforms linux/amd64`) | exit 0, matrix 6.1 LTS amd64 qualified | exit 0, matrix 6.6 LTS amd64 qualified |
+
+Limits of these numbers: both runners are KVM guests (not bare metal); the workload and the collector share two pinned CPUs (`taskset -c 4,5`, nice 5), so the `fanout16_offcpu` throughput drop is CPU contention with the collector and its explicit correlator loss, not workload CPU time (the 3% budget is on workload CPU and is met); the CPU-mode reports were measured on the tree before the capture-start identity changes (`l4w33-evidence/final/cpu-mode-tree-facts.txt`: none touches the sampling path) and their own start load average was the tail of the preceding scheduler-mode half (about 21), not below 2; the scheduler-mode reports were measured on the final tree at a 1-minute load of 0.74 (6.1) and 0.38 (6.6). No Kubernetes cluster and no bare-metal Linux host were available (04.09-C22 stays blocked on infrastructure; the 3% and 64 MiB budgets are measured, never adjusted).
+Permission matrix (04.02-C12, `fixtures/nativeperf/permission-cases.json`): every layer (seccomp, host capability, LSM, tracefs mount, tracefs DAC with a working grant, target visibility) has an independently evidenced denied case and a passing control on both kernels; BPF-LSM exists on 6.1 only (6.6's LSM list has no `bpf`, AppArmor ptrace mediation is the 6.6 evidence). NSpid decision: scheduler capture outside the initial PID namespace stays refused (`event_unavailable`), CPU capture across a PID-namespace boundary only when the namespace relation is proven.
 
 ## Helper under an OCI runtime (07.02#6, lane 5 wave 24)
 

@@ -49,6 +49,8 @@ type options struct {
 	runtimeDir  string
 	runtimes    string
 	commandLine string
+	// hostScenarios names the opt-in host scenarios to exercise (host_scenarios.go).
+	hostScenarios string
 }
 
 func main() {
@@ -67,9 +69,14 @@ func main() {
 	flag.StringVar(&o.out, "out", "", "write the machine report here instead of stdout")
 	flag.StringVar(&o.runtimeDir, "runtime-dir", "fixtures/nativeperf/runtime", "runtime fixtures directory")
 	flag.StringVar(&o.runtimes, "runtimes", "python,node,bun", "runtime columns to run (comma separated, empty for none)")
+	flag.StringVar(&o.hostScenarios, "host-scenarios", "", "opt-in host scenarios to exercise (comma separated: "+strings.Join(hostScenarioNames(), ", ")+"); they may change host state")
 	flag.Parse()
 	if o.duration < 10*time.Second || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: --duration must be at least 10s and no positional arguments are accepted")
+		os.Exit(qual.ExitUsage)
+	}
+	if _, err := parseHostScenarios(o.hostScenarios); err != nil {
+		fmt.Fprintln(os.Stderr, "usage: --host-scenarios:", err)
 		os.Exit(qual.ExitUsage)
 	}
 	o.commandLine = "acceptance " + strings.Join(os.Args[1:], " ")

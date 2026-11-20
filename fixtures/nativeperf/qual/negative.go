@@ -74,6 +74,7 @@ func RunNegativeControls() []NegativeControl {
 	record("noop_sampler_no_cpu_samples", ErrNoopSampler, negEvidence(noop))
 	record("noop_sampler_trickle", ErrNoopSampler, negEvidence(synthetic[:5]))
 	out = append(out, runSchedulerInjectionControls()...)
+	out = append(out, runHotplugControls()...)
 
 	// positive control: jittered, varying, in-target samples must pass.
 	var genuine []nativeperf.SanitizedEvent

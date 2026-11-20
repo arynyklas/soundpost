@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
 )
@@ -46,6 +47,7 @@ type targetFixture struct {
 	pid    int
 	exe    string
 	target Target
+	cmd    *exec.Cmd // the child: a test that ends it must reap it through os/exec, not with a raw wait4
 }
 
 func startTargetFixture(t *testing.T, source string) targetFixture {
@@ -63,6 +65,22 @@ func startTargetFixture(t *testing.T, source string) targetFixture {
 		t.Skipf("NOT run: cannot start %s: %v", source, e)
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	// Start returns when the vfork parent is released, which happens inside execve before the child's mm is the new program's:
+	// for a moment /proc/<pid>/exe still names the PARENT's executable (the test binary, which has no GNU build ID), and a check
+	// made then is refused as ErrAuthorization although the process is the authorized one (0.02% of single and ~1% of four
+	// concurrent spawns on 6.1.0-54: scripts/exec-window-probe.go). Wait until the process runs the copy.
+	own, e := os.Stat(exe)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+		if running, e := os.Stat("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/exe"); e == nil && os.SameFile(running, own) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the child never ran %s", exe)
+		}
+	}
 	target, e := ResolveLocalTarget(cmd.Process.Pid)
 	if e != nil {
 		t.Skipf("NOT run: target identity unavailable: %v", e)
@@ -77,7 +95,7 @@ func startTargetFixture(t *testing.T, source string) targetFixture {
 	}
 	target.CgroupID = model.Uint64(inode)
 	target.AllowedBuildIDs = []string{fileBuildID(t, exe)}
-	return targetFixture{pid: cmd.Process.Pid, exe: exe, target: target}
+	return targetFixture{pid: cmd.Process.Pid, exe: exe, target: target, cmd: cmd}
 }
 
 func fileBuildID(t *testing.T, path string) string {

@@ -347,6 +347,7 @@ func (a *accept) runAll() {
 	}
 	a.runInjections()
 	a.runPermissionCases(cfg)
+	a.runHostScenarios()
 	a.deriveRows()
 }
 

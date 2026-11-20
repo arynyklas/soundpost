@@ -158,7 +158,7 @@ func TestNegativeFixturesNeverCorruptTheBaselineRequest(t *testing.T) {
 	if e = os.WriteFile(path, raw, 0600); e != nil {
 		t.Fatal(e)
 	}
-	for _, scenario := range []string{"expired", "fd-cap", "denied", "authorized", "capture", "cancel"} {
+	for _, scenario := range []string{"expired", "fd-cap", "offcpu", "denied", "authorized", "capture", "cancel"} {
 		r, e := requestFor(scenario, base, path)
 		if e != nil {
 			t.Fatalf("%s: %v", scenario, e)
@@ -167,7 +167,7 @@ func TestNegativeFixturesNeverCorruptTheBaselineRequest(t *testing.T) {
 			t.Fatalf("after scenario %s the baseline request is %+v: a scenario corrupted it", scenario, base)
 		}
 		switch scenario {
-		case "expired", "fd-cap":
+		case "expired", "fd-cap", "offcpu":
 			if !reflect.DeepEqual(r, other) {
 				t.Fatalf("%s did not return the fixture", scenario)
 			}

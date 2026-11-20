@@ -58,6 +58,10 @@ func TestQualificationNativeGapsAreNeverExercised(t *testing.T) {
 	if r.State != StateNotExercised || !strings.Contains(r.Reason, "/sys/devices/system/cpu") || strings.Contains(r.Reason, "additionally") {
 		t.Errorf("even a genuine runner does not exercise hot-unplug here: %+v", r)
 	}
+	// the harness exists now (acceptance --host-scenarios cpu_hotplug): the gap is that running it changes the host, not that none is committed
+	if !strings.Contains(r.Reason, "acceptance --host-scenarios cpu_hotplug") || strings.Contains(r.Reason, "no committed harness") {
+		t.Errorf("the hot-unplug gap must name the committed harness and not claim there is none: %+v", r)
+	}
 	if r := runNativeGap(genuine, spec("amd64", "nonsense")); r.State != StateNotExercised || !strings.Contains(r.Reason, "unknown") {
 		t.Errorf("unknown gap: %+v", r)
 	}

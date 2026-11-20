@@ -39,7 +39,7 @@ func TestCPUAttrIsExactlyTheApprovedABI(t *testing.T) {
 func TestSchedulerAttrIsExactlyTheApprovedABI(t *testing.T) {
 	cfg := DefaultConfig(1)
 	want := func(frames uint16) cpuPerfAttr {
-		return cpuPerfAttr{Type: 2, Size: 112, Config: 17, Frequency: 1, SampleType: 2 | 4 | 32 | 128 | 1024, Flags: 1 | 1<<18 | 1<<21 | 1<<24 | 1<<25, Wakeup: 1, ClockID: 1, SampleMaxStack: frames}
+		return cpuPerfAttr{Type: 2, Size: 112, Config: 17, Frequency: 1, SampleType: 2 | 4 | 32 | 128 | 1024, ReadFormat: 1, Flags: 1 | 1<<18 | 1<<21 | 1<<24 | 1<<25, Wakeup: 1, ClockID: 1, SampleMaxStack: frames}
 	}
 	if got := schedulerPerfAttr(NumericLayout{id: 17}, cfg); got != want(127) {
 		t.Fatalf("%+v\nwant %+v", got, want(127))

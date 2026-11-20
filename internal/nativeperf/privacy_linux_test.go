@@ -626,11 +626,11 @@ func privacyTargetFor(t *testing.T, c *privacyCanary) Target {
 	if group == "" {
 		t.Skip("NOT run: cgroup v2 identity unavailable")
 	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := ResolveCgroupID(c.pid)
 	if e != nil {
 		t.Skipf("NOT run: cgroup identity not visible: %v", e)
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	f, e := os.Open(c.exe)
 	if e != nil {
 		t.Fatal(e)

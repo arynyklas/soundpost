@@ -31,6 +31,13 @@ type Helper struct {
 	// closed counts connections by closed, content-free end reason (see ClosedReasons).
 	closed closedReasons
 }
+
+// UseResidentSizeReader replaces the reader admission uses for the resident size of the helper and of its peer; nil restores
+// the real /proc reader. The shipped helper never calls it. A harness that embeds the helper in a process whose resident size is
+// not the product's (a race-instrumented binary carries the detector's own memory, 43 to 59 MB measured, against a 64 MiB budget)
+// calls it before Serve, in that build only and where the caller says so. It must not be called while Serve runs.
+func (h *Helper) UseResidentSizeReader(rss func(pid int) (uint64, error)) { h.rss = rss }
+
 type helperReply struct {
 	Error    string            `json:"error,omitempty"`
 	Event    *SanitizedEvent   `json:"event,omitempty"`

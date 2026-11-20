@@ -264,25 +264,11 @@ func launchWorkload(env *fixtureEnv, workloadPath string) (*workload, error) {
 	if e != nil {
 		return w, e
 	}
-	cg, e := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", w.pid))
-	if e != nil {
-		return w, e
-	}
-	group := ""
-	for _, line := range strings.Split(string(cg), "\n") {
-		if strings.HasPrefix(line, "0::/") {
-			group = strings.TrimPrefix(line, "0::")
-			break
-		}
-	}
-	if group == "" {
-		return w, errors.New("cgroup v2 identity unavailable")
-	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := nativeperf.ResolveCgroupID(w.pid)
 	if e != nil {
 		return w, errors.New("cgroup identity not visible")
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	f, e := elf.Open(w.exe)
 	if e != nil {
 		return w, e

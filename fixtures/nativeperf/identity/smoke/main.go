@@ -63,12 +63,13 @@ func main() {
 	}
 }
 func run() error {
-	scenarios := flag.String("scenario", "exit,exec,pid-reuse,namespaces,no-frame-pointers", "comma-separated real scenarios")
+	scenarios := flag.String("scenario", "exit,exec,pid-reuse,namespaces,no-frame-pointers", "comma-separated real scenarios; extra, never in the default list (root, cc and namespace creation needed; a host without them fails): ns-nested-target, ns-nested-helper, ns-transitions, ns-layers, ns-container (all of them)")
 	workload := flag.String("workload", "fixtures/nativeperf/identity/reuse", "frame-pointer controlled ELF")
 	execWorkload := flag.String("exec-workload", "fixtures/nativeperf/identity/exec", "same-file exec controlled ELF")
 	noFP := flag.String("no-fp-workload", "fixtures/nativeperf/identity/reuse-no-fp", "frame-pointer-disabled controlled ELF")
 	attempts := flag.Int("reuse-attempts", 4096, "maximum real PID allocation attempts; no pid_max/ns_last_pid writes unless -steer-ns-last-pid")
 	steer := flag.Bool("steer-ns-last-pid", false, "pid-reuse only: inside a DISPOSABLE PID namespace (unshare --pid --fork --mount-proc, as root) write the previous child's PID minus one to /proc/sys/kernel/ns_last_pid before each start, so the kernel really hands the same number to a new process; refused in the initial PID namespace")
+	attachExe := flag.String("attach-exe", "", "ns-attach only: the exact executable path (as /proc/<pid>/exe shows it) of an already running target in this PID namespace's /proc")
 	flag.Parse()
 	if *attempts < 2 || *attempts > 16384 {
 		return errors.New("invalid_reuse_attempt_budget")
@@ -84,6 +85,10 @@ func run() error {
 			e = capture(*noFP, scenario, true)
 		case "pid-reuse":
 			e = realPIDReuse(*workload, *attempts, *steer)
+		case "ns-attach":
+			e = nsAttach(*attachExe)
+		case "ns-nested-target", "ns-nested-helper", "ns-transitions", "ns-layers", "ns-container":
+			e = nsScenario(scenario)
 		default:
 			return errors.New("unknown_identity_scenario")
 		}
@@ -143,11 +148,11 @@ func targetFor(pid int, workload string) (nativeperf.Target, error) {
 			return target, errors.New("cgroup_namespace_unavailable")
 		}
 	}
-	st, e := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, e := nativeperf.ResolveCgroupID(pid)
 	if e != nil {
 		return target, errors.New("cgroup_identity_unavailable")
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	object, e := elf.Open(workload)
 	if e != nil {
 		return target, errors.New("fixture_elf_unavailable")

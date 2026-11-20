@@ -8,7 +8,6 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -47,6 +46,13 @@ type schedulerSource struct {
 	// only throttles how often an idle pass becomes one.
 	lastProgress   model.MonoNano
 	lastProgressAt time.Time
+	// topologyProven is the event-clock instant the last successful online-set comparison started at; live is the
+	// per-event enabled-time ledger (see sched_liveness_linux.go). onlineCPUs and enabledOf replace the sysfs and perf
+	// reads in tests.
+	topologyProven model.MonoNano
+	live           schedulerLiveness
+	onlineCPUs     func() ([]uint32, error)
+	enabledOf      func(*Ring) (uint64, error)
 }
 
 // schedulerProgressInterval is the least wall time between two progress proofs:
@@ -116,7 +122,7 @@ func schedulerLayouts() ([]NumericLayout, error) {
 	return layouts, nil
 }
 func schedulerPerfAttr(l NumericLayout, c Config) cpuPerfAttr {
-	a := cpuPerfAttr{Type: 2, Size: 112, Config: l.id, Frequency: 1, SampleType: 2 | 4 | 32 | 128 | 1024, Wakeup: 1, ClockID: 1, SampleMaxStack: min(uint16(c.MaxFrames), 127)}
+	a := cpuPerfAttr{Type: 2, Size: 112, Config: l.id, Frequency: 1, SampleType: 2 | 4 | 32 | 128 | 1024, ReadFormat: perfFormatTotalTimeEnabled, Wakeup: 1, ClockID: 1, SampleMaxStack: min(uint16(c.MaxFrames), 127)}
 	// USE_CLOCKID is required: otherwise the kernel ignores ClockID and the
 	// scheduler timestamps cannot be joined to MONOTONIC samples/final proofs.
 	// Kernel tracepoints remain enabled; no registers or stack bytes are captured.
@@ -248,6 +254,7 @@ func newSchedulerAcquisition(ctx context.Context, a AuthorizedTargets, c Config,
 	if e != nil {
 		return fail(e)
 	}
+	s.live.arm(s.start, len(s.rings))
 	return s, nil
 }
 func schedulerCPUs() ([]uint32, error) {
@@ -264,18 +271,19 @@ func schedulerCPUs() ([]uint32, error) {
 	}
 	return out, nil
 }
-func (s *schedulerSource) identity() error {
+
+// identity is the periodic whole-capture check: the targets' identity, the online CPU set and (at its own cadence) that
+// every per-CPU scheduler event still counts. A topology failure is an IdentityError that says when the topology was
+// last proven (see sched_liveness_linux.go).
+func (s *schedulerSource) identity() error { return s.verify(false) }
+
+// verify is identity, optionally forcing the enabled-time round (Stop does, so the final proof is only made over events
+// that were just seen counting).
+func (s *schedulerSource) verify(force bool) error {
 	if e := s.cpu.checkIdentity(); e != nil {
 		return e
 	}
-	cpus, e := schedulerCPUs()
-	if e != nil {
-		return e
-	}
-	if !reflect.DeepEqual(cpus, s.cpus) {
-		return ErrTopologyChanged
-	}
-	return nil
+	return s.verifyTopology(force)
 }
 func (s *schedulerSource) Next(ctx context.Context) (SanitizedEvent, error) {
 	return SanitizedEvent{}, ErrProgressRequired
@@ -559,7 +567,7 @@ func (s *schedulerSource) Stop() error {
 	if s.stopped {
 		return nil
 	}
-	if e := s.identity(); e != nil {
+	if e := s.verify(true); e != nil {
 		s.terminal = e
 		return e
 	}

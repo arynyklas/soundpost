@@ -57,11 +57,11 @@ func vaReuseTarget(t *testing.T, pid int, exe string) Target {
 			break
 		}
 	}
-	st, err := os.Stat(filepath.Join("/sys/fs/cgroup", group))
+	id, err := ResolveCgroupID(pid)
 	if err != nil || group == "" {
 		t.Skipf("cgroup v2 identity unavailable: %v", err)
 	}
-	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	target.CgroupID = model.Uint64(id)
 	f, err := elf.Open(exe)
 	if err != nil {
 		t.Fatal(err)
