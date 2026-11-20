@@ -8,7 +8,7 @@ import (
 
 // The helper image is FROM scratch. The helper names the host from /etc/machine-id in every domain it exports; run as a
 // container entrypoint without that file it refuses every capture as "invalid native target identity" (real run on
-// sp-oci, kernel 6.12: fixtures/nativeperf/helper-smoke/drive --container-image ... --container-machine-id=false).
+// a lab Docker host, kernel 6.12: fixtures/nativeperf/helper-smoke/drive --container-image ... --container-machine-id=false).
 // Both container recipes must therefore bind the host file read-only.
 func TestPerfHelperContainerRecipesProvideTheHostMachineID(t *testing.T) {
 	compose := read(t, "compose.distributed.yaml")

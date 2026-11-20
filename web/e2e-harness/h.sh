@@ -172,7 +172,7 @@ trust_files() {
 
 # firefox_fonts: Firefox's content-process sandbox reads fonts only from the SYSTEM font directories and $XDG_DATA_HOME/fonts. A host whose fonts live anywhere
 # else (a user-space extraction, no root, no /usr/share/fonts) leaves the sandboxed process with none: the first text shaping of a page then takes ~9 s
-# (measured on sp-w1: native profile view 9084 ms against 69 ms) and the 5 s expectations of accessibility.spec.ts and replay-profile.spec.ts fail while the
+# (measured on a lab VM: native profile view 9084 ms against 69 ms) and the 5 s expectations of accessibility.spec.ts and replay-profile.spec.ts fail while the
 # same specs pass headed. HOST REQUIREMENT (docs/user/investigation-acceptance.md): a font directory with at least one .ttf/.otf/.pfb/.pcf file, named by
 # E2E_FONT_DIR (default /usr/share/fonts). The harness copies it to $PKI/xdg/fonts and points XDG_DATA_HOME there, so the fonts Firefox sees are the same on
 # every host; a host without any font is refused here instead of failing later as a timeout.

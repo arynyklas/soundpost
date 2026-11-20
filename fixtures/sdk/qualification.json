@@ -1123,7 +1123,7 @@
         "source_sha256": "23428079fbde6c6e6a65f872007db5a1df84fdead213bca259e368faeb9e894d",
         "host": {
           "id": "ecc815057913eae5",
-          "hostname": "sp-q-d12",
+          "hostname": "the Debian 12 (6.1) lab VM",
           "platform": "linux",
           "release": "6.1.0-54-amd64",
           "arch": "x64",
@@ -1207,7 +1207,7 @@
         "source_sha256": "23428079fbde6c6e6a65f872007db5a1df84fdead213bca259e368faeb9e894d",
         "host": {
           "id": "ecc815057913eae5",
-          "hostname": "sp-q-d12",
+          "hostname": "the Debian 12 (6.1) lab VM",
           "platform": "linux",
           "release": "6.1.0-54-amd64",
           "arch": "x64",

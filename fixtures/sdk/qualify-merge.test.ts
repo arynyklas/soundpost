@@ -8,7 +8,7 @@ import {describe,expect,test} from "bun:test";
 import {EVIDENCE_SCHEMA,MergeError,RUN_SCHEMA,makeHost,mergeRuns,sealRun,verifyRun} from "./qualify-merge.mjs";
 
 const SRC_A="a".repeat(64),SRC_B="b".repeat(64);
-const hostOf=(hostname="sp-q-d12")=>makeHost({platform:"linux",release:"6.1.0-54-amd64",arch:"x64",cpu_model:"vCPU",logical_cpus:8,total_memory_mib:15000,hostname});
+const hostOf=(hostname="the Debian 12 (6.1) lab VM")=>makeHost({platform:"linux",release:"6.1.0-54-amd64",arch:"x64",cpu_model:"vCPU",logical_cpus:8,total_memory_mib:15000,hostname});
 const nodeRow=(version:string,over:Record<string,unknown>={})=>({id:`node-${version}-linux-x64-runtime_engine_samples`,runtime:"node",version,platform:"linux",arch:"x64",method:"runtime_engine_samples",exit_code:0,duration_ms:1000,status:"observed",evidence:{ok:true},...over});
 const bunRow=(over:Record<string,unknown>={})=>({id:"bun-1.3.14-linux-x64-runtime_engine_samples",runtime:"bun",version:"1.3.14",platform:"linux",arch:"x64",method:"runtime_engine_samples",exit_code:0,duration_ms:900,status:"observed",evidence:{ok:true},...over});
 const NOTES=[{row:"edge-142",reason:"not run on this machine."},{row:"node-runtime_engine_samples",reason:"skipped by --skip",kind:"runtime:node"}];
@@ -54,7 +54,7 @@ describe("a run built against another source is refused",()=>{
 
 describe("two runs merge into both rows",()=>{
  test("(b) Node 22.21.1 and Node 24.11.0 runs give both rows, each bound to runtime, host and run digest",()=>{
-  const r22=run("22.21.1",{at:"2026-11-19T10:00:00.000Z"}),r24=run("24.11.0",{at:"2026-11-19T10:05:00.000Z",host:hostOf("sp-q-d12b")});
+  const r22=run("22.21.1",{at:"2026-11-19T10:00:00.000Z"}),r24=run("24.11.0",{at:"2026-11-19T10:05:00.000Z",host:hostOf("a second Debian 12 (6.1) lab VM")});
   const m=merge(manifest(),[r22,r24]);
   expect(rowIds(m)).toEqual(expect.arrayContaining(["node-v22.21.1-linux-x64-runtime_engine_samples","node-v24.11.0-linux-x64-runtime_engine_samples","bun-1.3.14-linux-x64-runtime_engine_samples"]));
   const a=rowOf(m,"node-v22.21.1-linux-x64-runtime_engine_samples"),b=rowOf(m,"node-v24.11.0-linux-x64-runtime_engine_samples");
@@ -64,7 +64,7 @@ describe("two runs merge into both rows",()=>{
   expect(m.measured_evidence.schema).toBe(EVIDENCE_SCHEMA);
   expect(m.measured_evidence.source_sha256).toBe(SRC_A);
   expect(m.measured_evidence.runs.map((r:any)=>r.run_digest)).toEqual(expect.arrayContaining([r22.run_digest,r24.run_digest]));
-  expect(m.measured_evidence.runs.find((r:any)=>r.run_digest===r22.run_digest).host.hostname).toBe("sp-q-d12");
+  expect(m.measured_evidence.runs.find((r:any)=>r.run_digest===r22.run_digest).host.hostname).toBe("the Debian 12 (6.1) lab VM");
   // frozen target rows and the hand-entered observed rows are never touched
   expect(m.runtime_targets).toEqual(manifest().runtime_targets);
   expect(m.observed_rows).toEqual([{id:"keep-me"}]);

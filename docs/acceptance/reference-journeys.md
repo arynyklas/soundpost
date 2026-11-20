@@ -128,7 +128,7 @@ Notes on that run:
 
 ## The whole estate under compose (07.04#12)
 
-On a host with Docker (sp-oci: Debian 13, kernel 6.12, Docker 26.1.5, Compose 2.26.1; no internet, so the pinned python image was loaded
+On a lab Docker host (Debian 13, kernel 6.12, Docker 26.1.5, Compose 2.26.1; no internet, so the pinned python image was loaded
 offline and is named by id, `--dependency-image sha256:78976a69...`, and the hash-locked cp312 wheels come from `--estate-wheels DIR`) the smoke
 builds the node, provisioning and estate images from the tree and runs `examples/reference/compose.yaml` whole, as described under "What it
 starts". The cgroup subtree is made by root before the run (`mkdir /sys/fs/cgroup/<name>`, empty, with `memory`/`pids`) and passed as
@@ -146,8 +146,8 @@ Result: see "Recorded runs" below; an unpinned image is refused before anything 
 
 ### Recorded runs (private development ledger, not shipped: `.superpowers/sdd/approved-product/l5w27-evidence/`)
 
-* 2026-11-20, sp-oci, node binary from `go build ./cmd/soundpost`: exit 0, 18 of 18 rows (`run9.log`).
-* 2026-11-20, sp-oci, node binary from `go run ./build release` (version 1.0.0, embedded static UI page: the web app's dependencies cannot be
+* 2026-11-20, a lab Docker host, node binary from `go build ./cmd/soundpost`: exit 0, 18 of 18 rows (`run9.log`).
+* 2026-11-20, a lab Docker host, node binary from `go run ./build release` (version 1.0.0, embedded static UI page: the web app's dependencies cannot be
   installed offline there): exit 0, 18 of 18 rows (`run10/run10.log`); the same release feeds the fresh-install matrix, whose
   `reference_journeys` row passed 18 of 18 on the compose estate (`matrix/`).
 

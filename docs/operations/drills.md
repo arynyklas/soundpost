@@ -417,7 +417,7 @@ ready and reconciled"). A verification that loses one acknowledged id fails (`Te
 The scenario is not tagged `evidence: node_loss`. Orchestration of the committed run: `.superpowers/sdd/approved-product/l5w24-evidence/vmreset/orchestrate.sh`
 (private development ledger, not shipped).
 
-**Observed (sp-cg1, Debian 12, kernel 6.1.0-54, ext4 on one virtual disk; `l5w24-evidence/vmreset/`).** Phase 1 journalled 81 acknowledgements and 85 issued
+**Observed (a lab VM, Debian 12, kernel 6.1.0-54, ext4 on one virtual disk).** Phase 1 journalled 81 acknowledgements and 85 issued
 batches and reset the machine with the stream running; `last -x` shows the new `reboot` record with no `shutdown` record before it, the journal of
 the previous boot ends mid-session with no shutdown sequence, and journald logged `corrupted or uncleanly shut down` for the previous boot's file. Phase 2
 (boot id changed, uptime 20 s) started the three members in under a second, retried the 4 batches that were in flight, and reconciled all 85 acknowledged

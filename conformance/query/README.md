@@ -87,7 +87,7 @@ Dockerfiles are unchanged), so it is followed by a repin: the three evaluation i
 `image_sha256` values of `internal/conformance/query/testdata/native-configuration-observations.json`
 and the `acceptance.json` `configuration_phase` block, then `author/relock.py` for
 `provenance.json` and `acceptance.json` and `go run ./cmd/soundpost-querycheck inventory --check`.
-The last repin is the Debian 13 / Docker 26.1.5 `sp-oci` build of 2026-11-18
+The last repin is the Debian 13 / Docker 26.1.5 build of 2026-11-18 on a lab Docker host
 (`.superpowers/sdd/approved-product/l2oci-evidence/`): every recorded reference observation
 (181 configuration scenarios) came out identical on the new images.
 
