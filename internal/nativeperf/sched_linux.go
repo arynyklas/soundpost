@@ -142,15 +142,9 @@ func openSchedulerRing(cpu uint32, l NumericLayout, c Config) (*Ring, error) {
 		r.Close()
 		return nil, mmapFailure(e)
 	}
-	r.mapping = mapping
-	r.meta = mapping[:os.Getpagesize()]
-	offset := *(*uint64)(unsafe.Pointer(&mapping[1040]))
-	size := *(*uint64)(unsafe.Pointer(&mapping[1048]))
-	if !ringLayoutOK(offset, size, len(mapping), os.Getpagesize(), c.RingBytes) {
-		r.Close()
-		return nil, ErrRingMalformed
+	if e := r.adoptMapping(mapping, c.RingBytes); e != nil {
+		return nil, e
 	}
-	r.data = mapping[int(offset):]
 	return r, nil
 }
 func newSchedulerAcquisition(ctx context.Context, a AuthorizedTargets, c Config, r *Reservation) (EventSource, error) {

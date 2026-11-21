@@ -70,6 +70,27 @@ type hotplugRig struct {
 	cfg    Config
 }
 
+// lockHotplugHost serialises every process that cycles a CPU of this host: the online set is machine-wide, so two runs of the
+// package at once (two terminals, two agents, a rerun started before the last ended) see each other's offline CPU as a topology
+// change and fail (mut0402: 2 of 3 full runs on a 6.6 VM, each with a second run started at the same second). The lock is
+// released, after the CPU was put back (Cleanup runs last-in first), when the test ends.
+func lockHotplugHost(t *testing.T) {
+	t.Helper()
+	dir := "/run/lock"
+	if st, e := os.Stat(dir); e != nil || !st.IsDir() {
+		dir = os.TempDir()
+	}
+	f, e := os.OpenFile(filepath.Join(dir, "soundpost-nativeperf-hotplug.lock"), os.O_CREATE|os.O_RDWR, 0o666)
+	if e != nil {
+		t.Fatalf("hotplug host lock: %v", e)
+	}
+	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); e != nil {
+		f.Close()
+		t.Fatalf("hotplug host lock: %v", e)
+	}
+	t.Cleanup(func() { syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() })
+}
+
 func newHotplugRig(t *testing.T) *hotplugRig {
 	t.Helper()
 	switch {
@@ -95,6 +116,11 @@ func newHotplugRig(t *testing.T) *hotplugRig {
 	}
 	if _, e := schedulerLayouts(); e != nil {
 		t.Skipf("NOT run: scheduler tracepoints unavailable: %v", e)
+	}
+	lockHotplugHost(t)
+	all, e = OnlineCPUs() // read again under the lock: another run may have just put its CPU back
+	if e != nil || len(all) < 4 {
+		t.Skipf("NOT run: CPU hotplug needs at least four online CPUs (have %v, %v)", all, e)
 	}
 	r := &hotplugRig{t: t, cpu: cpu, all: all, orig: hotplugOnlineSet(t)}
 	// every exit path (also a failed or panicking test) puts the CPU back and says so if it cannot

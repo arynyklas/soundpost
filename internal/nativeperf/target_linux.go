@@ -103,15 +103,15 @@ func openCheckedTarget(t Target) (*TargetHandle, error) {
 	firstErr := syscall.Fstat(x, &firstStat)
 	lastErr := syscall.Fstat(again, &lastStat)
 	syscall.Close(again)
-	if firstErr != nil || lastErr != nil || firstStat.Dev != lastStat.Dev || firstStat.Ino != lastStat.Ino {
+	if !sameFile(firstErr, lastErr, &firstStat, &lastStat) {
 		return fail()
 	}
 	c2, e := readProcMetadata(p, "cgroup")
-	if e != nil || !bytes.Equal(c, c2) {
+	if !sameMetadata(e, c, c2) {
 		return fail()
 	}
 	after, e := ResolveLocalTarget(int(t.TGID))
-	if e != nil || before.PIDNamespace != after.PIDNamespace || before.ProcessStart != after.ProcessStart || before.TGID != after.TGID {
+	if !sameProcess(e, before, after) {
 		return fail()
 	}
 	// signal 0 through pidfd rejects an exited/reused process without signalling it.
@@ -121,6 +121,24 @@ func openCheckedTarget(t Target) (*TargetHandle, error) {
 	}
 	return h, nil
 }
+
+// sameFile reports whether two stats of /proc/<pid>/exe, taken around the cgroup read, describe one file (an exec in
+// between would show another device or inode).
+func sameFile(firstErr, lastErr error, first, last *syscall.Stat_t) bool {
+	return firstErr == nil && lastErr == nil && first.Dev == last.Dev && first.Ino == last.Ino
+}
+
+// sameMetadata reports whether the second read of a /proc file succeeded and returned the bytes of the first.
+func sameMetadata(e error, first, second []byte) bool {
+	return e == nil && bytes.Equal(first, second)
+}
+
+// sameProcess reports whether the resolution taken after the checked reads succeeded and names the process the one taken
+// before them named (its pid reused or its namespace changed in between would differ).
+func sameProcess(e error, before, after Target) bool {
+	return e == nil && before.PIDNamespace == after.PIDNamespace && before.ProcessStart == after.ProcessStart && before.TGID == after.TGID
+}
+
 func readProcMetadata(dir int, name string) ([]byte, error) {
 	fd, e := syscall.Openat(dir, name, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if e != nil {

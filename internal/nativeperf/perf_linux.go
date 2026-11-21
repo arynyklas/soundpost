@@ -30,18 +30,26 @@ func openThreadCPU(t TaskKey, c Config, method SamplingMethod) (*Ring, error) {
 		r.Close()
 		return nil, mmapFailure(e)
 	}
+	if e := r.adoptMapping(mapping, c.RingBytes); e != nil {
+		return nil, e
+	}
+	return r, nil
+}
+
+// adoptMapping makes a fresh perf mmap the ring's metadata page and data area. data_offset/data_size are initialized by
+// the kernel on mmap. An unexpected layout is refused (and the ring closed); the metadata page is never interpreted as
+// sample payload. Both ring openers (CPU and scheduler) end here.
+func (r *Ring) adoptMapping(mapping []byte, ringBytes uint64) error {
 	r.mapping = mapping
 	r.meta = mapping[:os.Getpagesize()]
-	// data_offset/data_size are initialized by the kernel on mmap. Refuse an
-	// unexpected layout; never interpret metadata pages as sample payload.
 	offset := *(*uint64)(unsafe.Pointer(&mapping[1040]))
 	size := *(*uint64)(unsafe.Pointer(&mapping[1048]))
-	if !ringLayoutOK(offset, size, length, os.Getpagesize(), c.RingBytes) {
+	if !ringLayoutOK(offset, size, len(mapping), os.Getpagesize(), ringBytes) {
 		r.Close()
-		return nil, ErrRingMalformed
+		return ErrRingMalformed
 	}
 	r.data = mapping[int(offset):]
-	return r, nil
+	return nil
 }
 func enableCPU(r *Ring) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, r.fd.Fd(), 0x2400, 0)
