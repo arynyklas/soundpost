@@ -82,8 +82,8 @@ func frameWrite(c *net.UnixConn, v any) error {
 }
 
 // targetOf is the workload as one authorized target: its resolved task identity, its cgroup and the GNU build ID of its executable, plus the
-// address range of its soundpost_hot_loop symbol.
-func targetOf(child *os.Process, workload string) (nativeperf.Target, uint64, uint64, error) {
+// address range of its `hot` symbol.
+func targetOf(child *os.Process, workload, hot string) (nativeperf.Target, uint64, uint64, error) {
 	target, e := nativeperf.ResolveLocalTarget(child.Pid)
 	if e != nil {
 		return target, 0, 0, cannot("the workload's identity cannot be resolved: %v", e)
@@ -133,7 +133,8 @@ func targetOf(child *os.Process, workload string) (nativeperf.Target, uint64, ui
 		return target, 0, 0, e
 	}
 	for _, symbol := range symbols {
-		if symbol.Name == "soundpost_hot_loop" {
+		// The compiler may clone the function (burn.isra.0, burn.constprop.0): the clone is the same code.
+		if symbol.Name == hot || strings.HasPrefix(symbol.Name, hot+".") {
 			hotStart, hotEnd = symbol.Value, symbol.Value+symbol.Size
 		}
 	}
@@ -162,7 +163,11 @@ func Capture(ctx context.Context, req Request) (Result, error) {
 	if ready, e := bufio.NewReader(stdout).ReadString('\n'); e != nil || ready != "ready\n" {
 		return res, errors.New("the workload did not become ready")
 	}
-	target, hotStart, hotEnd, e := targetOf(child.Process, req.Workload)
+	hot := req.HotSymbol
+	if hot == "" {
+		hot = "soundpost_hot_loop"
+	}
+	target, hotStart, hotEnd, e := targetOf(child.Process, req.Workload, hot)
 	if e != nil {
 		return res, e
 	}
@@ -172,6 +177,9 @@ func Capture(ctx context.Context, req Request) (Result, error) {
 	if caps.CPU != nativeperf.Supported {
 		return res, cannot("cpu=%s reasons=%v permissions=%+v probe error=%v", caps.CPU, caps.Reasons, caps.Permissions, probeErr)
 	}
+	if req.Scheduler && caps.OffCPU != nativeperf.Supported {
+		return res, cannot("scheduler capture: off_cpu=%s runqueue_split=%s reasons=%v permissions=%+v probe error=%v", caps.OffCPU, caps.RunqueueSplit, caps.Reasons, caps.Permissions, probeErr)
+	}
 	res.Capabilities = caps
 
 	public, private, e := ed25519.GenerateKey(rand.Reader)
@@ -179,8 +187,12 @@ func Capture(ctx context.Context, req Request) (Result, error) {
 		return res, e
 	}
 	cfg := nativeperf.DefaultConfig(1)
+	mode := nativeperf.ModeCPU
+	if req.Scheduler {
+		mode = nativeperf.ModeCPUOffCPU
+	}
 	targets := []nativeperf.Target{target}
-	signed, e := nativeperf.SignStart(nativeperf.StartAuthorization{Installation: "public-real-capture-fixture", UID: uint32(os.Getuid()), Revision: 1, Expires: time.Now().Add(2 * time.Minute).Unix(), Targets: targets, Config: cfg, Mode: nativeperf.ModeCPU}, private)
+	signed, e := nativeperf.SignStart(nativeperf.StartAuthorization{Installation: "public-real-capture-fixture", UID: uint32(os.Getuid()), Revision: 1, Expires: time.Now().Add(2 * time.Minute).Unix(), Targets: targets, Config: cfg, Mode: mode}, private)
 	if e != nil {
 		return res, e
 	}
@@ -221,7 +233,7 @@ func Capture(ctx context.Context, req Request) (Result, error) {
 	if res.FirstMono, e = monoNow(); e != nil {
 		return res, e
 	}
-	if e = frameWrite(conn, nativeperf.CaptureRequest{Authorization: signed, Targets: targets, Config: cfg, Mode: nativeperf.ModeCPU}); e != nil {
+	if e = frameWrite(conn, nativeperf.CaptureRequest{Authorization: signed, Targets: targets, Config: cfg, Mode: mode}); e != nil {
 		return res, e
 	}
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -238,27 +250,33 @@ func Capture(ctx context.Context, req Request) (Result, error) {
 	case <-ctx.Done():
 		return res, errors.New("the profile acquisition never started")
 	}
-	conn.SetReadDeadline(time.Now().Add(time.Duration(req.Seconds) * time.Second))
-	for len(res.Events) < MaxEvents {
-		var reply struct {
-			Event *nativeperf.SanitizedEvent `json:"event"`
-			Error string                     `json:"error"`
+	if req.Scheduler {
+		if e = readScheduler(conn, cfg, source, req.Seconds, &res); e != nil {
+			return res, e
 		}
-		if e = frameRead(conn, &reply); e != nil {
-			if n, ok := e.(net.Error); ok && n.Timeout() {
-				break
+	} else {
+		conn.SetReadDeadline(time.Now().Add(time.Duration(req.Seconds) * time.Second))
+		for len(res.Events) < MaxEvents {
+			var reply struct {
+				Event *nativeperf.SanitizedEvent `json:"event"`
+				Error string                     `json:"error"`
 			}
-			return res, fmt.Errorf("capture transport: %w", e)
+			if e = frameRead(conn, &reply); e != nil {
+				if n, ok := e.(net.Error); ok && n.Timeout() {
+					break
+				}
+				return res, fmt.Errorf("capture transport: %w", e)
+			}
+			if reply.Error != "" || reply.Event == nil || reply.Event.Validate() != nil {
+				return res, fmt.Errorf("capture refused or invalid event: %q", reply.Error)
+			}
+			res.Events = append(res.Events, *reply.Event)
 		}
-		if reply.Error != "" || reply.Event == nil || reply.Event.Validate() != nil {
-			return res, fmt.Errorf("capture refused or invalid event: %q", reply.Error)
+		if len(res.Events) == 0 {
+			return res, errors.New("no genuine CPU observation arrived")
 		}
-		res.Events = append(res.Events, *reply.Event)
+		res.Mappings = source.FramesMappings()
 	}
-	if len(res.Events) == 0 {
-		return res, errors.New("no genuine CPU observation arrived")
-	}
-	res.Mappings = source.FramesMappings()
 	threads := map[uint32]bool{}
 	for _, ev := range res.Events {
 		if ev.CPUEvent != nil {

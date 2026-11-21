@@ -8,15 +8,17 @@ import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,request as pwRequest,type APIRequestContext,type Response,type Browser,type BrowserContext,type FrameLocator,type Page} from '@playwright/test';
 import {activate,at,createOrg,createProject,createReader,login,onboardSdkProfileSource,origin,owner,id,sdkConfig,type Reader,type Source} from './support/real';
-import {NATIVE_CAPTURE,NATIVE_PROFILE,PROFILE_WINDOW,SCHEDULER_PROFILE,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
+import {NATIVE_CAPTURE,NATIVE_PROFILE,NATIVE_SCHED_PROFILE,PROFILE_WINDOW,SCHED_CAPTURE,SCHEDULER_PROFILE,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
 import {PAGE_CANARIES,onboardBrowserReplaySource,record,recorderApp} from './support/recorder';
 
 // Real server, real Chrome. Every replay chunk and profile record below was admitted through the real ingest route with a real
 // source credential, stored by the real storage engine and read back through the real POST /api/v1/replays/stream and
 // POST /api/v1/profiles/view routes by real readers. Nothing here fakes a server answer. The seeded replays use the closed chunk format
 // built by support/replay.ts (so gaps can be made on purpose); two tests at the end instead run the REAL browser SDK recorder
-// (packages/browser, support/recorder.ts) in the real Chrome over a page of canary text, delivered by the SDK's own transport. NOT covered, on purpose and stated:
-//  - scheduler events: this host cannot capture them (the probe reports scheduler_event_open unsupported, tracefs_unavailable, without CAP_PERFMON), so the blocked/runnable/unknown-split display is checked on SCHEDULER_PROFILE, nativeperf.AssembleProfile over synthetic intervals. The CPU profile (NATIVE_PROFILE) is a real perf capture.
+// (packages/browser, support/recorder.ts) in the real Chrome over a page of canary text, delivered by the SDK's own transport. The native CPU profile (NATIVE_PROFILE) is a real
+// perf capture on every host; the scheduler units of a REAL capture (sched_switch/sched_wakeup of a real workload, taken as root by `h.sh sched` on a host with tracefs and copied to the
+// browser host as E2E_NATIVE_SCHED_PROFILE, ingested through the same real route) are asserted by the 'REAL native capture' test. The synthetic SCHEDULER_PROFILE stays only for readings a
+// real host never produces (a denied runqueue split, an exact 30 ns delay).
 test.describe.configure({mode:'serial'});
 const ALL=['telemetry.read','replay.read','profiles.read'];
 let br:Browser,ctx:BrowserContext,owners:Page,api:APIRequestContext,org:string,p1:string,reader:Reader,telemetryOnly:Reader,seed:ReplaySeed,replaySource:Source;
@@ -234,9 +236,9 @@ test('a native CPU profile keeps OS on-CPU samples, as really captured, and read
  const rows=page.getByTestId('capability-row');
  await expect(rows).toHaveCount(3);
  // The server lists capability records in no promised order: each method is checked by name, against what the probe reported.
- await expect(rows.filter({hasText:'native_cpu'})).toHaveAttribute('data-status',c.cpu);
- await expect(rows.filter({hasText:'native_offcpu'})).toHaveAttribute('data-status',c.off_cpu);
- await expect(rows.filter({hasText:'native_runqueue_split'})).toHaveAttribute('data-status',c.runqueue_split);
+ await expect(rows.and(page.locator('[data-method="native_cpu"]'))).toHaveAttribute('data-status',c.cpu);
+ await expect(rows.and(page.locator('[data-method="native_offcpu"]'))).toHaveAttribute('data-status',c.off_cpu);
+ await expect(rows.and(page.locator('[data-method="native_runqueue_split"]'))).toHaveAttribute('data-status',c.runqueue_split);
  await expect(page.getByTestId('frame-list')).toContainText('unresolved frame');
  await expect(page.getByTestId('profile-correlation')).toContainText('no request link');
  await expect(page.getByTestId('profile-correlation')).toContainText('is not counted against any request');
@@ -260,6 +262,51 @@ test('the scheduler units of a native profile (a SYNTHETIC profile: this host ca
  await expect(rows.filter({hasText:'native_offcpu'})).toHaveAttribute('data-status','supported');
  await expect(rows.filter({hasText:'native_runqueue_split'})).toHaveAttribute('data-status','denied');
  await expect(page.getByTestId('frame-list')).toContainText('unresolved frame');
+});
+
+test('the scheduler units of a REAL native capture (real sched_switch/sched_wakeup of a running workload) read as measured blocked time and runnable delay, never summed, with the totals the capture measured',async()=>{
+ if(SCHED_CAPTURE===undefined||NATIVE_SCHED_PROFILE===undefined)throw Error('E2E_NATIVE_SCHED_PROFILE is not set: the real scheduler capture is taken by `h.sh sched` on a root host with tracefs and copied here; nothing synthetic stands in for it');
+ const c=SCHED_CAPTURE;
+ const group=(n:number):string=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,',');
+ // The capture has to be of the scheduler: a real stream with wakeups, a final drain proof, and stored intervals. A CPU-only capture (scheduler capture disabled) stops here.
+ expect(c.scheduler_captured,'the capture was taken with the scheduler tracepoints').toBe(true);
+ expect(c.off_cpu,'the probe of the capture host reported the off-CPU method').toBe('supported');
+ expect(c.scheduler_stream.final_proof_received).toBe(true);
+ expect(c.scheduler_stream.switch_events).toBeGreaterThan(0);
+ expect(c.scheduler_stream.wakeup_events).toBeGreaterThan(0);
+ expect(c.blocked_intervals).toBeGreaterThan(0);
+ expect(c.runnable_intervals).toBeGreaterThan(0);
+ const page=await ctx.newPage();
+ await openProfile(page,NATIVE_SCHED_PROFILE);
+ await expect(page.getByTestId('profile-method')).toContainText('native_cpu');
+ const cpu=page.getByTestId('unit-oscpu');
+ await expect(cpu).toHaveAttribute('data-state','measured');
+ await expect(cpu).toContainText(`${group(c.cpu_samples)} on-CPU samples`);
+ const unit=async(name:string,ns:number,intervals:number):Promise<void>=>{
+  const row=page.getByTestId(name);
+  await expect(row).toHaveAttribute('data-state','measured');
+  await expect(row).toContainText(`exactly ${group(ns)} ns`);
+  await expect(row).toContainText(`${group(intervals)} ${intervals===1?'interval':'intervals'}`);
+ };
+ await unit('unit-blocked',c.blocked_ns,c.blocked_intervals);
+ await unit('unit-runnable',c.runnable_ns,c.runnable_intervals);
+ // Off-CPU time whose wake evidence is missing (the waits still open when the capture stopped) is its own reading: present exactly when the capture produced such intervals.
+ if(c.unknown_intervals>0)await unit('unit-unknown-split',c.unknown_ns,c.unknown_intervals);
+ else await expect(page.getByTestId('unit-unknown-split')).toHaveAttribute('data-state','not_measured');
+ // never summed: no cell states the blocked plus runnable total (or any total with the CPU samples) as one duration
+ await expect(page.locator('body')).not.toContainText(`exactly ${group(c.blocked_ns+c.runnable_ns)} ns`);
+ await expect(page.locator('body')).not.toContainText(`exactly ${group(c.blocked_ns+c.runnable_ns+c.unknown_ns)} ns`);
+ const rows=page.getByTestId('capability-row');
+ // The timeline lists the real intervals as their own kinds beside the CPU samples, never merged into them.
+ const timelineRows=page.getByTestId('timeline-rows');
+ await expect(timelineRows.locator('tr[data-kind="blocked"]').first()).toBeVisible();
+ await expect(timelineRows.locator('tr[data-kind="runnable"]').first()).toBeVisible();
+ await expect(timelineRows.locator('tr[data-kind="sample"]').first()).toBeVisible();
+ await expect(rows).toHaveCount(3);
+ // By the row's own method attribute: the reason text of a supported row may name another method.
+ await expect(rows.and(page.locator('[data-method="native_cpu"]'))).toHaveAttribute('data-status',c.cpu);
+ await expect(rows.and(page.locator('[data-method="native_offcpu"]'))).toHaveAttribute('data-status',c.off_cpu);
+ await expect(rows.and(page.locator('[data-method="native_runqueue_split"]'))).toHaveAttribute('data-status',c.runqueue_split);
 });
 
 test('an unavailable browser sampling method reads unsupported, never zero',async()=>{

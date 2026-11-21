@@ -121,9 +121,15 @@ export async function setPermissions(page:Page,org:string,userId:string,project:
 
 // ---- profiles ---------------------------------------------------------------------------------------------------
 interface Capture{cpu_samples:number;hot_loop_samples:number;threads:number;period:number;loss:number;frames:number;kernel:string;cpu:string;off_cpu:string;runqueue_split:string;reasons:string[]}
+/** What a scheduler capture (e2eprofile -scheduler, run as root on a host with tracefs) measured: the stream it stands on and the totals its stored intervals sum to. */
+export interface SchedCapture extends Capture{
+ scheduler_captured:boolean;
+ scheduler_stream:{switch_events:number;wakeup_events:number;final_proof_received:boolean;consume_errors:number};
+ blocked_ns:number;runnable_ns:number;unknown_ns:number;blocked_intervals:number;runnable_intervals:number;unknown_intervals:number;censored_intervals:number;interval_threads:number;
+}
 interface Chunk{profile_id:string;clock:{wall_ns:string;domain:unknown};[field:string]:unknown}
-interface Fixture{chunk:Chunk;capabilities:{id:string;value:Record<string,unknown>}[];capture?:Capture}
-const readFixture=(path:string):Fixture=>JSON.parse(readFileSync(path,'utf8')) as Fixture;
+interface Fixture<C=Capture>{chunk:Chunk;capabilities:{id:string;value:Record<string,unknown>}[];capture?:C}
+const readFixture=<C=Capture>(path:string):Fixture<C>=>JSON.parse(readFileSync(path,'utf8')) as Fixture<C>;
 export const T0_NS=at(0);
 // The real capture. No fallback: without it (the harness's `h.sh prep` failed or was not run) nothing here may pretend to be a native profile.
 const nativePath=process.env.E2E_NATIVE_PROFILE??'';
@@ -133,6 +139,13 @@ if(fixture.capture===undefined||fixture.chunk.clock.wall_ns!==T0_NS.toString())t
 /** What the real capture measured: the figures the UI must show for NATIVE_PROFILE. */
 export const NATIVE_CAPTURE:Capture=fixture.capture;
 export const NATIVE_PROFILE=String(fixture.chunk.profile_id);
+// The REAL scheduler capture (`h.sh sched` on a root host: sched_switch/sched_wakeup of a real two-thread workload, correlated into blocked/runnable intervals), copied to the host
+// that runs the browsers and named by E2E_NATIVE_SCHED_PROFILE. It is optional here so that every other spec runs on a host without tracefs; the spec that needs it fails, never skips, without it.
+const schedPath=process.env.E2E_NATIVE_SCHED_PROFILE??'';
+const schedFixture=schedPath===''?undefined:readFixture<SchedCapture>(schedPath);
+if(schedFixture!==undefined&&(schedFixture.capture===undefined||schedFixture.chunk.clock.wall_ns!==T0_NS.toString()))throw Error(`${schedPath} is not an e2eprofile capture anchored at T0`);
+export const SCHED_CAPTURE:SchedCapture|undefined=schedFixture?.capture;
+export const NATIVE_SCHED_PROFILE:string|undefined=schedFixture===undefined?undefined:String(schedFixture.chunk.profile_id);
 // The SYNTHETIC scheduler profile: nativeperf.AssembleProfile over constructed blocked/runnable intervals (internal/httpapi TestWriteProfileFixture). It exists
 // only because the e2e hosts cannot capture scheduler events (the probe reports scheduler_event_open unsupported, tracefs_unavailable, without CAP_PERFMON).
 const scheduler=readFixture(fileURLToPath(new URL('./profile-fixture.json',import.meta.url)));
@@ -146,7 +159,8 @@ export const UNSUPPORTED_PROFILE=BROWSER_PROFILE;
 /** Admit the real native profile, the synthetic scheduler profile and an unsupported browser-sampling profile through the real ingest route. */
 export async function seedProfiles(request:APIRequestContext,s:Source):Promise<void>{
  const observed=T0_NS.toString();
- for(const f of [fixture,scheduler]){
+ const fixtures:Fixture<unknown>[]=[fixture,scheduler,...(schedFixture===undefined?[]:[schedFixture])];
+ for(const f of fixtures){
   for(const c of f.capabilities){
    const st=await ingestBatchRaw(request,s,[{id:c.id,kind:'capability',observed_at_ns:observed,resource:resource(s),payload:c.value}]);
    if(st!==200)throw Error(`capability refused: HTTP ${st}`);

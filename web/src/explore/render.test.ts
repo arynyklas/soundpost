@@ -207,6 +207,42 @@ describe('an empty result of a project that did not fully answer never says noth
  });
 });
 
+describe('a stale project says which shards were read behind the minimum position asked for and still shows what they held (05.09#6)', () => {
+ const asked = (min: { group: string; index: string }[] | undefined): QueryRequest => ({ expression: 'up', ...(min === undefined ? {} : { min_cursors: min }) }) as unknown as QueryRequest;
+ const stale = (): ProjectResult => ({ ...project({ type: 'vector', vector: [{ labels: [{ name: 'job', value: 'held-value' }], sample: sample(0, bitsOf(1)) }] }), completeness: 'stale', watermarks: [{ group: G, index: '1' }, { group: R, index: '40' }] });
+ test('the project is stale, never complete, and names each shard behind with the position it was read through and the minimum', () => {
+  const html = render(React.createElement(ProjectPanel, { request: asked([{ group: G, index: '9' }, { group: R, index: '40' }]), result: stale() }));
+  expect(html).toContain('data-state="stale"');
+  expect(html).toContain('data-completeness="stale"');
+  expect(html).toContain('<strong>Stale.</strong>');
+  expect(html).not.toContain('Complete.');
+  expect(html).toContain('data-testid="stale-shards"');
+  expect(html).toContain(`data-group="${G}"`);
+  expect(html).toContain('data-read="1"');
+  expect(html).toContain('data-required="9"');
+  expect(html).toContain('read through 1');
+  expect(html).toContain('minimum 9');
+  // The shard at its minimum is not listed as behind.
+  expect(html).not.toContain(`data-group="${R}"`);
+ });
+ test('the data the shards held is still shown, labelled as older than required, never withheld and never presented as current', () => {
+  const html = render(React.createElement(ProjectPanel, { request: asked([{ group: G, index: '9' }]), result: stale() }));
+  expect(html).toContain('held-value');
+  expect(html).toContain('newer writes of those shards are not in it');
+ });
+ test('a shard of the minimum that was not read reads "not read", never position 0', () => {
+  const html = render(React.createElement(ProjectPanel, { request: asked([{ group: R, index: '40' }, { group: '5'.repeat(32), index: '3' }]), result: stale() }));
+  expect(html).toContain(`data-group="${'5'.repeat(32)}"`);
+  expect(html).toContain('data-read="not read"');
+  expect(html).toContain('not read, minimum 3');
+ });
+ test('a stale project of a request that named no minimum keeps the plain wording and lists no shard', () => {
+  const html = render(React.createElement(ProjectPanel, { request: asked(undefined), result: stale() }));
+  expect(html).toContain('<strong>Stale.</strong>');
+  expect(html).not.toContain('data-testid="stale-shards"');
+ });
+});
+
 describe('a chart of more points than a call stack holds still draws (05.05 review)', () => {
  // V8 refuses Math.min(...array) above roughly 115000 arguments with a RangeError; JavaScriptCore (bun) allows far more. The test makes
  // every engine refuse above 100000 arguments, so the chart must compute its extent without spreading its samples into a call.

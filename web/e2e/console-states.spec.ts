@@ -10,7 +10,8 @@ import {at,createOrg,createProject,createReader,field,id,ingestMetric,login,onbo
 //    reads of the real route with handles the server never issued; the console's next elevated query meets the server's own 429 body.
 //  - stale: the query engine answers stale when a read has not reached a minimum cursor the caller names. The console's minimum-data-position
 //    field sends one no group can have reached (the largest index the field accepts) for a group of the previous answer: the shared server's groups
-//    keep moving while a person types, so a position "just beyond" the one read is reached by any other writer of that group.
+//    keep moving while a person types, so a position "just beyond" the one read is reached by any other writer of that group. Refused without
+//    partial results (the typed error); with them every shard is read at its own cut and the project is Stale (05.09#6), the data kept.
 const admin=process.env.SOUNDPOST_ELEVATION_EMAIL;
 const password=process.env.SOUNDPOST_ELEVATION_PASSWORD;
 const selected=process.env.SOUNDPOST_TEST_ORG;
@@ -142,7 +143,7 @@ test('the server\'s own throttle on elevation reads that found nothing is the Ra
  await expect(page.getByTestId('elevated-read')).toHaveCount(0);
 });
 
-test('a minimum data position the read has not reached is refused by the real query engine as Error (stale), and with partial results the project reads Partial, never Complete',async({browser})=>{
+test('a minimum data position the read has not reached is refused by the real query engine as Error (stale), and with partial results the project reads Stale, naming the shard behind, with the data it held',async({browser})=>{
  test.setTimeout(240_000);
  const o=owner();
  const adminPage=await (await browser.newContext()).newPage();
@@ -184,15 +185,24 @@ test('a minimum data position the read has not reached is refused by the real qu
  await expect(error).toBeVisible();
  await expect(error).toContainText('Error (stale)');
  await expect(page.locator('[data-series]')).toHaveCount(0);
- // With partial results the real fence drops the group whose minimum it could not reach: the project is Partial (missing data is not zero), never Complete.
- // (The engine's completeness `stale` cannot come out of the shipped storage, whose read fence refuses or drops first; the stale answer the real server gives is the typed error above.)
+ // With partial results the read does not drop the group whose minimum it could not reach (that would make a shard that answered look missing): every
+ // shard is read at its own cut and the real engine answers the project Stale (never Complete, never Partial), with the data the shards held.
  await page.getByLabel(/Allow partial results/).check();
  await run(page,`{__name__=~"${metric}.*"}`);
- const partial=page.getByTestId('results').locator(`[data-project="${project}"]`);
- await expect(partial).toHaveAttribute('data-state','incomplete');
- await expect(partial).toHaveAttribute('data-completeness','partial');
- await expect(page.locator('.status[data-state="incomplete"]')).toBeVisible();
- await expect(page.getByTestId('project-state')).not.toContainText('Complete.');
+ const stale=page.getByTestId('results').locator(`[data-project="${project}"]`);
+ await expect(stale).toHaveAttribute('data-state','stale');
+ await expect(stale).toHaveAttribute('data-completeness','stale');
+ await expect(page.locator('.status[data-state="stale"]')).toBeVisible();
+ await expect(stale.getByTestId('project-state')).toContainText('Stale.');
+ await expect(stale.getByTestId('project-state')).not.toContainText('Complete.');
+ const behind=stale.getByTestId('stale-shards').locator(`[data-group="${group}"]`);
+ await expect(behind).toHaveCount(1);
+ await expect(behind).toHaveAttribute('data-required',UINT64_MAX);
+ await expect(behind).toHaveAttribute('data-read',/^[0-9]+$/);
+ await expect(stale.getByTestId('stale-detail')).toContainText('newer writes of those shards are not in it');
+ // The stale answer still carries what the shards held: it is not withheld and not an empty result.
+ await expect(stale.locator('[data-series]').first()).toBeVisible();
+ await expect(stale).not.toHaveAttribute('data-state','empty');
  // A malformed position is refused in the form, before any request.
  await page.getByLabel(/Minimum data position/).fill('not a cursor');
  await page.getByRole('button',{name:'Run query',exact:true}).click();

@@ -39,7 +39,7 @@ organization, project and window stayed visible on every leg.
 | Log | log source `03427b42e8726c0152ca877d23594e50`, profile `logql-loki-3.5.2` | `Ready`, the ingested lines are listed | partial results not allowed | Satisfied. |
 | Metric | metric source `dd264c03a161b185869db7a929303eb1`, profile `promql-prometheus-3.1.0` | `Ready`, instant value `48` at the window end | evaluated with the shown feature set | Satisfied. |
 | Replay | replay `e43b81bbf9847cc80781762d2a70d950` | `Ready`; viewer status after one keyboard step `loading` then ready | closed-format chunks through the real ingest route; the real browser recorder replay is `replay-profile.spec.ts` | Satisfied. |
-| Profile | profile `5a010000000000000000000000000000` | `Ready`, complete; OS on-CPU samples, blocked time and runnable delay `measured`; engine samples and the unknown off-CPU split `not measured` | native assembler over sanitized synthetic events | Satisfied for that data. |
+| Profile | profile `5a010000000000000000000000000000` | `Ready`, complete; OS on-CPU samples, blocked time and runnable delay `measured`; engine samples and the unknown off-CPU split `not measured` | native assembler over sanitized synthetic events (kept for readings a real host never produces); the scheduler units of a REAL capture are the `REAL native capture` case of `replay-profile.spec.ts` (see "Real scheduler capture") | Satisfied for that data. |
 | Queue → incident | org B `94905b91db30d6175796c6b5d9745b18`, project `d35c5a19d335744c3aee46eea1faaf8a`, incident `9cd104d97b62942c6f5f0e36838ade24` (opened by the runner from an ingested error) | `Ready`; "Open", "Unassigned" | window `1 Jan 1970, 00:00:00 to 15 Jan 2027, 08:00:00` | Satisfied: the keyboard followed the queue row link. |
 | Trace → failure → issue → mapped frame | trace `07732d17353f4ed855c3487e538a5488`, occurrence `fc095ffb286ff0374e68a61c430cf413`, issue `aaae87a9a76681128c22ca00de55db13` | `Ready`; three spans (frontend, API, PostgreSQL dependency); both frames `Mapped` by the real source map: `src/app.ts:5:10` (throw site) and the call site `in riskyCheckout`, build `76453d63a871f2e60eb0d41db0265253` | map hash shown; the private source text is never shown | Satisfied (real minified bundle, real symbolication worker). |
 | Release | release `0ecb02dacf1d9da36844792fa68c2d09`, parent `f32f52f1a428e211470d4c837fb51556`, artifact `49b5ae3bcc0eafdcc34de23475f928f6` | `Ready`; label, artifact binding, build, registered parent | registered through the real register route | Satisfied. |
@@ -77,11 +77,9 @@ page the app renders, and real keyboard checks. No third-party audit library was
   additionally observed **produced by the server** in `server-states.spec.ts` (every shard removed under a fault-tagged server, the
   real Explore query then shows the Error state, `role=alert`, assertive, clean audit). `rate_limited` cannot be produced by any
   committed read route a console investigation page calls (no such read answers 429: query budgets are 429 on the wire but the client
-  words them as an error on purpose, and the login throttle and upload quotas are not load states), so it stays injected. `stale` is the
-  query engine's read fence (a replica that has not applied a requested minimum cursor) and the console sends no minimum cursor; the
-  existing fault seam removes shards (error, partial) but cannot make a replica lag, so no console-visible server-produced stale exists;
-  the API-level stale answer is driven in `shard-loss.spec.ts` and the state itself is covered by the server-rendered unit test
-  `web/src/app/accessibility.test.ts` (wave 12 record, not widened into a product change).
+  words them as an error on purpose, and the login throttle and upload quotas are not load states), so it stays injected there; it is
+  server-produced in `console-states.spec.ts` (the elevation read throttle, wave 24). `stale` is server-produced too: see
+  "Stale is server-produced" below; the injected-fault cases of `accessibility.spec.ts` keep covering the audit of every state's markup.
 - Reduced motion: under `prefers-reduced-motion: reduce` no animation, transition or smooth scroll runs, even against an author rule
   that tries to animate (control: the same rule animates when motion is allowed). The rule itself already existed in `style.css`.
 - Conflict dialog: verified in Chrome on a real incident (opened by the runner from an ingested error, found through `POST /api/v1/queue`):
@@ -124,12 +122,51 @@ individually reviewed by eye. No Firefox or WebKit rendering was seen by a perso
   elevation for a selected organization (refused before the elevation, answered after it with the elevated read said in words, refused again once the
   view is cleared); the server's own throttle on elevation reads that found nothing (HTTP 429 `rate_limited`) is shown as **Rate limited** with the
   request ID; a minimum data position the read has not reached is refused by the real query engine and shown as `Error (stale)`, and with partial
-  results the project reads Partial. The engine's completeness `stale` (the **Stale** load state) cannot come out of the shipped storage: its read
-  fence refuses (`stale`) or drops the group (partial) first, so the Stale state remains covered only by `accessibility.spec.ts` and the unit tests.
-- Still open and not claimed here: no person has looked at the Chromium, Firefox or WebKit artifacts (a human review is an owner action); the Stale
-  load state has no real producer (above); the gateway to dependency and frontend to API to PostgreSQL legs use ingested spans because the VMs have no Docker.
+  results the project reads Stale (see "Stale is server-produced" below; in wave 24 it read Partial because the engine handed the minimum to the storage fence, which dropped the
+  shard, so the **Stale** load state then remained covered only by `accessibility.spec.ts` and the unit tests).
+- Still open and not claimed here: no person has looked at the Chromium, Firefox or WebKit artifacts (a human review is an owner action); the gateway to dependency and frontend to API to PostgreSQL legs use ingested spans because the VMs have no Docker.
 - Wave 25 (HEAD 0512784 plus test-only changes): the full committed suites exited 0 on all three browsers: Chromium 142 passed in the ordinary group plus 1 and 8 on
   the fault-spec servers; Firefox 142 plus 1 and 8; WebKit 142 plus 1 skipped (the documented shard-loss lost-connection case) and 7. The first Firefox run had
   exited 1 on `replay-profile.spec.ts` (the real Bun SDK profile answered `profile_not_admitted` once); it did not recur on the rerun and its cause was not
   isolated. The first WebKit run was lost to the filesystem under the VM copy dying (`ENOTCONN`); the rerun passed. Headed Firefox and headed WebKit are
   recorded in the run table above.
+
+## Stale is server-produced (05.09#6)
+
+The page-level **Stale** state has a producer in the shipped server. Before, the query engine handed the minimum cursors of a read that allowed partial
+results to the storage read fence, which dropped any shard that had not reached one and called the answer partial (no data, `watermarks` empty); the engine's
+own freshness rule (`completenessOf`: a scan whose read cuts do not reach every minimum is `stale`) could therefore never fire. Now `readFence` in
+`internal/query/engine.go` keeps the minimum for a read that forbids partial results (the storage still refuses it, 409 `stale`, and no value leaves) and
+withholds it from a read that allows them: every shard that answers is read at its own cut, the engine compares the cuts it got back with the minimum and the
+project is `stale` and still carries what the shards held; a shard that did not answer at all is still `partial`.
+
+- Server, real stack (real control store, ingestion over HTTPS, storage and engine): `TestQueryThatAllowsPartialResultsReadsAShardBehindTheMinimumAsStaleWithItsData`
+  (`internal/httpapi/query_stale_test.go`), red before the change (`completeness "partial"`, empty vector, no watermarks), green after; `TestReadFenceDoesNotLetAPartialReadDropAShardThatOnlyLags`
+  (`internal/query/engine_fence_test.go`).
+- Console: the Explore project panel names each shard that was read behind the minimum (the position read through and the minimum, or "not read"), says that newer
+  writes of those shards are not in the answer, and keeps the data on screen (`staleShards` in `web/src/explore/model.ts`; unit tests in `model.test.ts` and `render.test.ts`, red before).
+- Real browser: `console-states.spec.ts` "a minimum data position the read has not reached ...": the console's minimum-data-position field names a position no shard
+  has reached; without partial results the real engine's refusal is shown as `Error (stale)`; with partial results the project reads **Stale** (`data-state="stale"`,
+  `data-completeness="stale"`), names the shard behind with `data-required` equal to the position named, shows the series the shards held, and the whole answer's status says Stale.
+  Red with the engine change reverted in a VM copy: the project reads `incomplete` / `partial`.
+- `rate_limited` is unchanged: the server's own throttle (HTTP 429) in `console-states.spec.ts` "the server's own throttle on elevation reads ...".
+
+## Real scheduler capture (05.08#10)
+
+The scheduler units of the profile view are asserted on a REAL capture: `h.sh sched`, run as root on a host with tracefs and CAP_PERFMON, runs the compiled
+`fixtures/nativeperf/export/workloads/cpu_wait.c` (one thread burns CPU and naps, a second blocks on a condition variable and burns when woken) under the in-process
+native helper with the CPU sampler and the scheduler tracepoints (`sched_switch`, `sched_wakeup`); the per-session correlator turns the real events into blocked and
+runnable intervals (`fixtures/nativeperf/realcapture`, `fixtures/nativeperf/e2eprofile -scheduler`), assembled by `nativeperf.AssembleProfile` with the CPU samples
+into one profile and its three capability records. A host that cannot do it fails with the probe's reason; no interval is ever constructed. The JSON is copied to the host
+that runs the browsers (the browser hosts have no tracefs) and named by `E2E_NATIVE_SCHED_PROFILE`; the spec admits it through the same real ingest route as every other profile.
+The `REAL native capture` case of `replay-profile.spec.ts` then asserts, in the console: OS on-CPU samples `measured` with the captured count; blocked time and runnable delay
+`measured` with the exact nanosecond totals and interval counts the capture's stored intervals sum to (the server sums exactly those); the unknown split `measured` exactly when the
+capture holds intervals without wake evidence, never merged into blocked or runnable; no cell states a blocked plus runnable total; the timeline lists blocked, runnable and sample
+rows; the capability rows read what the probe of the capture host reported. The case fails, never skips, without the capture, and fails with a capture taken with the scheduler
+disabled (`E2E_SCHED_OFF=1 h.sh sched`: CPU samples only, the units read `not_measured`). The synthetic scheduler profile stays for readings no real host produces (a denied runqueue split).
+`h.sh suite` therefore needs `E2E_NATIVE_SCHED_PROFILE` on a host without tracefs.
+
+Observed on the browser VM (user `sp`, no tracefs), the scheduler capture taken on a separate root VM (kernel 6.1.0-54, `perf_event_paranoid` 1, tracefs mounted): the capture holds 122 switch and 60 wakeup events
+over 8 CPUs, 58 blocked intervals (1,991,088,291 ns), 59 runnable intervals (846,586 ns) and 2 intervals without wake evidence (32,239,787 ns, censored) of 2 threads, 40 CPU samples, and its final drain proof. `replay-profile.spec.ts`, `console-states.spec.ts`,
+`explore.spec.ts` and `accessibility.spec.ts` passed 64 of 64 on Chromium, on Firefox and on WebKit with that capture. Red: the same case with the CPU-only capture (scheduler disabled)
+fails on the capture's own claim, and, with those preconditions removed in a VM copy, on the console (`unit-blocked` reads `not_measured`); the stale case with `readFence` reverted in a VM copy reads `incomplete` / `partial`.

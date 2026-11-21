@@ -2,7 +2,9 @@
 # Lane 3 wave 2 real-browser harness for the Linux worker VM (run from the checkout root through tools vm.py start).
 # Real `soundpost serve --mode single` over HTTPS with a private CA; Linux Chrome 156 trusts the private leaf by SPKI pin
 # (--ignore-certificate-errors-spki-list), Go and Node trust it through SSL_CERT_FILE / NODE_EXTRA_CA_CERTS.
-#   h.sh prep            install web deps, build binaries + web dist (once per run)
+#   h.sh prep            install web deps, build binaries + web dist, take the real native CPU capture (once per run)
+#   h.sh sched           the real scheduler capture (sched_switch/sched_wakeup of a real workload); needs tracefs + CAP_PERFMON, i.e. root; the file
+#                        is copied to the browser host and named by E2E_NATIVE_SCHED_PROFILE (the real-scheduler case of replay-profile.spec.ts)
 #   h.sh up [oidc]       fresh server (+ OIDC fixture when "oidc"), bootstrap the owner, provision accounts
 #   h.sh pw ARGS...      headless playwright (chromium project) with ARGS
 #   h.sh headed ARGS...  headed playwright under xvfb, screenshots + traces kept in $OUT
@@ -67,6 +69,19 @@ prep() {
 		&& go build -o "$T/native-capture" ./fixtures/nativeperf/e2eprofile \
 		&& "$T/native-capture" -workload "$T/native-loop" -out "$T/native-profile.json" -wall-ns 1730000000000000000 -seconds 6 ) || { echo "the real native capture failed (see above): no synthetic profile is substituted" >&2; exit 1; }
 	echo prep-ok
+}
+
+# sched: the REAL scheduler capture of the real-scheduler spec (replay-profile.spec.ts). The compiled fixtures/nativeperf/export/workloads/cpu_wait.c (one thread burns CPU and naps, a second blocks
+# on a condition variable and burns when woken) runs under the in-process native helper with the CPU sampler AND the scheduler tracepoints (sched_switch/sched_wakeup); the per-session
+# correlator turns the real events into blocked/runnable intervals, assembled with the CPU samples into $T/native-sched-profile.json. It needs tracefs and CAP_PERFMON (run it as root on
+# a host like that); a host without them fails here with the probe's reason and no synthetic interval is substituted. Copy the file to the host that runs the browsers and name it with
+# E2E_NATIVE_SCHED_PROFILE. E2E_SCHED_OFF=1 takes the same capture with the scheduler tracepoints disabled: the CPU-only profile the real-scheduler spec must refuse (its red).
+sched() {
+	flag=-scheduler; [ -n "${E2E_SCHED_OFF:-}" ] && flag=
+	( cd "$ROOT" && cc -O2 -g -fno-pie -no-pie -fno-omit-frame-pointer -fno-optimize-sibling-calls -pthread -Wl,--build-id -o "$T/native-cpu-wait" fixtures/nativeperf/export/workloads/cpu_wait.c \
+		&& CGO_ENABLED=0 go build -o "$T/native-capture" ./fixtures/nativeperf/e2eprofile \
+		&& "$T/native-capture" -workload "$T/native-cpu-wait" -hot burn $flag -out "$T/native-sched-profile.json" -wall-ns 1730000000000000000 -seconds 4 ) || { echo "the real scheduler capture failed (see above): no synthetic profile is substituted" >&2; exit 1; }
+	echo "sched-ok $T/native-sched-profile.json"
 }
 
 stop_pid() {
@@ -193,6 +208,8 @@ firefox_fonts() {
 pw_env() {
 	export NODE_EXTRA_CA_CERTS=$PKI/ca.pem SOUNDPOST_TEST_ORIGIN=$ORIGIN SOUNDPOST_SCOPE_EMAIL=e2e-owner@example.test SOUNDPOST_SCOPE_PASSWORD='e2e instance owner password 2026'
 	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_NATIVE_PROFILE=$T/native-profile.json E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
+	# The real scheduler capture (see `sched`): taken on this host, or copied from a root host and named by E2E_NATIVE_SCHED_PROFILE. Absent, only the spec that needs it fails.
+	[ -n "${E2E_NATIVE_SCHED_PROFILE:-}" ] || ! [ -f "$T/native-sched-profile.json" ] || export E2E_NATIVE_SCHED_PROFILE=$T/native-sched-profile.json
 	[ -f "$T/provision.env" ] && . "$T/provision.env"
 	trust_files
 	[ "${E2E_BROWSER:-chromium}" = firefox ] && firefox_fonts
@@ -202,6 +219,7 @@ exec_pw() { ( cd "$ROOT/web" && exec sh "$ROOT/web/e2e-harness/in-trust-ns.sh" n
 
 case "${1:-}" in
 prep) prep ;;
+sched) sched ;;
 up) shift; up "$@" ;;
 down) down ;;
 pw) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; case " $* " in *" --project"*) ;; *) set -- --project=$b "$@" ;; esac; pw_env exec_pw -c $cfg "$@" ;;
@@ -217,5 +235,5 @@ suite) shift; rc=0
 	sh "$0" run pw oidc "$@" $rest || rc=$?
 	for f in e2e/server-states.spec.ts e2e/shard-loss.spec.ts; do sh "$0" run pw oidc "$@" $f || { [ $rc -ne 0 ] || rc=$?; }; done
 	exit $rc ;;
-*) echo "usage: $0 prep|up [oidc]|pw ARGS|headed ARGS|run MODE oidc|no ARGS|suite ARGS|down" >&2; exit 2 ;;
+*) echo "usage: $0 prep|sched|up [oidc]|pw ARGS|headed ARGS|run MODE oidc|no ARGS|suite ARGS|down" >&2; exit 2 ;;
 esac

@@ -603,7 +603,7 @@ func (e *Engine) execute(ctx context.Context, scope auth.Scope, req Request) (Re
 		}
 		return *cached, nil
 	}
-	rn := &run{e: e, s: s, n: n, prof: prof, scope: scope, fence: storage.ReadFence{Min: n.MinCursors, AllowPartial: n.AllowPartial}, returned: n.returned}
+	rn := &run{e: e, s: s, n: n, prof: prof, scope: scope, fence: readFence(n), returned: n.returned}
 
 	plans := make([]projectPlan, len(n.Projects))
 	var pre []syntax.Diagnostic
@@ -883,4 +883,16 @@ func jsonKey(v any) string {
 		return ""
 	}
 	return string(raw)
+}
+
+// readFence is the fence a run reads under. A read that forbids partial results hands its minimum cursors to the storage, which refuses
+// (409 stale) a shard that has not reached one. A read that allows partial results does not: the storage would drop such a shard and call the
+// answer partial, turning a shard that answered, only older than the caller required, into a missing one with no data. Every shard that
+// answers is read at its own cut instead, and completenessOf compares the cuts it got back with the minimum: the answer is stale and still
+// carries the data; a shard that did not answer at all is what partial means.
+func readFence(n normalized) storage.ReadFence {
+	if n.AllowPartial {
+		return storage.ReadFence{AllowPartial: true}
+	}
+	return storage.ReadFence{Min: n.MinCursors}
 }

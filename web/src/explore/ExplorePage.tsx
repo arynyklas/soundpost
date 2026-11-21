@@ -13,7 +13,7 @@ import { elevationFor } from '../api/elevation';
 import { LiveLogView } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult, TimeText } from './MetricResult';
-import { elapsedText, nsToIso, projectState, resultState, splitByRuneRange } from './model';
+import { elapsedText, nsToIso, projectState, resultState, splitByRuneRange, staleShards } from './model';
 import { featureSetId, profileById, profilesFor, type ProfileInfo } from './profiles';
 import { runLatest, type RunState } from './runner';
 import { SavedViews } from './SavedViews';
@@ -83,6 +83,7 @@ export function ProjectPanel(props: { result: ProjectResult; request: QueryReque
  const state = projectState(pr);
  const reason = state.kind === 'incomplete' || state.kind === 'stale' ? state.reason : '';
  const headingId = `project-${pr.project_id}`;
+ const behind = state.kind === 'stale' ? staleShards(request.min_cursors, pr.watermarks) : [];
  return (
   <section className="panel project-panel" aria-labelledby={headingId} data-project={pr.project_id} data-state={state.kind} data-completeness={pr.completeness}>
    <h3 id={headingId}>Project <code>{pr.project_id}</code></h3>
@@ -96,6 +97,14 @@ export function ProjectPanel(props: { result: ProjectResult; request: QueryReque
     {state.kind === 'incomplete' && <><strong>Partial.</strong> {reason === 'project_failed' ? 'This project produced no value; it is not an empty or zero result.' : 'Some data did not answer. Missing data is not zero.'}</>}
     {state.kind === 'stale' && <><strong>Stale.</strong> The newest data is older than expected.</>}
    </p>
+   {behind.length > 0 && (
+    <div className="status status-stale" role="status" data-testid="stale-detail">
+     <p>{behind.length === 1 ? 'One shard was' : `${behind.length} shards were`} read through a position older than the minimum you named. The data below is what they held at their own position; newer writes of those shards are not in it, so it is not a current or complete answer and an absent value is not zero.</p>
+     <ul data-testid="stale-shards">
+      {behind.map((s) => <li key={s.group} data-group={s.group} data-read={s.read ?? 'not read'} data-required={s.required}>Shard <code>{s.group}</code>: {`${s.read === null ? 'not read' : `read through ${s.read}`}, minimum ${s.required}`}</li>)}
+     </ul>
+    </div>
+   )}
    {pr.failure && (
     <div role="alert" className="error" data-testid="project-failure" data-code={pr.failure.code}>
      Failure <code>{pr.failure.code}</code>{pr.failure.category ? <>, category <code>{pr.failure.category}</code></> : null}: {pr.failure.safe_message}

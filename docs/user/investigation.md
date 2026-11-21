@@ -21,7 +21,7 @@ Every view shows exactly one of these, spelled in words (never colour alone):
 | Ready | The requested data is complete for the window. |
 | Empty | The read completed with nothing missing and found nothing. It is not a health signal. |
 | Partial | The answer is real but incomplete: some data did not answer, or some parts of the view are not available. Missing data is not zero and not healthy. |
-| Stale | The newest data is older than expected. Treat figures as possibly out of date. |
+| Stale | The answer was read from data older than the position required. When you name a minimum data position and allow partial results, every shard that answers is read at its own position: a shard that has not reached the minimum is listed (the position it was read through and the minimum) and the answer carries what it held, so newer writes of that shard may be missing. Without partial results the same read is refused as an error (`stale`) and no value is shown. Treat figures as possibly out of date. |
 | Not available | The service behind this view (or a separate grant it needs) is not available in this installation. This is never presented as empty or successful. |
 | Not found | The selection does not exist or is not available to your account. |
 | Signed out | Your session ended. Sign in again. |

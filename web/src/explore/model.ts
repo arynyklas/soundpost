@@ -2,7 +2,7 @@
 // The result model: how an exact C06 value is turned into what a person may be shown. Nanoseconds, counts and float bits
 // stay strings or BigInt here; a JavaScript number is only ever used for drawing coordinates and for a finite float whose
 // bits are shown next to it. Missing data is a gap, never a zero.
-import type { EvaluationWire, FloatBits, Label, LoadState, LogEntry, LogStream, NativeHistogram, ProjectResult, QueryResult, QueryValue, Sample } from '../api/types';
+import type { Cursor, EvaluationWire, FloatBits, Id, Label, LoadState, LogEntry, LogStream, NativeHistogram, ProjectResult, QueryResult, QueryValue, Sample } from '../api/types';
 
 export type FloatKind = 'finite' | 'nan' | 'stale' | 'pos_inf' | 'neg_inf';
 export interface FloatView { kind: FloatKind; text: string; bits: FloatBits; value: number | null }
@@ -111,6 +111,23 @@ export function resultState(r: QueryResult): LoadState<QueryResult> {
  if (states.some((s) => s.kind === 'stale')) return { kind: 'stale', data: r, reason: 'freshness_stale' };
  if (states.length > 0 && states.every((s) => s.kind === 'empty')) return { kind: 'empty', data: r };
  return { kind: 'ready', data: r };
+}
+
+/** A shard of a stale answer: the position it was read through (null when it was not read at all) and the minimum position the request named. */
+export interface StaleShard { group: Id; read: string | null; required: string }
+
+/** The shards a stale answer was read from behind the minimum positions the request named: the ones whose read position is below the
+ * minimum, or that were not read. Positions are exact unsigned integers (decimal strings), compared as such; a shard not read has no position,
+ * and is never read as zero. A request that named no minimum has no stale shard. */
+export function staleShards(required: readonly Cursor[] | undefined, read: readonly Cursor[]): StaleShard[] {
+ const have = new Map(read.map((c) => [c.group, c.index]));
+ const out: StaleShard[] = [];
+ for (const c of required ?? []) {
+  const got = have.get(c.group);
+  if (got === undefined) out.push({ group: c.group, read: null, required: c.index });
+  else if (BigInt(got) < BigInt(c.index)) out.push({ group: c.group, read: got, required: c.index });
+ }
+ return out;
 }
 
 export interface OrderedEntry { entry: LogEntry; streamLabels: Label[] }

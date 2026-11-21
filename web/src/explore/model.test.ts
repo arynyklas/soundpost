@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import type { EvaluationWire, LogStream, ProjectResult, QueryResult, QueryValue, Sample } from '../api/types';
-import { elapsedText, entriesInOrder, floatView, histogramView, isEmptyValue, labelsText, nsToIso, planSeries, projectState, resultState, sampleText, splitByRuneRange } from './model';
+import { elapsedText, entriesInOrder, floatView, histogramView, isEmptyValue, labelsText, nsToIso, planSeries, projectState, resultState, sampleText, splitByRuneRange, staleShards } from './model';
 
 const bitsOf = (x: number): string => {
  const dv = new DataView(new ArrayBuffer(8));
@@ -195,5 +195,21 @@ describe('native histograms are shown bucket by bucket from their spans', () => 
   expect(sampleText({ time: '1', float: '7ff8000000000001' })).toEqual({ text: 'NaN', kind: 'nan' });
   expect(sampleText({ time: '1', float: '7ff0000000000002' })).toEqual({ text: 'stale marker', kind: 'stale' });
   expect(sampleText({ time: '1', histogram: { float: { ...base, count: bitsOf(1), zero_count: bitsOf(0), positive_spans: [], negative_spans: [], positive_buckets: [], negative_buckets: [] } } }).kind).toBe('histogram');
+ });
+});
+
+describe('a stale answer names the shards that were read behind the minimum position the request asked for', () => {
+ const A = 'a'.repeat(32), B = 'b'.repeat(32), C = 'c'.repeat(32);
+ test('a shard read through an older index than the minimum is behind, compared as exact integers', () => {
+  const required = [{ group: A, index: '18446744073709551615' }, { group: B, index: '10' }];
+  const read = [{ group: A, index: '18446744073709551614' }, { group: B, index: '10' }];
+  expect(staleShards(required, read)).toEqual([{ group: A, read: '18446744073709551614', required: '18446744073709551615' }]);
+ });
+ test('a shard at or past the minimum is not behind, and a request with no minimum names none', () => {
+  expect(staleShards([{ group: A, index: '5' }], [{ group: A, index: '5' }, { group: B, index: '1' }])).toEqual([]);
+  expect(staleShards(undefined, [{ group: A, index: '1' }])).toEqual([]);
+ });
+ test('a shard of the minimum that was not read at all is behind with no read position, never read as zero', () => {
+  expect(staleShards([{ group: C, index: '7' }], [{ group: A, index: '1' }])).toEqual([{ group: C, read: null, required: '7' }]);
  });
 });
