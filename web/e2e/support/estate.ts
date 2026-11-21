@@ -132,18 +132,31 @@ export interface Estate{
  close():Promise<void>;
 }
 
-async function orderThrough(browser:Browser,gateway:string,item:'sku-100'|'sku-404'):Promise<Order>{
+async function orderThrough(browser:Browser,gateway:string,item:'sku-100'|'sku-404',served:()=>string):Promise<Order>{
  const ctx=await browser.newContext({ignoreHTTPSErrors:true});
  try{
   const page=await ctx.newPage();
   const pageErrors:{name:string}[]=[];
-  page.on('pageerror',(e)=>pageErrors.push({name:e.name}));
+  // What the page did, kept (bounded) so that a page that does not get ready or does not finish its order says why instead of timing out bare.
+  const trail:string[]=[];
+  const note=(s:string):void=>{trail.push(s.slice(0,240));if(trail.length>40)trail.shift();};
+  page.on('pageerror',(e)=>{pageErrors.push({name:e.name});note(`pageerror ${e.name}: ${e.message}`);});
+  page.on('console',(m)=>note(`console.${m.type()} ${m.text()}`));
+  page.on('requestfailed',(r)=>note(`requestfailed ${r.method()} ${r.url()} ${r.failure()?.errorText??''}`));
+  page.on('response',(r)=>note(`${r.status()} ${r.request().method()} ${r.url()}`));
+  const until=async(what:string,done:()=>boolean):Promise<void>=>{
+   try{await page.waitForFunction(done,undefined,{timeout:30_000});}
+   catch{
+    const state=await page.evaluate(()=>`readyState=${document.readyState} reference=${'__reference' in window?'present':'absent'} result=${JSON.stringify(document.getElementById('result')?.textContent??null)}`).catch((x:unknown)=>`unreadable: ${String(x)}`);
+    throw Error(`the order page of ${gateway} (${item}) did not ${what} within 30 s (${state}); its last events: ${trail.join(' | ')}; ${served()}`);
+   }
+  };
   await page.goto(`${gateway}/`);
-  await page.waitForFunction(()=>Boolean((window as unknown as {__reference?:{ready:boolean}}).__reference?.ready),undefined,{timeout:30_000});
+  await until('get ready',()=>Boolean((window as unknown as {__reference?:{ready:boolean}}).__reference?.ready));
   await page.selectOption('#item',item);
   await page.fill('#note','estate journey note');
   await page.click('#place-order');
-  await page.waitForFunction(()=>(document.getElementById('result')?.textContent??'')!=='',undefined,{timeout:30_000});
+  await until('show the result of the order',()=>(document.getElementById('result')?.textContent??'')!=='');
   if(item==='sku-404'){const until=Date.now()+5000;while(pageErrors.length===0&&Date.now()<until)await page.waitForTimeout(50);}
   const ref=await page.evaluate(()=>{const v=(window as unknown as {__reference:{buildId:string;traceId:string;spanId:string}}).__reference;return {build:v.buildId,trace:v.traceId,span:v.spanId};});
   const flush=await page.evaluate(()=>(window as unknown as {__reference:{flush():Promise<{pending:number;lost:number;receipts:number}>}}).__reference.flush());
@@ -226,9 +239,11 @@ export async function seedEstate(owners:Page,browser:Browser):Promise<Estate>{
   await start('gateway-dark',darkPort,bun,gatewayArgs(gwDark,darkPort,darkApiPort),process.env);
 
   // The orders, through the real page in the browser under test.
-  const priced=await orderThrough(browser,gateway,'sku-100');
-  const unpriced=await orderThrough(browser,gateway,'sku-404');
-  const dark=await orderThrough(browser,darkGateway,'sku-100');
+  // A page that stalls is explained with what the gateways themselves logged (one line per request they served), next to what the page saw.
+  const served=():string=>procs.filter((p)=>p.name.startsWith('gateway')).map((p)=>`${p.name} served: ${p.err.slice(-12).join(' | ')}`).join(' || ');
+  const priced=await orderThrough(browser,gateway,'sku-100',served);
+  const unpriced=await orderThrough(browser,gateway,'sku-404',served);
+  const dark=await orderThrough(browser,darkGateway,'sku-100',served);
 
   // Stop the programs: each flushes its SDK; a trace is complete only when nothing was pending or lost.
   const flushed:Record<string,{pending:number;lost:number;receipts:number}|null>={};

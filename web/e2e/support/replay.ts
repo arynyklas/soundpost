@@ -183,11 +183,18 @@ export async function seedOwnProfile(request:APIRequestContext,s:Source):Promise
 
 /** Begin a real entity deletion (POST /api/v1/admin/deletions, mode entity) of one replay or profile; returns once the server answers that it is fencing, which already denies every read. */
 export async function deleteEntity(page:Page,org:string,project:string,entity:string,kind:'replay_chunk'|'profile_chunk'):Promise<string>{
- const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
- const revision=field(read.json,'revision');
- if(typeof revision!=='string')throw Error(`admin read: ${read.text}`);
- const r=await postJson(page,'/api/v1/admin/deletions',{command_id:id(),expected_revision:revision,mode:'entity',org_id:org,project_ids:[project],signals:[kind],entity_ids:[entity],reason:'replay-profile e2e deletion while open'});
- if(r.status!==202)throw Error(`entity deletion: HTTP ${r.status} ${r.text}`);
+ // expected_revision is the admin API's optimistic concurrency check: any other admin command between the read and the post (the suite's own provisioning
+ // runs beside this test) moves the revision and the server answers 409 conflict, which means "read again", not a failure. One command ID: a retry never applies twice.
+ const command=id();
+ let r:Awaited<ReturnType<typeof postJson>>|undefined;
+ for(let attempt=1;attempt<=5;attempt++){
+  const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
+  const revision=field(read.json,'revision');
+  if(typeof revision!=='string')throw Error(`admin read: ${read.text}`);
+  r=await postJson(page,'/api/v1/admin/deletions',{command_id:command,expected_revision:revision,mode:'entity',org_id:org,project_ids:[project],signals:[kind],entity_ids:[entity],reason:'replay-profile e2e deletion while open'});
+  if(r.status!==409)break;
+ }
+ if(r===undefined||r.status!==202)throw Error(`entity deletion: HTTP ${r?.status} ${r?.text}`);
  const phase=field(r.json,'phase');
  if(phase!=='fencing'&&phase!=='complete')throw Error(`entity deletion phase ${String(phase)}`);
  return String(field(r.json,'operation_id'));

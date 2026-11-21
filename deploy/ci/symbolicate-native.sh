@@ -18,28 +18,36 @@ dir=${SOUNDPOST_CI_DIR:-/opt/soundpost-symbolicate-ci}
 unit=soundpost-symbolicate-ci
 run=${SOUNDPOST_CI_RUN:-.}
 # These must run and pass: a skip is a failure of this job.
-required=(TestAHandshakenWorkerThatWaitsStillAnswersItsRequest TestActualSandboxDeniesFileNetworkExec TestActualSandboxMemoryKilled TestActualSandboxDeadlineAndRestart)
+required=(TestAHandshakenWorkerThatWaitsStillAnswersItsRequest TestActualSandboxDeniesFileNetworkExec TestActualSandboxMemoryKilled TestActualSandboxDeadlineAndRestart TestActualNativeSandboxAnswersEveryLaunchOfItsWorker)
 
 sudo systemctl stop "$unit.service" 2>/dev/null || true
 sudo rm -rf "$dir"
 sudo install -d -m 755 -o "$(id -u)" -g "$(id -g)" "$dir"
 
-# The worker is the one soundpost binary (re-exec worker); the tests are compiled once and run by the unit's user.
-(cd "$root" && CGO_ENABLED=0 go build -trimpath -o "$dir/soundpost" ./cmd/soundpost && go test -c -o "$dir/symbolicate.test" ./internal/symbolicate)
+# The worker is the one soundpost binary (re-exec worker); the tests are compiled once and run by the unit's user. The release binary is static
+# (CGO_ENABLED=0); soundpost-cgo is the same program linked against glibc, which is what a plain `go build` makes on a host with a C compiler: its
+# worker starts glibc threads inside the sandbox, so the allowlist is also tried with the thread start-up of glibc (rseq).
+(cd "$root" && CGO_ENABLED=0 go build -trimpath -o "$dir/soundpost" ./cmd/soundpost && CGO_ENABLED=1 go build -o "$dir/soundpost-cgo" ./cmd/soundpost && go test -c -o "$dir/symbolicate.test" ./internal/symbolicate)
 mkdir "$dir/src"
 # tar exits 1 when a file changed while it was read (a developer tree being edited); that is no failure of the copy.
 (cd "$root" && tar --exclude=./.git --exclude=./.tools --exclude=./.superpowers --exclude=./node_modules -cf - . || [ $? -eq 1 ]) | tar -C "$dir/src" -xf -
 chmod -R a+rX "$dir"
 hash=$(sha256sum "$dir/soundpost" | cut -d' ' -f1)
+cgohash=$(sha256sum "$dir/soundpost-cgo" | cut -d' ' -f1)
 
 cat >"$dir/run.sh" <<EOF
 set -eu
 cgroup_root=\$(dirname "/sys/fs/cgroup\$(cut -d: -f3 /proc/self/cgroup)")
 printf '{"mode":"native","worker_path":"%s","worker_sha256":"%s","cgroup_root":"%s"}\n' "$dir/soundpost" "$hash" "\$cgroup_root" >/tmp/native.json
+printf '{"mode":"native","worker_path":"%s","worker_sha256":"%s","cgroup_root":"%s"}\n' "$dir/soundpost-cgo" "$cgohash" "\$cgroup_root" >/tmp/native-cgo.json
 export SOUNDPOST_SYMBOLICATE_TEST_CONFIG=/tmp/native.json SOUNDPOST_SYMBOLICATE_DELEGATED_ROOT=\$cgroup_root
 export SOUNDPOST_SYMBOLICATE_TEST_OCI='skip:native sandbox job; the OCI runtime tests run where a runtime exists'
 cd "$dir/src/internal/symbolicate"
-exec "$dir/symbolicate.test" -test.count=1 -test.v -test.timeout 20m -test.run '$run'
+status=0
+"$dir/symbolicate.test" -test.count=1 -test.v -test.timeout 20m -test.run '$run' || status=\$?
+echo '== worker linked with cgo'
+SOUNDPOST_SYMBOLICATE_TEST_CONFIG=/tmp/native-cgo.json "$dir/symbolicate.test" -test.count=1 -test.v -test.timeout 20m -test.run TestActualNativeSandboxAnswersEveryLaunchOfItsWorker || status=\$?
+exit \$status
 EOF
 
 set +e
@@ -68,4 +76,9 @@ for name in "${required[@]}"; do
 		exit 1
 	fi
 done
+# The same test must also have passed for the cgo-linked worker (its output follows the marker line).
+if ! sed -n '/^== worker linked with cgo$/,$p' "$dir/out.txt" | grep -q -- "--- PASS: TestActualNativeSandboxAnswersEveryLaunchOfItsWorker "; then
+	echo "the native sandbox did not answer every launch of a worker linked with cgo" >&2
+	exit 1
+fi
 echo "native sandbox tests passed: ${required[*]}"

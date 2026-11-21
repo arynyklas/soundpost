@@ -54,7 +54,10 @@ prep() {
 		grep -q 'bindIssueLinks(c, resolver)' "$ROOT/internal/appcore/app.go" || { echo "issue link wiring did not apply" >&2; exit 1; }
 	fi
 	# E2E_FAULTS=1 builds the server with the soundpost_faults tag: it then reads shard-removal requests from $T/fault (cmd/soundpost/faultcontrol.go).
-	( cd "$ROOT" && go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost )
+	# The served binary is built the way the release builds it, CGO_ENABLED=0 (static). Its symbolication worker is this same binary re-executed under a
+	# seccomp allowlist, and a build with cgo (what a plain `go build` makes where a C compiler exists) is dynamically linked against glibc, a different
+	# program than the one released: its worker died intermittently (SIGABRT) and a frame read worker_failure. A binary that is not CGO_ENABLED=0 is refused.
+	( cd "$ROOT" && CGO_ENABLED=0 go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost && go version -m "$BIN" | grep -q 'CGO_ENABLED=0' ) || { echo "the served binary is not a CGO_ENABLED=0 build" >&2; exit 1; }
 	( cd "$ROOT/web" && node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/vite/bin/vite.js build 2>&1 | tail -2 )
 	# The suite's native profile is a REAL capture (fixtures/nativeperf/e2eprofile: perf_event_open software CPU-clock samples of the compiled
 	# fixtures/nativeperf/cpu/loop.c through the in-process native helper, assembled by nativeperf.AssembleProfile). No fallback: a host that

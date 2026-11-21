@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -65,6 +66,44 @@ func TestActualSandboxDeadlineAndRestart(t *testing.T) {
 	r = Probe(context.Background(), c, ProbeFile)
 	if !r.Denied {
 		t.Fatalf("post-kill restart: %+v", r)
+	}
+}
+
+// Every launch of the worker answers its request. The worker is a fresh process whose Go runtime starts threads after the filter is installed (the
+// main goroutine blocks reading the request while the runtime hands its processor to another thread), so a call the allowlist forgot kills a random
+// fraction of the launches, never all of them: a worker linked against glibc (cgo enabled) registers each such thread's restartable-sequences area
+// (rseq) and died of SIGABRT in 7 to 13 of 100 launches on an idle host, which a frame showed as worker_failure. One launch proves nothing; this
+// runs 300 against the actual sandbox, two at a time, and refuses a single non-resolved answer. deploy/ci/symbolicate-native.sh runs it for the
+// release's static worker and again for a worker built with cgo enabled.
+func TestActualNativeSandboxAnswersEveryLaunchOfItsWorker(t *testing.T) {
+	c := nativeSandboxConfig(t)
+	s, e := New(&unusedReader{}, unusedGenerations{}, c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw := lineMap(40000)
+	const launches, parallel = 300, 2
+	var mu sync.Mutex
+	answers := map[Reason]int{}
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, parallel)
+	for range launches {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			got := s.run(context.Background(), batchInput(raw, 1, 7, 99, 1000, 5000))
+			mu.Lock()
+			defer mu.Unlock()
+			for _, o := range got {
+				answers[o.Reason]++
+			}
+		}()
+	}
+	wg.Wait()
+	if want := launches * 5; answers[Resolved] != want {
+		t.Fatalf("%d launches of the actual worker, 5 positions each: want %d resolved, got %v", launches, want, answers)
 	}
 }
 func TestSandboxUnavailableFailsClosed(t *testing.T) {

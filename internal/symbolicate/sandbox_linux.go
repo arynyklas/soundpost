@@ -41,7 +41,10 @@ func installSandbox() error {
 	filters := []unix.SockFilter{{Code: ld, K: 4}, {Code: jump, K: sandboxAuditArch, Jt: 1}, {Code: ret, K: unix.SECCOMP_RET_KILL_PROCESS}, {Code: ld, K: 0}}
 	// An allowlist, not a network-only denylist: no open/stat/readlink, socket,
 	// connect, exec, ptrace, process_vm, mount, namespace or filesystem mutation.
-	allowed := []uint32{unix.SYS_READ, unix.SYS_WRITE, unix.SYS_CLOSE, unix.SYS_FUTEX, unix.SYS_CLOCK_GETTIME, unix.SYS_NANOSLEEP, unix.SYS_CLOCK_NANOSLEEP, unix.SYS_SCHED_YIELD, unix.SYS_MUNMAP, unix.SYS_MADVISE, unix.SYS_BRK, unix.SYS_RT_SIGACTION, unix.SYS_RT_SIGPROCMASK, unix.SYS_RT_SIGRETURN, unix.SYS_SIGALTSTACK, unix.SYS_GETPID, unix.SYS_GETTID, unix.SYS_GETRANDOM, unix.SYS_EXIT, unix.SYS_EXIT_GROUP, unix.SYS_SET_ROBUST_LIST, unix.SYS_SCHED_GETAFFINITY, unix.SYS_EPOLL_CREATE1, unix.SYS_EPOLL_CTL, unix.SYS_EPOLL_PWAIT, unix.SYS_EPOLL_PWAIT2, unix.SYS_EVENTFD2, unix.SYS_RESTART_SYSCALL}
+	// rseq: a worker linked against glibc (a `go build` of cmd/soundpost with cgo enabled; the release is the static CGO_ENABLED=0 binary) registers the
+	// restartable-sequences area of every thread the runtime starts after this filter is installed, and an unlisted call answers EPERM: that thread, and the
+	// worker with it, died of SIGABRT in about one launch in ten (a frame answered worker_failure). It registers memory of the calling thread only.
+	allowed := []uint32{unix.SYS_READ, unix.SYS_WRITE, unix.SYS_CLOSE, unix.SYS_FUTEX, unix.SYS_CLOCK_GETTIME, unix.SYS_NANOSLEEP, unix.SYS_CLOCK_NANOSLEEP, unix.SYS_SCHED_YIELD, unix.SYS_MUNMAP, unix.SYS_MADVISE, unix.SYS_BRK, unix.SYS_RT_SIGACTION, unix.SYS_RT_SIGPROCMASK, unix.SYS_RT_SIGRETURN, unix.SYS_SIGALTSTACK, unix.SYS_GETPID, unix.SYS_GETTID, unix.SYS_GETRANDOM, unix.SYS_EXIT, unix.SYS_EXIT_GROUP, unix.SYS_SET_ROBUST_LIST, unix.SYS_SCHED_GETAFFINITY, unix.SYS_EPOLL_CREATE1, unix.SYS_EPOLL_CTL, unix.SYS_EPOLL_PWAIT, unix.SYS_EPOLL_PWAIT2, unix.SYS_EVENTFD2, unix.SYS_RESTART_SYSCALL, unix.SYS_RSEQ}
 	for _, nr := range allowed {
 		filters = append(filters, unix.SockFilter{Code: jump, K: nr, Jf: 1}, unix.SockFilter{Code: ret, K: unix.SECCOMP_RET_ALLOW})
 	}
