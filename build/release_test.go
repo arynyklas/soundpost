@@ -230,6 +230,29 @@ func TestStageUIRequiresABuiltBundleAndDigestsItsContent(t *testing.T) {
 	}
 }
 
+// A bundle whose index references an asset that is missing or empty is not a UI the server will start
+// with (httpapi.UIRoutes refuses it): embedding it produced a release whose every node exited at once
+// (a stub written with `: > a.js` did exactly that on a lab host). The build refuses it and names the asset.
+func TestStageUIRefusesABundleTheServerWouldRefuse(t *testing.T) {
+	index := `<div id="root"></div><script type="module" src="/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">`
+	for name, files := range map[string]map[string]string{
+		"empty script":            {"assets/a.js": "", "assets/a.css": "x"},
+		"empty stylesheet":        {"assets/a.js": "1", "assets/a.css": ""},
+		"referenced asset absent": {"assets/a.js": "1"},
+		"no assets at all":        {},
+	} {
+		root := sourceTree(t)
+		dist := filepath.Join(t.TempDir(), "dist")
+		write(t, filepath.Join(dist, "index.html"), index)
+		for file, content := range files {
+			write(t, filepath.Join(dist, file), content)
+		}
+		if _, _, err := stageUI(root, dist); err == nil || !strings.Contains(err.Error(), "assets/a.") {
+			t.Errorf("%s: stageUI answered %v, want a refusal naming the asset", name, err)
+		}
+	}
+}
+
 func TestImageContextOnlyTakesTheBinaryTheReleaseListed(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "deploy", "Dockerfile"), "FROM scratch\n")

@@ -521,12 +521,17 @@ func (g *Group) Campaign() error {
 	}
 	return g.processReady()
 }
-func (g *Group) Step(ctx context.Context, m *pb.Message) (err error) {
+func (g *Group) Step(ctx context.Context, m *pb.Message) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.stepLocked(m)
+}
+
+// stepLocked is Step with g.mu held.
+func (g *Group) stepLocked(m *pb.Message) (err error) {
 	defer g.recoverBehind(&err)
 	if g.failed || g.closed {
 		return ErrUnavailable

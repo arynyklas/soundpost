@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,6 +104,7 @@ type mtlsCluster struct {
 	roots      *x509.CertPool
 	certs      []tls.Certificate // the three members' credentials
 	outsider   tls.Certificate   // issued by the same CA, but for a node that is not a member
+	requests   atomic.Int64      // every request any of the three servers received
 }
 
 func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
@@ -128,7 +130,7 @@ func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
 		if err != nil {
 			t.Fatal(err)
 		}
-		server := &http.Server{Handler: transport, TLSConfig: transport.ServerTLS(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
+		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { c.requests.Add(1); transport.ServeHTTP(w, r) }), TLSConfig: transport.ServerTLS(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
 		go func() { _ = server.Serve(tls.NewListener(listeners[i], server.TLSConfig)) }()
 		c.transports = append(c.transports, transport)
 		var groups []*Group

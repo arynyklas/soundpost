@@ -69,6 +69,9 @@ type Engine struct {
 	// (envelope.go); envelopesProposed counts the proposals that used it.
 	fragmentEnvelope  atomic.Bool
 	envelopesProposed atomic.Uint64
+	// afterSubscribeFence is a test seam: called by Subscribe between its read fence and its registration
+	// (nothing is held), so a test can commit exactly there. Nil in production.
+	afterSubscribeFence func()
 }
 type walEntry struct {
 	Type       string                      `json:"type"`

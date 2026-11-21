@@ -1057,17 +1057,26 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 }
 
 // readIndexEach runs one ReadIndex round on every listed group and returns the cut and the error of
-// each, in the order of groups. The rounds run one after another: running them concurrently (64 or
-// 8 at a time) made a voter that had just led or rejoined refuse its erasure checkpoint as unavailable
-// for over 30 s (TestAcknowledgementIsWithdrawnWhenTheStoresTurnDirty locally 1 in 4,
-// TestAnEraseAckProposedByAnotherVoterIsRefused on a 2-vCPU CI runner), with the cause not isolated.
-// A read's cost is dominated by per-chunk release, not by this fence.
+// each, in the order of groups. The rounds run concurrently: every one costs the leader a heartbeat to
+// each follower and a response from each, and run one after another (as they did) a fence was 64
+// round trips of 4 peer requests each (256), ~75 % of all the peer requests of the distributed smoke
+// campaign; together, the transport (internal/replica/transport_batch.go) sends the heartbeats of the
+// groups that are waiting in one request to each peer. (A concurrent fence was once tried with a
+// transport that sent each heartbeat on its own request, and a voter that had just led or rejoined
+// refused its erasure checkpoint as unavailable for over 30 s; the erasure tests of this package run
+// the concurrent fence now.)
 func readIndexEach(ctx context.Context, groups []*replica.Group) ([]model.Cursor, []error) {
 	cuts := make([]model.Cursor, len(groups))
 	errs := make([]error, len(groups))
+	var wg sync.WaitGroup
 	for i, group := range groups {
-		cuts[i], errs[i] = group.ReadIndex(ctx)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cuts[i], errs[i] = group.ReadIndex(ctx)
+		}()
 	}
+	wg.Wait()
 	return cuts, errs
 }
 func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, allowPartial bool) ([]model.Cursor, bool, error) {

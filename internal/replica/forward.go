@@ -27,6 +27,12 @@ type forwardedResult struct {
 func (g *Group) transportMembers() Members {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.transportMembersLocked()
+}
+
+// transportMembersLocked is the membership the transport addresses: the members plus those being retired.
+// g.mu is held.
+func (g *Group) transportMembersLocked() Members {
 	members := cloneMembers(g.members)
 	known := map[uint64]bool{}
 	for _, member := range members.Nodes {

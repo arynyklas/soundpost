@@ -90,6 +90,19 @@ type liveData struct {
 	} `json:"gap"`
 }
 
+// String names the event's content: a failed expectation must say which gap (and why) took the place
+// of a record, not print the address of the gap.
+func (d liveData) String() string {
+	s := fmt.Sprintf("{type=%s stream=%s seq=%s project=%s reason=%q", d.Type, d.StreamID, d.Sequence, d.Project, d.Reason)
+	if d.Entry != nil {
+		s += fmt.Sprintf(" entry=%q", d.Entry.Line)
+	}
+	if d.Gap != nil {
+		s += fmt.Sprintf(" gap={reason=%s from=%s to=%s}", d.Gap.Reason, d.Gap.From, d.Gap.To)
+	}
+	return s + "}"
+}
+
 // liveConn is one attached SSE stream.
 type liveConn struct {
 	cancel context.CancelFunc
@@ -431,7 +444,7 @@ func RunLive(ctx context.Context, layout Layout, dir, path string) (steps []Step
 						if ev.Event == "heartbeat" {
 							continue
 						}
-						checkf(ev.Event == term.Type && ev.Data.Reason == term.Reason, "terminal %s/%s want %s/%s", ev.Event, ev.Data.Reason, term.Type, term.Reason)
+						checkf(ev.Event == term.Type && ev.Data.Reason == term.Reason, "terminal %s/%s want %s/%s (%v)", ev.Event, ev.Data.Reason, term.Type, term.Reason, ev.Data)
 						break
 					}
 					select {

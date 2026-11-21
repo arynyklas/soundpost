@@ -5,43 +5,25 @@ package httpapi
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/arynyklas/soundpost/internal/uibundle"
 )
+
+// ErrUIBundle is every refusal of UIRoutes: the bundle is not a servable production UI. `soundpost
+// serve` prints it as the closed startup reason ui_bundle_invalid.
+var ErrUIBundle = errors.New("UI bundle invalid")
 
 // UIRoutes admits only a real production bundle, on the existing HTTPS origin.
 func UIRoutes(assets fs.FS) (func(*http.ServeMux), error) {
-	if assets == nil {
-		return nil, fmt.Errorf("UI assets required")
-	}
-	index, err := fs.ReadFile(assets, "index.html")
-	if err != nil {
-		return nil, fmt.Errorf("UI index: %w", err)
-	}
-	refs := regexp.MustCompile(`(?:src|href)="(/assets/[^"?#]+)"`).FindAllSubmatch(index, -1)
-	script := false
-	if !strings.Contains(string(index), `id="root"`) {
-		return nil, fmt.Errorf("UI root missing")
-	}
-	for _, ref := range refs {
-		name := strings.TrimPrefix(string(ref[1]), "/")
-		if !fs.ValidPath(name) {
-			return nil, fmt.Errorf("invalid UI asset")
-		}
-		info, e := fs.Stat(assets, name)
-		if e != nil || info.IsDir() || info.Size() == 0 {
-			return nil, fmt.Errorf("missing UI asset %s", name)
-		}
-		if strings.HasSuffix(name, ".js") {
-			script = true
-		}
-	}
-	if !script {
-		return nil, fmt.Errorf("built UI module missing")
+	if err := uibundle.Check(assets); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUIBundle, err)
 	}
 	return func(mux *http.ServeMux) { RegisterUI(mux, assets) }, nil
 }

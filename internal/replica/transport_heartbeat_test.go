@@ -88,6 +88,11 @@ func TestLaneKeepsOnlyTheNewestHeartbeatBehindASlowReceiver(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { transport.Close(); group.Close() })
+			// This is the lane a peer without the batch route is delivered on (transport_batch.go).
+			legacy := transport.batcher(2)
+			legacy.mu.Lock()
+			legacy.legacyUntil = time.Now().Add(time.Hour)
+			legacy.mu.Unlock()
 			send := func(m *pb.Message) {
 				t.Helper()
 				if err := transport.Send(group.group, m); err != nil {

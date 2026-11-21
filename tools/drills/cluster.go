@@ -916,7 +916,7 @@ func (c *dcCluster) bootstrapAndStart() error {
 	if err = c.env.Approve([]string{dir}, []string{addr}); err != nil {
 		return err
 	}
-	logs := &dcLog{}
+	logs := newDCLog("bootstrap")
 	cmd := exec.Command(c.binary, "serve", "--mode=single", "--data-dir", dir, "--listen", addr)
 	cmd.Stdout, cmd.Stderr = logs, logs
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
@@ -940,7 +940,7 @@ func (c *dcCluster) bootstrapAndStart() error {
 		return err
 	}
 	site := newDCSite("https://"+addr, cert, 20*time.Second)
-	if err = dcWaitSiteReady(site, 60*time.Second); err != nil {
+	if err = dcWaitSiteReady(site, done, logs, 60*time.Second); err != nil {
 		return err
 	}
 	var token []byte
@@ -1006,9 +1006,22 @@ func (c *dcCluster) bootstrapAndStart() error {
 	return nil
 }
 
-func dcWaitSiteReady(site *dcSite, limit time.Duration) error {
+// dcWaitSiteReady waits for the bootstrap node's /readyz. A node that exits before it is ready will never
+// answer: that fails at once as exited_before_ready, with the closed reason token the process printed
+// (`soundpost serve` names why it refused to start), instead of a 60 s timeout that says nothing of
+// the cause (a release whose embedded UI bundle is empty used to look like a slow host).
+func dcWaitSiteReady(site *dcSite, done <-chan struct{}, logs *dcLog, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
+		select {
+		case <-done:
+			code := "exited_before_ready"
+			if reason := logs.lastReason(); reason != "" {
+				code += "_reason_" + dcSafeToken(reason)
+			}
+			return &dcFailure{Stage: "bootstrap_ready", Code: code}
+		default:
+		}
 		if code, raw, err := site.get("/readyz"); err == nil && code == 200 {
 			var st dcReady
 			if json.Unmarshal(raw, &st) == nil && st.Ready {

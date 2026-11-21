@@ -67,11 +67,15 @@ type MTLS struct {
 	dialer      *net.Dialer
 	groups      map[model.ID]*Group
 	queues      map[deliveryLane]*laneQueue
+	batchers    map[uint64]*peerBatcher // the coalesced heartbeats of each peer (transport_batch.go)
 	clients     map[string]*http.Client
 	stop        chan struct{}
 	once        sync.Once
 	closing     bool
 	workers     sync.WaitGroup
+	// dmu guards deferred, the batched messages waiting for a busy group's lock.
+	dmu      sync.Mutex
+	deferred map[deferKey]*deferredStep
 	// layoutSupport answers QueryLayout of the other members (layout_query.go); nil: the route is forbidden.
 	layoutSupport atomic.Pointer[func() (uint64, bool)]
 }
@@ -92,7 +96,7 @@ func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x50
 		}
 		dialer.LocalAddr = &net.TCPAddr{IP: ip}
 	}
-	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]*laneQueue{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
+	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]*laneQueue{}, batchers: map[uint64]*peerBatcher{}, deferred: map[deferKey]*deferredStep{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
 }
 func certificateIdentity(c *x509.Certificate) string {
 	if c == nil {
@@ -137,6 +141,10 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, readinessPath) {
 		t.serveReadiness(w, r)
+		return
+	}
+	if r.URL.Path == batchPath {
+		t.serveBatch(w, r)
 		return
 	}
 	if r.Method != "POST" || !strings.HasPrefix(r.URL.Path, raftPath) || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
@@ -194,6 +202,19 @@ func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 	if g == nil || m.GetFrom() != t.id {
 		return ErrInvalid
 	}
+	kind := supersedableKind(m.GetType())
+	if kind != 0 {
+		// Heartbeats and their responses travel with every other group's to the peer (transport_batch.go):
+		// one that carries a read-index position is sent at once, the others wait for the batch window.
+		select {
+		case <-t.stop:
+			return ErrUnavailable
+		default:
+		}
+		if b := t.batcher(m.GetTo()); b != nil && b.offer(group, kind, m) {
+			return nil
+		}
+	}
 	if lane == nil {
 		t.mu.Lock()
 		if t.closing {
@@ -213,7 +234,7 @@ func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 		return ErrUnavailable
 	default:
 	}
-	if kind := supersedableKind(m.GetType()); kind != 0 {
+	if kind != 0 {
 		lane.mu.Lock()
 		defer lane.mu.Unlock()
 		if lane.held[kind-1] {

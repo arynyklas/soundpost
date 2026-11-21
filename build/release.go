@@ -46,6 +46,7 @@ import (
 	"sync/atomic"
 
 	"github.com/arynyklas/soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/uibundle"
 )
 
 func main() {
@@ -619,9 +620,13 @@ func copyTree(src, dst string) error {
 // its tree digest. The directory is generated output: it carries its own .gitignore and the
 // caller removes it after the build.
 func stageUI(root, dist string) (digest string, files int, err error) {
-	index, err := os.ReadFile(filepath.Join(dist, "index.html"))
-	if err != nil || !bytes.Contains(index, []byte(`id="root"`)) {
+	if _, err = os.Stat(filepath.Join(dist, "index.html")); err != nil {
 		return "", 0, errors.New("web dist has no built index.html (build it with the pinned Node and `pnpm --filter @soundpost/web build`)")
+	}
+	// The rule the server applies at start (httpapi.UIRoutes): a bundle it would refuse makes a release
+	// that cannot start, so it is refused here, naming the asset.
+	if err = uibundle.Check(os.DirFS(dist)); err != nil {
+		return "", 0, fmt.Errorf("web dist is not a servable UI bundle (%w); build it with the pinned Node and `pnpm --filter @soundpost/web build`", err)
 	}
 	if digest, files, err = releaseevidence.TreeDigest(dist, nil); err != nil {
 		return "", 0, err

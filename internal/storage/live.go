@@ -67,6 +67,9 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	if err != nil {
 		return nil, err
 	}
+	if e.afterSubscribeFence != nil {
+		e.afterSubscribeFence()
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -113,7 +116,15 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 			}
 		}
 	}
-	if advanced {
+	if advanced && len(req.After) == 0 {
+		// A fresh subscription starts at what is applied now. Commits that landed between the read fence
+		// and this registration were not acknowledged before the call (the fence covers everything that
+		// was), so they are neither owed to the consumer nor a gap: a stream opened with nothing missing
+		// used to open with a catch_up_required gap whenever a background commit (an erasure declaration,
+		// a verification, a deletion) fell into that window (hundreds of milliseconds under load).
+		it.marks = append([]model.Cursor(nil), through...)
+		it.delivered = append([]model.Cursor(nil), through...)
+	} else if advanced {
 		after := marks
 		if it.gap != nil {
 			after = it.gap.After

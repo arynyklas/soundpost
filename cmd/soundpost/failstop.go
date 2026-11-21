@@ -11,13 +11,15 @@ import (
 	"sync/atomic"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // startupReason names, in a closed vocabulary, why `serve` could not start or stopped serving: the
 // code of a typed fault (invalid, corrupt, unavailable, stale, conflict, ...), the replication
-// layer's typed errors, or io_error for a file system call that failed. It is "" for any other
+// layer's typed errors, ui_bundle_invalid for an embedded or --web-dir UI bundle that is not
+// servable, or io_error for a file system call that failed. It is "" for any other
 // error, which keeps the generic line: those can carry operator-supplied paths. The text of an
 // error is never part of it.
 func startupReason(err error) string {
@@ -26,6 +28,8 @@ func startupReason(err error) string {
 	switch {
 	case errors.Is(err, replica.ErrJournalBehind):
 		return replica.ReasonJournalBehind
+	case errors.Is(err, httpapi.ErrUIBundle):
+		return "ui_bundle_invalid"
 	case errors.As(err, &fault):
 		return string(fault.Code)
 	case errors.Is(err, replica.ErrStale):

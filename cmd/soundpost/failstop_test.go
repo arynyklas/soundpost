@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
@@ -28,6 +29,8 @@ func TestStartupFailureCarriesAClosedReasonNeverText(t *testing.T) {
 		"wrapped typed fault":  {fmt.Errorf("open /secret/dir: %w", model.Fail(model.Corrupt)), "soundpost: startup or service failed (reason=corrupt)"},
 		"replication error":    {fmt.Errorf("group /secret/dir: %w", replica.ErrUnavailable), "soundpost: startup or service failed (reason=unavailable)"},
 		"file system failure":  {&fs.PathError{Op: "sync", Path: "/secret/dir/ready.wal", Err: syscall.EIO}, "soundpost: startup or service failed (reason=io_error)"},
+		"unservable UI bundle": {fmt.Errorf("%w: missing UI asset assets/secret.js", httpapi.ErrUIBundle), "soundpost: startup or service failed (reason=ui_bundle_invalid)"},
+		"missing UI index":     {fmt.Errorf("%w: UI index: %w", httpapi.ErrUIBundle, &fs.PathError{Op: "open", Path: "/secret/dir/index.html", Err: fs.ErrNotExist}), "soundpost: startup or service failed (reason=ui_bundle_invalid)"},
 		"untyped error":        {errors.New("flag provided but not defined: -/secret"), "soundpost: startup or service failed"},
 		"insecure data folder": {errInsecureMode, "soundpost: the data directory or TLS private key is accessible to other users; it must be mode 0700 and the key 0600"},
 	} {
