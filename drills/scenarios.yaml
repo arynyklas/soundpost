@@ -1,0 +1,90 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Failure drills for task 07.07. `go run ./tools/drills --scenario NAME|all --target isolated --report DIR`.
+# The allowlist is explicit: a drill refuses any data directory outside data_roots, any directory that is
+# or contains a forbidden production/default location, and any address that is not a loopback literal
+# listed in hosts. Production execution is a separate owner action and is not implemented.
+version: 1
+allowlist:
+  data_roots:
+    - /tmp/soundpost-drills
+    # /tmp is cleaned at boot on some distributions (Debian); the vm-hard-reset state directory must survive a reboot.
+    - /var/tmp/soundpost-drills
+  hosts:
+    - 127.0.0.1
+    - localhost
+  forbidden_data_dirs:
+    - /var/lib/soundpost
+    - /var/lib
+    - /var/log
+    - /etc/soundpost
+    - /opt/soundpost
+    - /srv
+    - /data
+    - /home
+    - /root
+    - /mnt
+    - /usr
+    - /etc
+    - /boot
+scenarios:
+  # ---- real three-member cluster of the produced static binary (the `node_loss` release evidence) ----
+  - name: node-kill-restart
+    evidence: node_loss
+    needs_binary: true
+    description: SIGKILL one member of three real processes, keep acknowledging through the survivors, restart it, reconcile every ACKed id against the exact retained data on every member.
+  - name: minority-pause
+    evidence: node_loss
+    needs_binary: true
+    description: SIGSTOP one member (a minority is unreachable but alive), acknowledge through the majority, SIGCONT, reconcile.
+  - name: majority-pause
+    evidence: node_loss
+    needs_binary: true
+    description: SIGSTOP two members; the survivor must refuse acknowledgement (typed) and no ACK may exist for a refused batch; SIGCONT, retry the identical batch, reconcile.
+  - name: network-partition
+    evidence: node_loss
+    needs_binary: true
+    description: Link-level partition with both sides live, through the drill's own loopback proxy transport (no iptables/tc/netns, no host privilege). One member is isolated from the other two (initial leader with dropped packets, then member 3 with reset links), stays reachable by clients and must never acknowledge; the majority keeps acknowledging; after the heal every ACK is reconciled on every member.
+  - name: power-loss
+    evidence: node_loss
+    needs_binary: true
+    description: Power cut of one member (initial leader; member 3 with a torn tail) and of all three at once, emulated as SIGKILL of the whole process group plus rollback of every byte and directory entry the member never fsynced (observed through an unprivileged seccomp user-notification ledger of its own fsync/rename calls); restart; every ACK reconciled on every member. Not a physical power cut.
+  - name: fsync-failure
+    evidence: node_loss
+    needs_binary: true
+    description: Every fsync of one member answers a real kernel errno (injected at the system-call boundary by the unprivileged seccomp user-notification seam under the real binary) while writes stream, EIO on the initial leader and on member 3 (a failing disk), ENOSPC on member 2 (a full filesystem); the member fails stop in every group (stops leading and voting, exits), the other two keep acknowledging inside the scenario window in all three phases, nothing is acknowledged without durability, the member restarts on re-verified journals and rejoins, every ACK reconciled.
+  - name: disk-disappearance
+    evidence: node_loss
+    needs_binary: true
+    description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks and keep acknowledging inside the scenario window in both phases, then a blank replacement disk, then the original returns. The original disk holds less than the member acknowledged on the blank one, so the member must refuse to rejoin with reason=journal_behind_acknowledged (never become ready) while the other two keep acknowledging; a replacement is a new identity. No false ACK, every ACK reconciled on the remaining members.
+  - name: membership-replace
+    needs_binary: true
+    description: Operator replacement of a voter on three real processes of the produced binary through `soundpost membership` (status, add-learner for a fourth node, start it, replace the stopped member 3 by member 4) while a write stream keeps being acknowledged; the new voter serves every acknowledged batch and carries a majority with member 1 while member 2 is stopped; a re-add is idempotent, an add that does not fit is refused, and the socket and its directory are private (a real second uid is not available on the drill host, so that refusal is covered per connection by a unit test and recorded as not run here).
+  - name: node-loss-journeys
+    needs_binary: true
+    opt_in: true
+    description: The node-kill-restart loss (SIGKILL of the initial leader, then of member 3, while a write stream is acknowledged, restart, reconcile) on three real processes of the produced binary, then, only after the recovery is proved (every ACKed id read back identically from every member, every member ready, the control cursors equal, the outage closed), the real reference journeys of tools/smoke against that cluster (reference Bun gateway, Python API and job, the Vite-built web app in headless Chrome, a real PostgreSQL 16, the product's own routes; fifteen rows, all must pass). The applications ingest through different members, some killed and restored; the drill stops the scan member for the smoke's in-process storage scan and starts it again, and every read of the rows goes through that restored member; the drill's own writers keep acknowledging while the applications run, and every ACKed id of the whole run is reconciled on every member afterwards. Needs `--journeys-smoke` (the tools/smoke binary) and `--journeys-arg` flags for the tools the smoke uses (without them it is reported not_run with that reason); not tagged for the node_loss release evidence. Three processes on one host are not three failure domains.
+  - name: vm-hard-reset
+    needs_binary: true
+    opt_in: true
+    description: A real guest hard reset of the machine that holds all three members, in two phases because the harness dies with the machine. Phase 1 (root; `--allow-vm-reset` must name this machine; `--vm-reset-state` under an allowlisted data root that survives a reboot; sysrq writable) bootstraps the three-process cluster with its data under the state directory, streams writes while appending every issued batch and every acknowledgement to a chained, fsynced journal before it counts, writes the boot id and a marker, and writes `b` to /proc/sysrq-trigger while the stream runs (immediate reboot, no sync, no unmount, page cache dropped). Phase 2 (same command after the machine is back) refuses unless the boot id changed and the journals are intact, restarts the members on the same data, retries the batches that were in flight unchanged, and requires every acknowledged id retained with identical semantic data on every member, no unknown id, the original receipt on retry and converged cursors. A guest-level crash reboot, NOT a hypervisor power cut (the host's virtual-disk cache is not exercised); three processes on one machine are not three failure domains; not tagged for the node_loss release evidence; not_run without the two flags.
+  # ---- capacity ----
+  - name: capacity-faults
+    description: Failed sync and slow apply through the replica journal hook and through the running storage.Engine (storage.Engine.SetFaultHook over HTTPS ingest, restart, retry of the same batches), and full disk through the committed storage.DiskMeter admission gate; nothing acknowledged without durability, every ACK reconciled. The real operating-system errors (EIO, ENOSPC) at the engine are the fsync-failure scenario.
+  # ---- pipeline, outage, deadman, cutover ----
+  - name: provider-failure-outage
+    description: Failed provider attempts, outage and recovery with the recording senders; recovery never erases the outage or the failed attempts and never sends retroactive backlog as new emergencies; retries keep id and receipt.
+  - name: external-deadman
+    description: The independent observer process delivers while every Soundpost process is stopped, keeps the outage after recovery and announces no retroactive backlog.
+  - name: owner-cutover-rollback
+    description: Canonical notification owner cutover and rollback with exactly one active owner and no stale sender.
+  # ---- deletion, backup, restore, evidence ----
+  - name: stale-policy-delete-barrier
+    description: A stale policy revision and the all-shard delete barrier race; no stale worker sends or remaps source states.
+  - name: backup-predates-deletion
+    description: A backup older than a completed deletion, with an independent authority HEAD, must not resurrect the deleted data.
+  - name: restore-authority-unavailable
+    description: Restore with the authority unavailable fails closed, on a backup taken after a completed deletion whose erased rows carried a series no retained row has; with the authority available the same restore and activation succeed and no deleted row is readable.
+  - name: evidence-gap-after-retention
+    description: After retention expiry the missing evidence is an explicit gap, never an empty success.

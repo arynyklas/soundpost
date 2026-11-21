@@ -1,0 +1,9 @@
+diff --git a/bun.d.ts b/bun.d.ts
+index d341e0d3cbef1bfddcd8c2cb5eada474c605b557..a2f5ef703f6dfbb9297eefddea82f1397ffd4870 100644
+--- a/bun.d.ts
++++ b/bun.d.ts
+@@ -507,3 +507,3 @@ declare module "bun" {
+      */
+-    TZ?: string;
++    TZ?: string | undefined;
+   }

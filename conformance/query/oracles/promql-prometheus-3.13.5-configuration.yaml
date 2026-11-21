@@ -1,0 +1,15 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+# Control configuration of the configuration-phase observation variant of the
+# pinned Prometheus 3.13.5 oracle. The observation harness loads this file first, in
+# the same way as every authored scenario, and refuses to trust a run whose
+# observed effective values differ from the ones recorded for it in
+# internal/conformance/query/configuration_oracle.go.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 5s
+  evaluation_interval: 45s
+scrape_configs:
+  - job_name: control
+    static_configs:
+      - targets: ["127.0.0.1:9"]

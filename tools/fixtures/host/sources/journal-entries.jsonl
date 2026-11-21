@@ -1,0 +1,3 @@
+{"__CURSOR":"s=fixture;i=1","__REALTIME_TIMESTAMP":"1700000000000001","_BOOT_ID":"b","MESSAGE":"service started unit alpha","PRIORITY":"6","SYSLOG_IDENTIFIER":"myapp","_SYSTEMD_UNIT":"myapp.service","_CMDLINE":"/usr/bin/myapp --token=CMDLINE-CANARY"}
+{"__CURSOR":"s=fixture;i=2","__REALTIME_TIMESTAMP":"1700000000000002","_BOOT_ID":"b","MESSAGE":"authentication failure for dave password=hunter2-BODY-CANARY","PRIORITY":"4","SYSLOG_IDENTIFIER":"myapp","_SYSTEMD_UNIT":"myapp.service"}
+{"__CURSOR":"s=fixture;i=3","__REALTIME_TIMESTAMP":"1700000000000003","_BOOT_ID":"b","MESSAGE":[104,117,110,116,101,114,50],"PRIORITY":"6","SYSLOG_IDENTIFIER":"myapp","_SYSTEMD_UNIT":"myapp.service"}

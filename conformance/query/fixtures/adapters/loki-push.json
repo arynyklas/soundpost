@@ -1,0 +1,19 @@
+{
+  "note": "Independently authored semantic input. The test harness encodes it as Loki push JSON, gzip JSON and the snappy-compressed logproto.PushRequest. Timestamps are decimal nanosecond strings above 2^53; entries two and three are distinct records with equal timestamp and equal line and must both survive.",
+  "streams": [
+    {
+      "labels": {"app": "web", "region": "eu"},
+      "entries": [
+        {"ts_ns": "1700000000123456789", "line": "alpha", "metadata": {"tenant": "t1"}},
+        {"ts_ns": "1700000000123456789", "line": "beta", "metadata": {"tenant": "t1"}},
+        {"ts_ns": "1700000000123456789", "line": "beta", "metadata": {"tenant": "t1"}}
+      ]
+    },
+    {
+      "labels": {"app": "web", "region": "us"},
+      "entries": [
+        {"ts_ns": "1700000000123456790", "line": "alpha", "metadata": {"tenant": "t1"}}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+# Changelog
+
+## Unreleased — lane 4 wave 27 per-request frames (no wire, privacy or API change)
+
+- The WSGI hook's plain request opens 19 Python frames instead of 28 (`tests/test_hot_path_cost.py`, wave-27 section): the span, record and batch identifiers are drawn with the pool's C-level `popleft` (`ids.take16`/`take8`; a dry pool still refills through `hex16`/`hex8`), the trace context variable is set and reset by the span itself instead of through a `_Binding` object (`bind()` stays for callers), `Client._admit_span` is part of `_record_span` (the gates and their order are unchanged), the normal end of a response skips `_Response._finish`, and `freeze()` builds its batch tuple with an inline list comprehension (one frame per batch less). Hot in-process cost on CPython 3.12: request path 9.4 -> 9.0 us, flush 6.1 -> 6.0 us per request.
+- The ASGI hook begins its span with the request's own parent directly (as the WSGI hook already did) instead of binding the parent around an `async with` scope: a plain request opens 12 SDK frames instead of 20, and a request without a `traceparent` header no longer calls `extract`. Statuses, parents, error capture inside the span and the restored ambient context are pinned (`test_asgi_outcomes_parents_and_the_ambient_context_are_what_they_were`).
+- Queue limits, spool format, loss counters, record bytes and routing are unchanged.
+
+## Unreleased — lane 4 wave 21 delivered-mode warm path (no wire, privacy or API change)
+
+- Flush: one frozen batch per route slot is still the wire shape, but each batch is cheaper: its priority and byte total are recorded when it is sealed (no per-batch lambda/generator sort key, no `sum` over every remaining entry on removal), a one-record batch skips the sort/min/set work, slot tails are precomputed, receipts are validated with one `unix_nano_int` per value and without re-checking the batch id the SDK itself issued, the default clock's policy-expiry check no longer converts clock text, and nothing calls `persist()` without a spool. Python calls per frozen batch 28 -> 19.5, per plain WSGI request 35 -> 28 (`tests/test_hot_path_cost.py`).
+- Request: the span's wire bytes are composed with the record instead of being cut out of the finished text again, the expiry scan runs only when something can have expired, the default clock is read in place, and the exporter gate is one context-variable read. `DeliveryQueue.enqueue_span(head, trace_id)` now takes the record text up to its payload (internal; its only caller is `Client._admit_span`).
+- Queue limits, `queue_full`/eviction behaviour, spool format and the loss counters are unchanged.
+
+## Unreleased — 03.09 server capture cost (no wire or API change)
+
+- Span capture is composed directly in canonical form (`Client._record_span`, `DeliveryQueue.enqueue_span`) instead of being re-validated by `normalize_span`/`parse_safe_record` and canonicalized twice; the output is byte-identical to the validated path (pinned by `tests/test_span_fast_path.py`, including every refusal and loss reason). `Client._capture_span` is removed (it had no caller left).
+- Batches are built from the stored record text (policy revision swapped for the resource) and a text header instead of re-parsing every record at freeze; entries expire through a conservative next-expiry bound instead of an O(n) scan per enqueue; hot validation regexes are precompiled; `TraceContext.trusted`, class-based context bindings, no context rebinding while iterating a list/tuple WSGI body, default `Config.clock_ns` is the named `types.wall_clock_ns` (read without re-validation).
+- Measured with `fixtures/sdk/overhead.mjs --only python` (CPython 3.13.5, 3 runs each): process CPU per request +182% -> +38..45% (3 hashes) and +165% -> +31..35% (100 hashes), p95 +22% -> +0.2%. The 5% budget is still not met.
+
+## Unreleased — 03.09 runtime profile delivery
+
+- Runtime profiles reach the backend: `Config(deployment_profiles=True)` plus a source policy that lists `profile_chunk` and `capability` admits the internal `start_profile` report as a `capability` record (method `python_monitoring` / `python_wall_samples`) and, for a supported run, linked `runtime_cpu` chunks (units `samples`, or `events` for `python_monitoring`; one single-frame stack per code object with its summed event count). `report["ack"]` is `not_available/profile_not_admitted` when the records were refused.
+
+## Unreleased — 03.06 Celery documentation
+
+- Document `soundpost.celery.instrument` (README "Celery 5 job attempts"); the README no longer says a Celery adapter is not implemented.
+- Development/qualification only: the Celery 5.7.0 / kombu 5.7.0 closure is now pinned with hashes in `requirements-integrations.lock` (not a package dependency).
+
+## Unreleased — 11.06 adoption friction (additive except `close()` now returns a report)
+
+- Delivery: one flush deadline now covers connection and TLS setup, request and response (socket timeout re-armed per phase; previously a slow first handshake could stretch the response wait past the deadline).
+- `Client.close(timeout=2.0)` returns the final `FlushReport` and never drops buffered records silently: `FlushReport.dropped` (new, default 0) counts records destroyed by a spool-less close, `diagnostics()["closed_pending"]` accumulates them and a `RuntimeWarning` names the count. Invalid timeouts raise `ValueError` without closing; repeated `close()` returns the first report. `fixtures/sdk/python/short_process.py` runs fresh short-lived processes against a real server.
+- `span.set_error()` / `span.set_status("ok"|"error")` replace assigning `span.status`; ASGI/WSGI adapters use them. Calling after the scope exited raises `RuntimeError`.
+- `client.capture_handled(error, code=None)` = begin episode + capture + close in one call.
+- `client.span(..., kind=...)` accepts the adapter kinds (`internal` default, `server`, `client`, `producer`, `consumer`); the vocabulary is the shared `types.SPAN_KINDS`.
+- An error `code` outside the registered set is still exported as `null`, but is now counted as `diagnostics()["unregistered_code"]` (value never stored); free text is still refused.
+- Exception classes whose metaclass is a `type` subclass (asyncpg, ORM hierarchies) keep their class name instead of becoming `UnknownError`; the name is read through `type`'s own descriptor. A class whose name is not a safe identifier is `UnknownError` with the shared graph reason `foreign_or_custom_error_class`. No class-name allowlist exists.
+
+## Unreleased — 03.09 runtime supplements (additive, qualification pending)
+
+- Add internal optional `soundpost.profile` (`start_profile(options, client) -> ProfileLease`; not exported, not public C09): explicit, off-by-default, <=60 s profiles with `python_monitoring` (deterministic `sys.monitoring` PY_START/PY_RESUME/PY_RETURN/PY_UNWIND counts per project code object on the first free tool ID of 2/3/4, never touching return/exception values) and `python_wall_samples` (`sys._current_frames()` sampler, leaf-first stacks <=128 deep, no locals/globals/thread names).
+- Report carries units `events`/`samples` with `time_delta_unit` `null`/`wall_microseconds` (never a CPU unit), a fresh clock domain, achieved interval, `sample_gap`/`truncated` losses with derived counts, a C04 capability (`soundpost.wire`-valid) with truthful coverage and machine-readable bias flags (GIL acquisition, native time attributed to the Python caller, suspended asyncio tasks unobserved).
+- One lease per process via a well-known registry key (duplicate module copies conflict: `profiler_owned`); clients own and close leases; refusals are typed (`invalid_options`, `monitoring_tool_ids_occupied`, `client_unavailable`, `sys_monitoring_unavailable`, `free_threaded_unqualified`) with zero samples/events. Stop calls `sys.monitoring.restart_events()` to undo per-location DISABLE.
+- With loss permission, truncation/unsupported results use `client._record_signal_loss("profile_chunk", ...)`; ACK is reported `obtained` only with real flushed cursors. The Go C04 profile-chunk method set still excludes the Python methods, so no chunk is exported.
+- Add `tests/test_profile.py` and `fixtures/sdk/profiles/python.py`; observed results are Windows CPython 3.14.2 only.
+
+## Unreleased — 03.04 authored, qualification pending
+
+- Add client-owned token-restored trace context, strict traceparent-only propagation, sync/async C09 span scopes and closed native C04 span DTO admission.
+- Add independent strict signed traces/jobs permissions (absent false), deployment intersections, trace-sampling loss and error trace/span links; retain policy-first durable delivery.
+- Add explicit ASGI/WSGI streaming lifecycle, requests/httpx target-origin-safe calls, psycopg real execution, template-only logging and detached-by-default asyncio task/thread adapters with owned leases.
+- Add real concurrent HTTP/PostgreSQL/cancellation/privacy fixtures plus context/protocol/policy/adapter behavior tests; worker did not execute them. Framework security blocks and runtime matrix remain explicit.
+- Add optional strict signed loss permission and policy-gated native span/policy loss hook; require actual admitted loss count/source/producer/epoch in the real critical-path smoke instead of treating local sampling counters as native evidence.
+- Use the configured wall-clock source consistently in span/event stamps; represent uncalibrated uncertainty as canonical uint64 maximum, with an explicit trusted calibrated-bound option and preserved local monotonic durations.
+- Document bounded native-loss aggregation acceptance versus durable ACK, exact observed/acknowledged/pending/unexported counters and explicit recovery/expiry/close loss without potentially committed-count replay.
+- Author actual Starlette/FastAPI/Flask route/stream/error/cancel-or-close adapter cases for parent-approved patched targets; preserve historical vulnerable rows as BLOCKED_SECURITY without claiming runtime qualification.
+- Document03.05 manual job-attempt public scopes and finite alias→JobID registry: durable started/terminal observations, independent sanitized failed-body errors, explicit unscheduled semantics and no current-health/availability qualification claim.
+- Add `test_transport_retry.py`: behavior tests against a real local TLS server (throwaway CA, verification on) proving 429/503 stay pending and are retried with the same frozen batch bytes/hash, Retry-After seconds/HTTP-date honored and clamped to 0.25–30 s, a later 200 receipt ACKs without re-freezing, and 401/403 are denied (no retry, export stops).
+- Correct README: jobs (`client.job_attempt`) are implemented; replay, profiling and any Celery adapter are not. Document that error `code` is authorized by the signed source policy's independent error-code registry (`Codes`), not by span operations.
+
+## 0.1.0 — 2026-11-03
+
+- Add installation-trusted signed policy admission and bounded immutable safe error/log capture.
+- Keep unimplemented instrumentation/replay APIs unavailable; no support claims before qualification.
+- Reject boolean envelope versions, preserve explicitly registered log severity, and enforce strict UTF-8 byte boundaries.
+- Pin cryptography 50.0.0 following primary advisory review; retain Apache-2.0 OR BSD-3-Clause dependency licensing and exact artifact evidence.
+- Add intrinsic bounded cause/context/group graphs and project-relative traceback identities; explicit no-raw-identity episodes and conditional sys/threading/asyncio hook leases.
+- Bind episode arms to weak Thread/source/loop/Task identities; require explicit same-source context opt-in for nonweak exceptions, and skip message-only asyncio occurrences.
+- Freeze shared C04 mechanisms/edges and document observation-based fatality; preserve prior handlers and no-raw-error retention.
+- Enforce canonical nonzero opaque IDs, uint64 revisions and signed int64 UnixNano at SDK admission; reject bad injected clocks with safe counters instead of application exceptions.
+- Add real typed resources, all fixed64 owner keys/native-JSON goldens, bounded ordered HTTPS delivery and exact durable/historical receipt-aware flush/close.
+- Add opt-in authenticated AES-GCM backend spool with policy-transition historical recovery, exclusive OS leases, capped atomic writes and explicit corruption/full-disk failures.
+- Preserve exact optional metric start timestamps and approved closed native-profile metadata; retain frozen payload bytes once and expire/recover whole batches without identity mutation.

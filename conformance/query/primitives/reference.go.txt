@@ -1,0 +1,43 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+// Only generic BSD-3-Clause primitives are imported into this dev-only module.
+package main
+import (
+ "fmt"
+ "runtime/debug"
+ "strings"
+ stdsyntax "regexp/syntax"
+ "unicode"
+ grafana "github.com/grafana/regexp"
+ forksyntax "github.com/grafana/regexp/syntax"
+)
+func initialize(profile,commit string) {
+ if profile==""||commit==""{panic("missing profile identity")}
+}
+func compilePrimitive(pattern,mode string)(regex,string,error) {
+ normalized:=pattern
+ switch mode {
+ case "search":
+ case "label":
+  tree,err:=forksyntax.Parse(pattern,forksyntax.Perl|forksyntax.DotNL)
+  if err!=nil{return nil,"",err}
+  normalized="^(?s:"+tree.Simplify().String()+")$"
+ default:panic("unknown regex mode")
+ }
+ r,err:=grafana.Compile(normalized);return r,normalized,err
+}
+func errorCode(err error)string {
+ switch e:=err.(type){case *stdsyntax.Error:return string(e.Code);case *forksyntax.Error:return string(e.Code)}
+ panic(fmt.Sprintf("unclassified reference error %T: %v",err,err))
+}
+func upper(s string)string{return strings.ToUpper(s)}
+func lower(s string)string{return strings.ToLower(s)}
+func fold(r rune)rune{return unicode.SimpleFold(r)}
+func primitiveIdentity()map[string]string {
+ info,ok:=debug.ReadBuildInfo();if !ok{panic("missing reference build identity")}
+ for _,dep:=range info.Deps{if dep.Path=="github.com/grafana/regexp"{
+  if dep.Replace==nil{panic("reference must use hash-verified local source")}
+  return map[string]string{"module":dep.Version,"unicode":unicode.Version,"module_path":dep.Path,"replacement":dep.Replace.Path}
+ }}
+ panic("missing exact Grafana dependency")
+}

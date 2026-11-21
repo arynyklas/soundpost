@@ -1,0 +1,243 @@
+{
+  "profile": "logql-loki-3.5.2",
+  "source_facts": [
+    {
+      "path": "go.mod",
+      "sha256": "48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8"
+    },
+    {
+      "path": "cmd/loki/Dockerfile",
+      "sha256": "49017dd17efc3dfe2e505b6ff6d62ee91808924f7f13a70d847e22a5326ffd19"
+    },
+    {
+      "path": "loki-build-image/Dockerfile",
+      "sha256": "7d8855d9920c72aec0c5a4c40b84c8461bcb1a101e10ccab8eb99edb026d6a1a"
+    },
+    {
+      "path": "vendor/github.com/grafana/regexp/regexp.go",
+      "sha256": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a"
+    },
+    {
+      "path": "vendor/github.com/grafana/regexp/syntax/parse.go",
+      "sha256": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545"
+    },
+    {
+      "path": "vendor/github.com/grafana/regexp/syntax/prog.go",
+      "sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64"
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/functions.go",
+      "sha256": "e8965eeef01361ac86be9467b9034f8894445a525c2d8df19a78b0bd15242f8e"
+    }
+  ],
+  "module_identity": {
+    "go_directive": "1.24.0",
+    "toolchain_directive": "go1.24.1",
+    "release_make_go_version": "1.24.4",
+    "release_build_image_tag": "0.34.6",
+    "dockerfile_default_go_arg": "1.24",
+    "grafana_regexp": "v0.0.0-20240518133315-a468a5bfb3bc",
+    "sprig": "v3.3.0"
+  },
+  "candidate_standard_library_sources": [
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/unicode/tables.go",
+      "sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/text/template/exec.go",
+      "sha256": "d5c9fabe29a29067a6b6a6d69fa990e9200e26edea11bac572832e5b177122e8",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/text/template/funcs.go",
+      "sha256": "f3cdea878fa8b2913999622f5e9e31b6327c28c92f8d943a79431b4de0633123",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/text/template/parse/parse.go",
+      "sha256": "4d67edf780c8243047936c9a42d80af9bdb2d5fb6ad4b4d1dce5424897d35f56",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/strconv/atof.go",
+      "sha256": "c8d9a1720134e2f42816f74a4925f2f062ee17694698cc9a6add5471e920bde4",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.4/src/strings/strings.go",
+      "sha256": "df833df3b0fef971c0241257c2f1dfa05fd4660d8152d776aada9487b20eb3ea",
+      "identity": "candidate release-recipe Go1.24.4, not yet proven actual binary compiler"
+    }
+  ],
+  "candidate_unicode_version": "15.0.0",
+  "actual_binary_compiler": "go1.24.5",
+  "obligations": [
+    {
+      "id": "logql-loki-3.5.2/primitive/unicode-case-version",
+      "kind": "primitive-version-difference",
+      "profile": "logql-loki-3.5.2",
+      "gate": "",
+      "signature": "Unicode case conversion and regexp categories",
+      "semantic_rule": "Actual locked Go1.24.5 Unicode tables are edition15.0.0. A newer host Unicode edition must not expand case mappings/categories in LogQL string helpers or regex classes. Treat Garay letters introduced after Unicode15 as unmapped/nonletter under this baseline as required by the actual compiler Unicode15.0.0 identity.",
+      "source_refs": [
+        "Makefile:21@aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8",
+        "go.mod:3@48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6",
+        "vendor/github.com/grafana/regexp/regexp.go:1@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt:1@4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+      ],
+      "implementation": "pending",
+      "positive_cases": [
+        "logql-loki-3.5.2/primitive/unicode-case-version/positive"
+      ],
+      "negative_cases": [
+        "logql-loki-3.5.2/primitive/unicode-case-version/negative"
+      ],
+      "interaction_cases": [
+        "logql-loki-3.5.2/primitive/unicode-case-version/interaction"
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/template-version",
+      "kind": "primitive-version-difference",
+      "profile": "logql-loki-3.5.2",
+      "gate": "",
+      "signature": "Go text/template parser/executor/builtins",
+      "semantic_rule": "Use reference compiler stdlib template semantics rather than host template acceptance. Function return errors, recovered panics, missingkey=zero, reflect assignment, builtin index/slice/comparisons and control actions are profile-sensitive; successful host parsing does not prove reference acceptance.",
+      "source_refs": [
+        "Makefile:21@aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8",
+        "go.mod:3@48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6",
+        "vendor/github.com/grafana/regexp/regexp.go:1@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt:1@4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+      ],
+      "implementation": "pending",
+      "positive_cases": [
+        "logql-loki-3.5.2/primitive/template-version/positive"
+      ],
+      "negative_cases": [
+        "logql-loki-3.5.2/primitive/template-version/negative"
+      ],
+      "interaction_cases": [
+        "logql-loki-3.5.2/primitive/template-version/interaction"
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/regexp-engine-identity",
+      "kind": "primitive-version-difference",
+      "profile": "logql-loki-3.5.2",
+      "gate": "",
+      "signature": "grafana/regexp pinned module versus host regexp",
+      "semantic_rule": "Loki parser/filter/template regex paths use archived grafana/regexp at a468a5bfb3bc, not an assumed equivalent current standard regexp. Match acceptance, captures, empty-match progression, replacement expansion and Unicode classes must follow the pinned engine; whole-label anchoring remains distinct from line searching.",
+      "source_refs": [
+        "Makefile:21@aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8",
+        "go.mod:3@48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6",
+        "vendor/github.com/grafana/regexp/regexp.go:1@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt:1@4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+      ],
+      "implementation": "pending",
+      "positive_cases": [
+        "logql-loki-3.5.2/primitive/regexp-engine-identity/positive"
+      ],
+      "negative_cases": [
+        "logql-loki-3.5.2/primitive/regexp-engine-identity/negative"
+      ],
+      "interaction_cases": [
+        "logql-loki-3.5.2/primitive/regexp-engine-identity/interaction"
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/numeric-string-stdlib-version",
+      "kind": "primitive-version-difference",
+      "profile": "logql-loki-3.5.2",
+      "gate": "",
+      "signature": "strconv/strings primitive semantics",
+      "semantic_rule": "Float parsing and string/rune conversion use the compiled reference standard library; compiler upgrade cannot silently alter accepted numeric strings, rounding, invalid UTF8 replacement or formatting. Profile comparison retains bit-level nonfinite and signed-zero distinctions.",
+      "source_refs": [
+        "Makefile:21@aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8",
+        "go.mod:3@48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6",
+        "vendor/github.com/grafana/regexp/regexp.go:1@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt:1@4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+      ],
+      "implementation": "pending",
+      "positive_cases": [
+        "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/positive"
+      ],
+      "negative_cases": [
+        "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/negative"
+      ],
+      "interaction_cases": [
+        "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/interaction"
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/time-stdlib-version",
+      "kind": "primitive-version-difference",
+      "profile": "logql-loki-3.5.2",
+      "gate": "",
+      "signature": "time parsing/formatting/timezone data",
+      "semantic_rule": "Reference time.Time methods and Go layouts come from the compiled standard library; named timezone results additionally depend on available timezone data. Freeze process TZ and timezone dataset independently of Go compiler. Unsupported date input may read wall clock, toDate failure returns zero time and unknown explicit timezone falls back UTC.",
+      "source_refs": [
+        "Makefile:21@aca689f7a84c838cc12896a0ae77b77a0fed1d9fa1b80094841cbccd7f9f6db8",
+        "go.mod:3@48193174fc88c9dc023c94f92e0af7f2feb2dc31105f6a53d43bfc224c1081b6",
+        "vendor/github.com/grafana/regexp/regexp.go:1@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt:1@4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+      ],
+      "implementation": "pending",
+      "positive_cases": [
+        "logql-loki-3.5.2/primitive/time-stdlib-version/positive"
+      ],
+      "negative_cases": [
+        "logql-loki-3.5.2/primitive/time-stdlib-version/negative"
+      ],
+      "interaction_cases": [
+        "logql-loki-3.5.2/primitive/time-stdlib-version/interaction"
+      ]
+    }
+  ],
+  "scope": "Names/version/location/hash facts and independently authored behavioral distinctions; no upstream implementation prose/code copied.",
+  "actual_binary_sha256": "4924f98d63eaff80ad2a50d261bb1561baa5d41a1a02d62a7a78556a5805b20d",
+  "actual_buildinfo": {
+    "path": ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt",
+    "line": 1,
+    "sha256": "4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b"
+  },
+  "actual_standard_library_sources": [
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/tables.go",
+      "sha256": "c7173480b49b36103bf6bd02d7970e2c5642d747dbb40edc1e94f7eb61fb75bc",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/text/template/exec.go",
+      "sha256": "a7e7c329558c27e580763d7a5ac353857d8b7b2a461d1ab08b35701c499fe389",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/text/template/funcs.go",
+      "sha256": "91f70034a23b2f223e8ff406f0aee20e53fe08c9661a502acaffea92c1227af6",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/text/template/parse/parse.go",
+      "sha256": "a6b2d9235f0bad3c305889dd68dcbae5859dbf948f6c5a6a8f71d5f9c885a036",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/atof.go",
+      "sha256": "21a3d4f59a1e7621602943c29aeae652c992e03277d6be3894126aa7e6742d70",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strings/strings.go",
+      "sha256": "e123e90a3d1321be9cdb502a0a813878af0b853903b4a5b3ff31fbd9c0df7de9",
+      "identity": "actual oracle Go1.24.5 release source; raw UTF8 source bytes"
+    }
+  ],
+  "actual_unicode_version": "15.0.0",
+  "build_recipe_difference": "Actual locked ELF Go1.24.5 differs from source Makefile1.24.4/toolchain directive1.24.1; recipe identities are not actual build identity."
+}

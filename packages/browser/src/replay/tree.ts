@@ -1,0 +1,212 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+import type {DomAccessors, ReplayNode} from "./types.ts";
+import {MASK, MAX_DEPTH, MAX_NODES, MAX_RECORD_NODES, isOpaqueWidget, isSkipped, tagFor} from "./policy.ts";
+
+type Proto = {readonly prototype: object};
+export interface DomGlobals {
+ readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto; readonly NodeList?: Proto;
+}
+type Read = (self: object) => unknown;
+const NO_ARGS: readonly unknown[] = Object.freeze([]);
+const NO_NODES: readonly object[] = Object.freeze([]);
+function getter(proto: object | undefined, name: string): Read | undefined {
+ const fn = proto === undefined ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
+ return fn === undefined ? undefined : (self: object) => Reflect.apply(fn, self, NO_ARGS);
+}
+function required(proto: object | undefined, name: string): Read {
+ const read = getter(proto, name);
+ if (read === undefined) throw Error("replay_dom_accessor_missing");
+ return read;
+}
+/**
+ * Closed shadow roots are invisible to page script (`shadowRoot` is null), so they can only be recognised when they are
+ * created: while a recorder is active, `Element.prototype.attachShadow` is wrapped so a call that returned a root for a host
+ * whose own platform `shadowRoot` getter answers null marks that host closed. The init dictionary is never read (the platform reads
+ * it once itself; a second read could run page getters or Proxy traps). The wrapper forwards the receiver, arguments, result and any
+ * exception unchanged. A closed root created BEFORE the wrapper was installed (page script that ran before replay started) cannot be
+ * detected: its host is walked as an ordinary element (see packages/browser/README.md).
+ */
+function watchClosedShadows(elementProto: object, shadow: Read): {readonly closedShadow: (element: object) => boolean; readonly release: () => void} {
+ const closed = new WeakSet<object>();
+ const none = {closedShadow: () => false, release: () => {}};
+ const descriptor = Object.getOwnPropertyDescriptor(elementProto, "attachShadow");
+ const original = descriptor?.value;
+ if (descriptor === undefined || typeof original !== "function" || descriptor.writable !== true) return none;
+ let live = true;
+ const wrapper = function attachShadow(this: unknown, ...args: unknown[]): unknown {
+  const root = Reflect.apply(original, this, args);
+  if (live && typeof this === "object" && this !== null && typeof root === "object" && root !== null) {
+   try { if (shadow(this) === null) closed.add(this); } catch { /* host is not a platform element: nothing to record */ }
+  }
+  return root;
+ };
+ Object.defineProperty(elementProto, "attachShadow", {...descriptor, value: wrapper});
+ return {
+  closedShadow: element => closed.has(element),
+  release: () => {
+   live = false;
+   // Restore only when nobody wrapped the wrapper; otherwise it stays installed but inert.
+   if (Object.getOwnPropertyDescriptor(elementProto, "attachShadow")?.value === wrapper) Object.defineProperty(elementProto, "attachShadow", descriptor);
+  },
+ };
+}
+const asObject = (value: unknown): object | null => (typeof value === "object" && value !== null ? value : null);
+const asNumber = (value: unknown): number => (typeof value === "number" ? value : 0);
+
+/**
+ * Captures platform getters once so own-property or per-instance getter traps planted by page script
+ * never execute during traversal. Every result is type-checked at the edge.
+ */
+export function captureDomAccessors(g: DomGlobals): DomAccessors {
+ const nodeP = g.Node.prototype, elementP = g.Element.prototype, htmlP = g.HTMLElement?.prototype ?? elementP;
+ const nodeType = required(nodeP, "nodeType"), first = required(nodeP, "firstChild"), next = required(nodeP, "nextSibling"), parent = required(nodeP, "parentNode");
+ const localName = required(elementP, "localName"), shadow = required(elementP, "shadowRoot"), editable = getter(htmlP, "isContentEditable");
+ const closedShadows = watchClosedShadows(elementP, shadow);
+ const target = required(g.MutationRecord?.prototype, "target"), eventTarget = required(g.Event?.prototype, "target");
+ const recordType = getter(g.MutationRecord?.prototype, "type"), recordAdded = getter(g.MutationRecord?.prototype, "addedNodes"), recordRemoved = getter(g.MutationRecord?.prototype, "removedNodes"), listLength = getter(g.NodeList?.prototype, "length");
+ const last = required(nodeP, "lastChild"), previous = required(nodeP, "previousSibling");
+ /** The members of a record's node list (indexed reads of a platform list run no page code), or null for a list the recorder will not attribute: unreadable or longer than MAX_RECORD_NODES. */
+ const members = (list: unknown): readonly object[] | null => {
+  if (typeof list !== "object" || list === null || listLength === undefined) return null;
+  const length = listLength(list);
+  if (typeof length !== "number" || !(length >= 0) || length > MAX_RECORD_NODES) return null;
+  if (length === 0) return NO_NODES;
+  const out: object[] = [];
+  for (let i = 0; i < length; i++) { const member = asObject((list as ArrayLike<unknown>)[i]); if (member === null) return null; out.push(member); }
+  return out;
+ };
+ const clientX = required(g.MouseEvent?.prototype, "clientX"), clientY = required(g.MouseEvent?.prototype, "clientY");
+ return {
+  nodeType: node => asNumber(nodeType(node)),
+  firstChild: node => asObject(first(node)),
+  nextSibling: node => asObject(next(node)),
+  lastChild: node => asObject(last(node)),
+  previousSibling: node => asObject(previous(node)),
+  parentNode: node => asObject(parent(node)),
+  localName: element => { const name = localName(element); return typeof name === "string" ? name.toLowerCase() : ""; },
+  openShadowRoot: element => asObject(shadow(element)),
+  closedShadow: element => closedShadows.closedShadow(element),
+  release: closedShadows.release,
+  // The HTMLElement getter throws "Illegal invocation" on SVG/MathML elements, which cannot be contenteditable.
+  editable: element => { try { return editable?.(element) === true; } catch { return false; } },
+  mutationTarget: record => asObject(target(record)),
+  childListChange: record => {
+   if (recordType === undefined || recordAdded === undefined || recordRemoved === undefined || recordType(record) !== "childList") return null;
+   const added = members(recordAdded(record)), removed = members(recordRemoved(record));
+   return added === null || removed === null ? null : {added, removed};
+  },
+  eventTarget: event => asObject(eventTarget(event)),
+  clientX: event => asNumber(clientX(event)),
+  clientY: event => asNumber(clientY(event)),
+ };
+}
+
+export interface WalkState {
+ readonly nodes: ReplayNode[];
+ readonly ids: WeakMap<object, number>;
+ readonly allocate: () => number;
+ readonly onOpenShadow?: (root: object) => void;
+ overflow: boolean;
+ /** Most nodes this walk may emit: MAX_NODES minus the nodes already allocated since the last checkpoint (the running total of the live tree). */
+ readonly limit: number;
+ /** Number of siblings skipped because of the node cap or depth limit. */
+ truncated: number;
+ steps: number;
+}
+export function newWalkState(ids: WeakMap<object, number>, allocate: () => number, onOpenShadow?: (root: object) => void, limit: number = MAX_NODES): WalkState {
+ return {nodes: [], ids, allocate, ...(onOpenShadow === undefined ? {} : {onOpenShadow}), overflow: false, limit, truncated: 0, steps: 0};
+}
+
+/** JSON text of one node with every value empty, plus its separator: a recorded node is exactly this plus the lengths of its five values (ids are decimals, tags and masks come from the closed vocabulary, none needs escaping). */
+export const NODE_FRAME_BYTES = JSON.stringify({id: "", parent: "", tag: "", class: "", text: ""}).length + 1;
+/** Bytes one recorder-built node takes in a chunk (its JSON plus separator), without serializing it. */
+export function nodeBytes(node: ReplayNode): number { return NODE_FRAME_BYTES + node.id.length + node.parent.length + node.tag.length + node.class.length + node.text.length; }
+
+/** A node the replay already holds keeps its id when it is walked again (a re-walked subtree is the same nodes, so churn does not use the id space up); a new node gets a fresh id. */
+function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id: number | undefined): void {
+ const known = id === undefined ? state.ids.get(source) : undefined;
+ const assigned = id ?? known ?? state.allocate();
+ if (assigned !== known) state.ids.set(source, assigned);
+ state.nodes.push({id: String(assigned), parent: node.parent, tag: node.tag, class: node.class, text: node.text});
+}
+
+/**
+ * Directly builds owned nodes from the live DOM. Text and input values are never read: a text node
+ * or input is a constant mask. Subtrees that cannot be masked structurally become one opaque node.
+ */
+export function walk(dom: DomAccessors, source: object, parentId: string, state: WalkState, depth = 0, forcedId?: number): void {
+ if (state.overflow || ++state.steps > MAX_NODES * 4) { state.overflow = true; return; }
+ const type = dom.nodeType(source);
+ if (type === 9 || type === 11) { walkChildren(dom, source, parentId, state, depth); return; }
+ if (type !== 1 && type !== 3) return;
+ if (state.nodes.length >= state.limit - 1) {
+  // Last slot: one opaque placeholder stands for everything not retained; nothing further is walked.
+  state.overflow = true;
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: ""}, forcedId);
+  return;
+ }
+ if (type === 3) { emit(state, source, {parent: parentId, tag: "masked", class: "", text: MASK}, forcedId); return; }
+ const name = dom.localName(source);
+ if (isSkipped(name)) return;
+ if (depth >= MAX_DEPTH || isOpaqueWidget(name) || dom.editable(source) || dom.closedShadow?.(source) === true) {
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: ""}, forcedId);
+  return;
+ }
+ emit(state, source, {parent: parentId, tag: tagFor(name), class: "", text: name === "input" ? MASK : ""}, forcedId);
+ const id = String(state.ids.get(source));
+ if (name === "input") return;
+ const root = dom.openShadowRoot(source);
+ if (root !== null) { state.onOpenShadow?.(root); walkChildren(dom, root, id, state, depth + 1); }
+ walkChildren(dom, source, id, state, depth + 1);
+}
+function walkChildren(dom: DomAccessors, container: object, parentId: string, state: WalkState, depth: number): void {
+ for (let child = dom.firstChild(container); child !== null; child = dom.nextSibling(child)) {
+  if (state.overflow) { state.truncated++; return; }
+  walk(dom, child, parentId, state, depth);
+ }
+}
+
+export interface FitResult {
+ readonly nodes: readonly ReplayNode[];
+ /** True when whole subtrees were replaced by opaque placeholders to fit. */
+ readonly truncated: boolean;
+ /** Local ids of every placeholder and every node it replaced; deltas under them are suppressed until the next complete checkpoint. */
+ readonly suppressed: readonly number[];
+}
+/**
+ * Makes one emission fit one chunk without ever truncating a chunk silently or inventing a fragmented-checkpoint
+ * format: whole sanitized subtrees are replaced by bounded opaque placeholders (same id and parent,
+ * tag and class "masked", empty text) until `maxNodes` and `maxBytes` hold. Priority is explicit: later in document
+ * order and deeper means lower priority, so the tail of the page is collapsed first, smallest subtrees first, and
+ * the head of the page is kept as long as possible. The input is in walk (pre-order) order; the output keeps it.
+ * A flat run of thousands of siblings cannot shrink except by collapsing their parent, which is what happens.
+ */
+export function fitSubtrees(nodes: readonly ReplayNode[], maxNodes: number, maxBytes: number): FitResult {
+ const count = nodes.length;
+ const size = nodes.map(nodeBytes);
+ let totalNodes = count, totalBytes = size.reduce((sum, value) => sum + value, 0);
+ if (totalNodes <= maxNodes && totalBytes <= maxBytes) return {nodes, truncated: false, suppressed: []};
+ const index = new Map<string, number>();
+ nodes.forEach((node, at) => index.set(node.id, at));
+ const parent = nodes.map(node => index.get(node.parent) ?? -1);
+ const liveCount = new Array<number>(count).fill(1), liveBytes = size.slice();
+ for (let at = count - 1; at >= 0; at--) { const up = parent[at]!; if (up >= 0) { liveCount[up]! += liveCount[at]!; liveBytes[up]! += liveBytes[at]!; } }
+ const span = liveCount.slice(); // pre-order subtree length, fixed
+ const alive = new Array<boolean>(count).fill(true);
+ const replaced = new Map<number, ReplayNode>();
+ const suppressed: number[] = [];
+ for (let at = count - 1; at >= 0 && (totalNodes > maxNodes || totalBytes > maxBytes); at--) {
+  if (!alive[at] || liveCount[at]! <= 1) continue;
+  const original = nodes[at]!;
+  const placeholder: ReplayNode = {...original, tag: "masked", class: "masked", text: ""};
+  const placeholderBytes = nodeBytes(placeholder);
+  const freedNodes = liveCount[at]! - 1, freedBytes = liveBytes[at]! - placeholderBytes;
+  for (let inner = at + 1; inner < at + span[at]!; inner++) if (alive[inner]) { alive[inner] = false; suppressed.push(Number(nodes[inner]!.id)); }
+  replaced.set(at, placeholder); suppressed.push(Number(original.id));
+  for (let up = parent[at]!; up >= 0; up = parent[up]!) { liveCount[up]! -= freedNodes; liveBytes[up]! -= freedBytes; }
+  liveCount[at] = 1; liveBytes[at] = placeholderBytes;
+  totalNodes -= freedNodes; totalBytes -= freedBytes;
+ }
+ return {nodes: nodes.flatMap((node, at) => (alive[at] ? [replaced.get(at) ?? node] : [])), truncated: true, suppressed};
+}

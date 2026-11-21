@@ -1,0 +1,1 @@
+{"Host": "cap:9000", "User-Agent": "Prometheus/3.13.5", "Content-Length": "596", "Content-Encoding": "snappy", "Content-Type": "application/x-protobuf;proto=io.prometheus.write.v2.Request", "X-Prometheus-Remote-Write-Version": "2.0.0"}

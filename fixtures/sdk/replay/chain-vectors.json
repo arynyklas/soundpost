@@ -1,0 +1,990 @@
+{
+ "version": 1,
+ "source": "internal/replays ChunkHash + ValidateChunk + model.StrictJSON; regenerate with SOUNDPOST_UPDATE_VECTORS=1 go test ./fixtures/sdk/replay -run TestChainVectors",
+ "max_chunk_bytes": 131072,
+ "chunks": {
+  "c1": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f",
+    "canonical_bytes": 866
+   }
+  },
+  "c1_big_counters": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"18446744073709551615\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "09d37b6f2df922fa9ae24327e960e56cc5cd0ac97ad0102f28ccc6130e587e07",
+    "canonical_bytes": 891
+   }
+  },
+  "c1_bom_prefix": {
+   "wire": "﻿{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_checkpoint_hash_differs_from_previous": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_class_secret": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"btn-primary\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_clock_unknown_field": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"zone\":\"x\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_domain_host_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"00000000000000000000000000000000\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_duplicate_key": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"gap\":true,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_at_number": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":1,\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_kind_unknown": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"click\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_node_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"2147483648\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "a4ffec8194b967a50f40902ac55631c6a513ae662247ac06fd689b1bfddf7533",
+    "canonical_bytes": 875
+   }
+  },
+  "c1_event_node_over_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"2147483649\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_x_exponent": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":1e2,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_x_fraction": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":1.5,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_x_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":16777216,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "7bcd6ee4a3c60dcd34ec1d614cbe889a9c83b12b12f9ef283b7daa34c4448d82",
+    "canonical_bytes": 873
+   }
+  },
+  "c1_event_x_min": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":-16777216,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "27515633418033b470848bbbf6a612d0a7a6581cd74d1e3a0d9ab6457790a6e7",
+    "canonical_bytes": 874
+   }
+  },
+  "c1_event_x_out_of_range": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":16777217,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_x_string": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":\"0\",\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_x_under_min": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":-16777217,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_event_y_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":16777216}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "77f2dc209068674069b8a0519e8b44b69c65879ee5c8441142c6603885c8db61",
+    "canonical_bytes": 873
+   }
+  },
+  "c1_event_y_over_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":16777217}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_events_null": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":null,\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "24063d743b2d3aa0db4316ea3233db7fcf30ac0f7db8a676255454a8d9a845b7",
+    "canonical_bytes": 812
+   }
+  },
+  "c1_gap_string": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":\"false\",\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_loss_overflow": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"18446744073709551616\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_negative_zero_coordinate": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":-0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f",
+    "canonical_bytes": 866
+   }
+  },
+  "c1_node_duplicate_id": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"1\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_id_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"2147483648\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "87ef5384a3c72f964d4870ed07c5da3384105a31014f3253ba7b33f05930c02a",
+    "canonical_bytes": 875
+   }
+  },
+  "c1_node_id_over_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"2147483649\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_id_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"0\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_parent_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"2147483648\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "2c65b820e933eb6e3873b1bfba0dfe68753c4033f9f7882f92ddf5e3ba92bcf5",
+    "canonical_bytes": 875
+   }
+  },
+  "c1_node_parent_over_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"2147483649\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_parent_self": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"1\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_pres": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"pres\":\"block\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_rect": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"rect\":{\"h\":8,\"w\":8,\"x\":0,\"y\":0},\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_node_unknown_field": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"alt\":\"x\",\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_oversized": {
+   "synth": {
+    "base": "c1",
+    "nodes": 3000,
+    "shape": "masked"
+   },
+   "go": {
+    "verdict": "too_large",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_policy_revision_zero": {
+   "wire": "{\"capture_policy_revision\":\"0\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_pretty_reordered": {
+   "wire": "{\n  \"session_id\": \"22222222222222222222222222222222\",\n  \"sequence\": \"1\",\n  \"replay_id\": \"11111111111111111111111111111111\",\n  \"recorder_version\": \"1\",\n  \"previous_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n  \"nodes\": [{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\n  \"loss\": \"0\",\n  \"gap\": false,\n  \"events\": [{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\n  \"clock\": {\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\n  \"checkpoint_sequence\": \"1\",\n  \"checkpoint_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n  \"capture_policy_revision\": \"7\"\n}\n",
+   "go": {
+    "verdict": "valid",
+    "hash": "c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f",
+    "canonical_bytes": 866
+   }
+  },
+  "c1_previous_uppercase_hash": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"000000000000000000000000000000000000000000000000000000000000000A\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_seq1_nonzero_previous": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_sequence_leading_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"01\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_sequence_number": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":1,\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_sequence_too_big": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"65537\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_sequence_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"0\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_tag_html": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"html\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_tag_img": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"img\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_text_secret": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"hunter2\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_too_many_nodes": {
+   "synth": {
+    "base": "c1",
+    "nodes": 4097,
+    "shape": "plain"
+   },
+   "go": {
+    "verdict": "too_large",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_trailing_garbage": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"} {}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_truncated": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_unknown_field_html": {
+   "wire": "{\"html\":\"\u003cb\u003ex\u003c/b\u003e\",\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_version_2": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"2\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "unsupported",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_version_empty": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "unsupported",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_version_soundpost1": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"soundpost1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "unsupported",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_wall_negative": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"-1\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_wall_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"0\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c1_zero_replay_id": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"1\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"p\",\"text\":\"\"},{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"}],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"00000000000000000000000000000000\",\"sequence\":\"1\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "c2_contradicts_predecessor": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"checkpoint_sequence\":\"2\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"120\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"}],\"previous_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "d2b090ef96fc4724e046cee23c5893a4c4f9d4b317ecc007ab3cfd81f830f458",
+    "canonical_bytes": 747
+   }
+  },
+  "c5": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"554b25e2652e9cca1b44837d87be048d6021b0dc27c2a4b5a5b58a4ef7e919ae\",\"checkpoint_sequence\":\"5\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"400\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"section\",\"text\":\"\"},{\"class\":\"masked\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"canvas\",\"text\":\"\"}],\"previous_hash\":\"554b25e2652e9cca1b44837d87be048d6021b0dc27c2a4b5a5b58a4ef7e919ae\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"5\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df",
+    "canonical_bytes": 817
+   }
+  },
+  "c8": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"b37017883ceac9038857a0d52fbeead4a79597391339cddf609b1eb89da530ef\",\"checkpoint_sequence\":\"8\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"700\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"},{\"class\":\"\",\"id\":\"2\",\"parent\":\"1\",\"tag\":\"input\",\"text\":\"[masked]\"}],\"previous_hash\":\"b37017883ceac9038857a0d52fbeead4a79597391339cddf609b1eb89da530ef\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"8\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "4fa506ad6a95fe182f152aa8636b89287fb4c74394a032d83bd8594ba0bd3061",
+    "canonical_bytes": 814
+   }
+  },
+  "d2": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "da9fd5b6b02817699292e2e16df39d73c53adb50a7c40050472b5d7867f48953",
+    "canonical_bytes": 690
+   }
+  },
+  "d2_checkpoint_after_sequence": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"3\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "d2_checkpoint_sequence_zero": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"0\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "d2_conflicting": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":96,\"y\":96}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "04e6c0306124010bbc25a40d24c8803262d7b502e0d16159e007dbb90da9195f",
+    "canonical_bytes": 690
+   }
+  },
+  "d2_foreign_session": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"66666666666666666666666666666666\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "98fe0812d15f40dd63e0a6d3c3e82d2215841993e43390797a0ae5185a5eea1c",
+    "canonical_bytes": 690
+   }
+  },
+  "d2_sequence_max": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"65536\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "8b345e293aa14ccb5b313bade4706711bcd820097a786d1da5ce638451090b10",
+    "canonical_bytes": 694
+   }
+  },
+  "d2_zero_checkpoint_hash": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "d2_zero_previous": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5100000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"100\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":64,\"y\":-8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"2\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "invalid",
+    "hash": null,
+    "canonical_bytes": null
+   }
+  },
+  "d3": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"200\",\"kind\":\"mutation\",\"node\":\"2\",\"x\":0,\"y\":0},{\"at_ns\":\"210\",\"kind\":\"scroll\",\"node\":\"0\",\"x\":0,\"y\":480}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"},{\"class\":\"\",\"id\":\"4\",\"parent\":\"2\",\"tag\":\"button\",\"text\":\"[masked]\"}],\"previous_hash\":\"da9fd5b6b02817699292e2e16df39d73c53adb50a7c40050472b5d7867f48953\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"3\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "08d0269e6410e77156ccdd9a4fe46acbc8a0782df00c0fcd7c977f54da05b69f",
+    "canonical_bytes": 879
+   }
+  },
+  "d3_altered_previous": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"200\",\"kind\":\"mutation\",\"node\":\"2\",\"x\":0,\"y\":0},{\"at_ns\":\"210\",\"kind\":\"scroll\",\"node\":\"0\",\"x\":0,\"y\":480}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"},{\"class\":\"\",\"id\":\"4\",\"parent\":\"2\",\"tag\":\"button\",\"text\":\"[masked]\"}],\"previous_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"3\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "084c6d06d9923457f7ac4a719a870297f24618300205991dabaf920be4e4f00f",
+    "canonical_bytes": 879
+   }
+  },
+  "d3_wrong_checkpoint": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"da9fd5b6b02817699292e2e16df39d73c53adb50a7c40050472b5d7867f48953\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"200\",\"kind\":\"mutation\",\"node\":\"2\",\"x\":0,\"y\":0},{\"at_ns\":\"210\",\"kind\":\"scroll\",\"node\":\"0\",\"x\":0,\"y\":480}],\"gap\":false,\"loss\":\"0\",\"nodes\":[{\"class\":\"\",\"id\":\"3\",\"parent\":\"2\",\"tag\":\"span\",\"text\":\"[masked]\"},{\"class\":\"\",\"id\":\"4\",\"parent\":\"2\",\"tag\":\"button\",\"text\":\"[masked]\"}],\"previous_hash\":\"da9fd5b6b02817699292e2e16df39d73c53adb50a7c40050472b5d7867f48953\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"3\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "6ef4750dd46c443c40513a1b291bbb29aeac6b90588ac1526996dc9607f20241",
+    "canonical_bytes": 879
+   }
+  },
+  "d4": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"300\",\"kind\":\"resize\",\"node\":\"0\",\"x\":1280,\"y\":720}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"08d0269e6410e77156ccdd9a4fe46acbc8a0782df00c0fcd7c977f54da05b69f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"4\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "554b25e2652e9cca1b44837d87be048d6021b0dc27c2a4b5a5b58a4ef7e919ae",
+    "canonical_bytes": 692
+   }
+  },
+  "d4_null_nodes": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"c3819828a7ed0be0d9449c91da21968ec2694827de701f732d5e16f7d444b31f\",\"checkpoint_sequence\":\"1\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"300\",\"kind\":\"resize\",\"node\":\"0\",\"x\":1280,\"y\":720}],\"gap\":false,\"loss\":\"0\",\"nodes\":null,\"previous_hash\":\"08d0269e6410e77156ccdd9a4fe46acbc8a0782df00c0fcd7c977f54da05b69f\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"4\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "0a2032fa283388f355216cf238bfafb5298c3d5192dda5069ae8ee375c79165b",
+    "canonical_bytes": 694
+   }
+  },
+  "d6": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"checkpoint_sequence\":\"5\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"500\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":8,\"y\":8}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"6\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "12d7bec71959a19150c848a5237a066c4c0dcf5001e3297f39e6bada6ef41607",
+    "canonical_bytes": 688
+   }
+  },
+  "d7": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"checkpoint_sequence\":\"5\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"600\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":16,\"y\":16}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"12d7bec71959a19150c848a5237a066c4c0dcf5001e3297f39e6bada6ef41607\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"7\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "b37017883ceac9038857a0d52fbeead4a79597391339cddf609b1eb89da530ef",
+    "canonical_bytes": 690
+   }
+  },
+  "d9": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"4fa506ad6a95fe182f152aa8636b89287fb4c74394a032d83bd8594ba0bd3061\",\"checkpoint_sequence\":\"8\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"800\",\"kind\":\"pointer\",\"node\":\"2\",\"x\":24,\"y\":24}],\"gap\":false,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"4fa506ad6a95fe182f152aa8636b89287fb4c74394a032d83bd8594ba0bd3061\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"9\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "8603c993036da72ba72abb2f1a1456017feb541377a92b7b48a84d72e1f46147",
+    "canonical_bytes": 690
+   }
+  },
+  "g6": {
+   "wire": "{\"capture_policy_revision\":\"7\",\"checkpoint_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"checkpoint_sequence\":\"6\",\"clock\":{\"domain\":{\"boot\":\"44444444444444444444444444444444\",\"host\":\"33333333333333333333333333333333\",\"runtime\":\"55555555555555555555555555555555\"},\"mono_ns\":\"5000000000\",\"uncertainty_ns\":\"1000\",\"wall_ns\":\"1700000000000000000\"},\"events\":[{\"at_ns\":\"450\",\"kind\":\"checkpoint\",\"node\":\"0\",\"x\":0,\"y\":0},{\"at_ns\":\"450\",\"kind\":\"gap\",\"node\":\"0\",\"x\":0,\"y\":0}],\"gap\":true,\"loss\":\"3\",\"nodes\":[{\"class\":\"\",\"id\":\"1\",\"parent\":\"0\",\"tag\":\"div\",\"text\":\"\"}],\"previous_hash\":\"7534401bf8f62d64deab23b851b908e3b5a5d5eb4dc27fb0dd92ae3ca77d51df\",\"recorder_version\":\"1\",\"replay_id\":\"11111111111111111111111111111111\",\"sequence\":\"6\",\"session_id\":\"22222222222222222222222222222222\"}",
+   "go": {
+    "verdict": "valid",
+    "hash": "f736d793c33e12cd445b96d561babfc862f2cd7329b7dcd9ccdf7080ad836114",
+    "canonical_bytes": 798
+   }
+  }
+ },
+ "scenarios": [
+  {
+   "name": "intact chain",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d3",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d4",
+     "expect": "apply"
+    },
+    {
+     "chunk": "c5",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d6",
+     "expect": "apply"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6"
+   ],
+   "final_continuous": true
+  },
+  {
+   "name": "delta before any checkpoint",
+   "steps": [
+    {
+     "chunk": "d2",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    },
+    {
+     "chunk": "d3",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [],
+   "final_continuous": false
+  },
+  {
+   "name": "missing chunk then valid checkpoint resumes with a visible gap",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d4",
+     "expect": "gap",
+     "reason": "missing_chunk"
+    },
+    {
+     "chunk": "c5",
+     "expect": "checkpoint",
+     "reason": "missing_chunk"
+    },
+    {
+     "chunk": "d6",
+     "expect": "apply"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "5",
+    "6"
+   ],
+   "final_continuous": true
+  },
+  {
+   "name": "checkpoint after a long hole",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "c8",
+     "expect": "checkpoint",
+     "reason": "missing_chunk"
+    },
+    {
+     "chunk": "d9",
+     "expect": "apply"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "8",
+    "9"
+   ],
+   "final_continuous": true
+  },
+  {
+   "name": "deltas after a gap never apply before the next checkpoint",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d3",
+     "expect": "gap",
+     "reason": "missing_chunk"
+    },
+    {
+     "chunk": "d4",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [
+    "1"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "duplicate delivery never double-applies",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d2",
+     "expect": "reject",
+     "reason": "duplicate"
+    },
+    {
+     "chunk": "d3",
+     "expect": "apply"
+    },
+    {
+     "chunk": "c1",
+     "expect": "reject",
+     "reason": "stale"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "3"
+   ],
+   "final_continuous": true
+  },
+  {
+   "name": "altered previous hash rejects and breaks the chain",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d3_altered_previous",
+     "expect": "reject",
+     "reason": "hash_mismatch"
+    },
+    {
+     "chunk": "d3",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "wrong checkpoint dependency rejects",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d3_wrong_checkpoint",
+     "expect": "reject",
+     "reason": "dependency_mismatch"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "conflicting chunk at an applied sequence breaks the chain",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d2_conflicting",
+     "expect": "reject",
+     "reason": "conflict"
+    },
+    {
+     "chunk": "d3",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "a checkpoint contradicting its present predecessor is not a recovery point",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "c2_contradicts_predecessor",
+     "expect": "reject",
+     "reason": "hash_mismatch"
+    },
+    {
+     "chunk": "d2",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [
+    "1"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "foreign session chunk is rejected and breaks the chain",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2_foreign_session",
+     "expect": "reject",
+     "reason": "identity_mismatch"
+    },
+    {
+     "chunk": "d2",
+     "expect": "gap",
+     "reason": "no_checkpoint"
+    }
+   ],
+   "final_applied": [
+    "1"
+   ],
+   "final_continuous": false
+  },
+  {
+   "name": "recorder-declared gap checkpoint resumes with a visible gap",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "c5",
+     "expect": "checkpoint",
+     "reason": "missing_chunk"
+    },
+    {
+     "chunk": "g6",
+     "expect": "checkpoint",
+     "reason": "recorder_gap"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "5",
+    "6"
+   ],
+   "final_continuous": true
+  },
+  {
+   "name": "null nodes hash exactly as Go hashes them",
+   "steps": [
+    {
+     "chunk": "c1",
+     "expect": "checkpoint"
+    },
+    {
+     "chunk": "d2",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d3",
+     "expect": "apply"
+    },
+    {
+     "chunk": "d4_null_nodes",
+     "expect": "apply"
+    }
+   ],
+   "final_applied": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "final_continuous": true
+  }
+ ]
+}

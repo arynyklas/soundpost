@@ -1,0 +1,89 @@
+// Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
+import * as React from 'react';
+import type { LoadState } from '../api/types';
+import { EVIDENCE_REASON } from '../evidence/model';
+
+const REASONS: Record<string, string> = {
+ service_not_built: 'The service behind this view is not available in this installation yet.',
+ separate_grant_required: 'This data needs a separate grant (replay or profile access) that your account does not hold on this project.',
+ view_not_built: 'This part of the view is not available yet.',
+ service_not_selected: 'Open one service to see this part. A service list does not state health, dependencies or releases for every service at once.',
+ resource_filter_unavailable: 'Telemetry cannot be narrowed to one service or environment by this installation, so no project-wide answer is shown in its place.',
+ health_source_not_wired: 'This installation has no incident or condition reader wired, so the health of a service is not stated. It is never reported as healthy without evidence.',
+ health_not_authorized: 'Your account cannot read incidents and conditions for this project, so the health of this service is not stated.',
+ health_evidence_unreadable: 'A stored incident or condition could not be read, so the health of this service is not stated.',
+ sections_not_available: 'Some parts of this view are not available yet; the parts shown are real.',
+ shards_missing: 'Some data did not answer. Missing data is not zero.',
+ freshness_stale: 'The newest data is older than expected.',
+ no_visible_sources: 'No readable source was found for this selection.',
+ restricted_source_discovery_unavailable: 'Discovery does not run for a restricted source.',
+ project_failed: 'This project produced no value. It is not an empty or zero result; the failure is listed below.',
+ span_source_not_wired: 'This installation has no span reader wired, so no trace can be shown. That is not an empty trace.',
+ no_spans_in_window: 'No span of this trace is readable by this account in the selected window. Widen the window; this is not proof that the trace does not exist.',
+ replay_service_not_wired: 'This installation has no replay reader wired, so no replay can be shown. That is not an empty replay.',
+ replay_truncated: 'This response is bounded; the rest of the replay was not sent.',
+ profile_service_not_wired: 'This installation has no profile reader wired, so no profile can be shown. That is not a profile with zero samples.',
+ profile_partial: 'This profile is partial; the parts shown are real and missing parts are not zero.',
+ coverage_incomplete: 'Coverage or loss is reported for this profile, so it does not describe all execution in the window.',
+ missing_capability_or_page: 'A page or a capability record of this profile did not arrive, so support for a method is not confirmed.',
+ missing_chunk: 'A chunk of this profile is missing between the chunks that arrived.',
+ no_observations_in_window: 'No observation of this profile lies in the selected window. That is not zero work.',
+ spans_partial: 'Some data did not answer, so spans of this trace may be missing. Missing spans are not proof that no work happened.',
+ edges_truncated: 'The list of path edges was cut at its bound, so the critical path shown covers only part of this trace. The missing edges are not proof that no work happened.',
+ link_resolver_not_wired: 'This installation has no link resolver wired, so no span reference to an error, job, replay or profile is reported. That is not proof that the spans have no references.',
+ targets_truncated: 'More span references exist than one resolution batch holds, so only part of them were resolved. The rest are not reported as unavailable or absent.',
+ incident_source_not_wired: 'This installation has no incident reader wired, so no incident can be shown. That is not an empty queue.',
+ job_evidence_incomplete: 'Evidence the health of this job needs is missing, so the verdict is not conclusive.',
+ schedule_observer_stale: "The external schedule observer's newest report is older than its stale-after limit, so the schedule health is unknown rather than last observed.",
+ no_schedule_observer: 'No external schedule observer has reported for this scheduled job, so a missed run cannot be established.',
+ evidence_loss_recorded: 'Producer or evidence loss is recorded for this job. It is reported separately from the job outcome.',
+};
+export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }
+
+interface Presentation { label: string; text: string; role: 'status' | 'alert' }
+function present(state: LoadState<unknown>): Presentation {
+ switch (state.kind) {
+  case 'loading': return { label: 'Loading', text: 'Loading this view for the selected scope.', role: 'status' };
+  case 'ready': return { label: 'Ready', text: 'Showing the answer for the selected scope.', role: 'status' };
+  case 'empty': return { label: 'Empty', text: 'Nothing was found in this window. Nothing is missing.', role: 'status' };
+  case 'unauthorized': return state.status === 401
+   ? { label: 'Signed out', text: 'Your session has ended. Sign in again.', role: 'alert' }
+   : { label: 'Not found', text: 'This selection was not found or is not available to this account.', role: 'alert' };
+  case 'unsupported': return { label: 'Not available', text: reasonText(state.reason), role: 'status' };
+  case 'stale': return { label: 'Stale', text: reasonText(state.reason), role: 'status' };
+  case 'incomplete': return { label: 'Partial', text: reasonText(state.reason), role: 'status' };
+  case 'rate_limited': return { label: 'Rate limited', text: 'Too many requests. Wait and retry; nothing was changed.', role: 'alert' };
+  case 'error': return { label: 'Error', text: 'The request failed. Nothing is shown for this view.', role: 'alert' };
+ }
+}
+
+/** One explicit panel for every load state. State is always spelled out in words
+ * (never color alone) and the request ID of a failure is kept for support. */
+export function StatusPanel(props: { state: LoadState<unknown> }): React.JSX.Element {
+ const { state } = props;
+ const p = present(state);
+ const id = state.kind === 'unauthorized' || state.kind === 'rate_limited' ? state.requestId : state.kind === 'error' ? state.fault.requestId : '';
+ const code = state.kind === 'error' ? state.fault.code : '';
+ return (
+  <div className={`status status-${state.kind}`} role={p.role} data-state={state.kind} aria-live={p.role === 'alert' ? 'assertive' : 'polite'}>
+   <strong>{p.label}</strong> <span>{p.text}</span>
+   {code && <span> Code <code>{code}</code>.</span>}
+   {id && <span> Request <code>{id}</code>.</span>}
+  </div>
+ );
+}
+
+const SECTION_LABEL: Record<string, string> = { ready: 'Ready', empty: 'Empty', incomplete: 'Partial', stale: 'Stale', not_available: 'Not available' };
+/** Each section of a view with its own state in words. A part that is not built is
+ * listed as such, never hidden and never shown as healthy or zero. */
+export function SectionList(props: { sections: { name: string; state: string; reason?: string }[] }): React.JSX.Element {
+ return (
+  <ul className="sections">
+   {props.sections.map((s) => (
+    <li key={s.name} data-section={s.name} data-state={s.state}>
+     <strong>{s.name}</strong>: {SECTION_LABEL[s.state] ?? 'Unknown'}{s.reason ? ` — ${reasonText(s.reason)}` : ''}
+    </li>
+   ))}
+  </ul>
+ );
+}

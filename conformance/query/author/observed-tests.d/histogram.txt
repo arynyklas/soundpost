@@ -1,0 +1,24 @@
+# 11.15 histogram worker
+./internal/query/promql TestReleaseHistogramAggregationAnnotationAnchorsAtArgument
+./internal/query/promql TestReleaseHistogramBinaryAnnotationsSpanWholeExpression
+./internal/query/promql TestReleaseHistogramRateResetKeepsFirstSampleCountForZeroCap
+./internal/query/promql TestReleaseHistogramSubqueryClearsExplicitResetHints
+./internal/query/promql TestReleaseHistogramVarianceZeroCrossingCustomBucketIsZero
+./internal/query/promql TestReleaseHistogramInfoNewerOriginalTimestampWins
+./internal/query/promql TestReleaseHistogramInfoJoinFacts
+./internal/query/promql TestReleaseHistogramTrimSumIsDeterministic
+./internal/query/promql TestReleaseHistogramFractionCustomBucketSpanningZero
+./internal/query/promql TestReleaseHistogramAnnotationRules
+./internal/query/promql TestReleaseHistogramAnnotationsDeduplicate
+./internal/query/promql TestReleaseHistogramResetDetectionClauses
+./internal/query/promql TestReleaseHistogramScaleFacts
+./internal/query/promql TestReleaseHistogramVarianceFacts
+./internal/query/promql TestReleaseHistogramQuantileAndFractionFacts
+./internal/query/promql TestReleaseHistogramTrimFacts
+./internal/query/promql TestReleaseHistogramStartTimestampResetPredicate
+./internal/query/promql TestReleaseHistogramRateZeroCap
+./internal/query/promql TestReleaseHistogramDelayedNameRangeMerge
+./internal/query/promql TestReleaseHistogramReservedNameRemoval
+./internal/query/promql TestReleaseHistogramTypeUnitFeatureSwitchesCounterHeuristic
+./internal/query/promql TestReleaseHistogramLayoutReconciliation
+./internal/query/promql TestReleaseHistogramMixedRangeAnnotations

@@ -1,0 +1,142 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
+# Jobs: attempt history, schedules and current health
+
+Soundpost's job model is an owned Apache-2.0 implementation by Aryn Yklas (`internal/jobs`). It keeps four things apart:
+
+| Concept | What it is | Who writes it |
+|---|---|---|
+| **Definition** | Configured schedule, time zone, grace, maximum runtime | the schedule observer (revisioned) |
+| **Run / Attempt** | Immutable evidence of what executed and how it ended | the SDK, through the evidence journal |
+| **Observer** | An external clock plus a statement of how complete the data path is | the schedule observer |
+| **Current health** | A verdict *derived* from the three above, with the evidence it used | nobody: it is computed |
+
+Job health is independent of alert conditions, error issues and incidents. Nothing here acknowledges, resolves, snoozes or notifies, and an incident acknowledgement never changes a job's health. A job can fail, miss a run, and be healthy again without any of those lifecycles moving.
+
+## Attempts are immutable
+
+An attempt is identified by `(job, run, attempt ID)`. Each SDK event carries a producer epoch and sequence; the exact `(epoch, sequence)` of one attempt is applied once. Consequences:
+
+- Re-delivering any event (journal replay, retry after a crash, restore) is a no-op. Re-sending an identical terminal result from a restarted producer (new epoch) is also accepted without effect on the result.
+- `started` and terminal events may arrive in either order and in any interleaving across attempts; the same set of events always yields the same state.
+- A terminal result is never rewritten. A second terminal event for the same attempt with a different state or terminal time is rejected with `conflict` and changes nothing. A different start time, ordinal, run or occurrence for a known attempt is also a conflict. Cause trace/error references may be filled in once and are then immutable.
+- A retry is a new attempt in the same run. Attempt 1 stays `failed` forever; if the final attempt (highest ordinal) succeeds the run's status becomes `recovered` and current health becomes `succeeded` with reason `run_recovered_after_retry`. Retries sent twice are not counted twice.
+- `cancelled` is its own result. It is never success and a later `succeeded` for the same attempt is a conflict.
+- Overlap policy is `allow`: a run that starts while another is running is recorded, never dropped or merged. Other policies are rejected as unsupported.
+
+## Schedule occurrences
+
+A scheduled run reports `schedule_occurrence` as the key made by `jobs.OccurrenceKey(timezone, utcInstant, fold)`:
+
+```
+s.<scheduled UTC instant, decimal nanoseconds>.f<0|1>.<8 hex digits of the configured zone>
+```
+
+The key stays within the SDK alphabet (`[A-Za-z0-9_.-]`, at most 256 bytes). Any other string (for example `manual.<run id>`, which the SDKs send when no scheduler instant is given) identifies a manual or unscheduled execution. A scheduler adapter passes its zone and scheduled instant to the SDK (`client.job_attempt(job, run_id, ordinal, (timezone, scheduled_at_ns, fold))` in Python, `client.withJobAttempt(job, runId, ordinal, callback, {timezone, atNs, fold})` in TypeScript) and the SDK reports exactly this key; `occurrence_key` / `occurrenceKey` expose the same function. Such runs are ordered by their earliest attempt start. **Until a scheduler adapter supplies the scheduled instant in this form, runs are attributed to a schedule window by start time only**: a run that starts at or after an expected instant covers that occurrence (and, if it is the newest run, every earlier one).
+
+Which run is "newer" is decided by the occurrence's scheduled instant (or, for manual runs, start time), never by arrival order. A late failure from an old schedule cannot overwrite the health of a newer successful occurrence; it is appended to history and shown as the older run.
+
+## Schedule definitions
+
+A definition is revisioned by the observer and has an `EffectiveFrom` instant. Revisions are totally ordered, a late older revision is inserted rather than dropped, and an older revision keeps governing the windows before the next revision took effect. A different definition under an existing revision is a conflict.
+
+`Schedule` is a five-field cron expression (minute hour day-of-month month day-of-week) in an IANA time zone. Supported: `*`, numbers, ranges `a-b`, steps `*/n` and `a-b/n`, comma lists; day-of-week `0-7` (0 and 7 are Sunday). When both day-of-month and day-of-week are restricted either matching selects the day. Names (`MON`, `JAN`), macros (`@daily`), seconds and the zone `Local` are rejected. The zone database is embedded in the binary so every node resolves DST identically.
+
+DST semantics (wall-clock time in the configured zone):
+
+- A local time that does not exist (spring-forward gap) is skipped. No run is expected for it, and the health evidence lists it under `skipped_local_times` with reason `nonexistent_local_time_skipped`.
+- A local time that occurs twice (fall-back) produces one expected occurrence per distinct UTC instant, with fold 0 for the first and fold 1 for the second. Both have distinct keys.
+- The enumeration assumes at most one UTC-offset transition within a day of the wall time.
+
+Grace defaults to 5 minutes (`DefaultGrace`). Maximum runtime is off unless configured. `ObserverStaleAfter` defaults to 10 minutes.
+
+## The schedule observer
+
+A missed run is the *absence* of evidence, so only something with its own clock and an attestation of data completeness can claim it. Each observation carries:
+
+- `ObservedAt`: the observer's clock;
+- `CompleteThrough`: the instant through which the data path (source producing, ingest ACKed, journal processed) is attested complete for the job; never later than `ObservedAt`;
+- `Healthy`: false when the observer cannot attest anything;
+- optionally a definition revision and declared incomplete intervals.
+
+Observations are a join: the newest clock wins, an unhealthy observation beats a healthy one at the same clock, observations never regress, and delivery order does not matter. The service refuses an observation whose clock is more than 5 minutes ahead of the service clock, because a far-future observation would otherwise outrank every later one.
+
+## Current health
+
+`Evaluate(state, at, extraIntervals...)` is pure. Statuses:
+
+| Status | Meaning |
+|---|---|
+| `succeeded` | The newest run's effective final attempt succeeded and nothing in the evidence undermines that |
+| `failed` / `cancelled` | The newest run's final attempt ended that way |
+| `running` | The newest attempt started and has no result |
+| `running_too_long` | `running` past the configured maximum runtime, judged on the observer clock |
+| `late` | An expected occurrence is past its grace with no run yet, its window is still open, and absence is attested complete through the grace deadline |
+| `missed` | An expected occurrence's window closed (the next expected instant arrived) with no run, absence attested complete through the window end. Stays `missed` until a run happens |
+| `unknown` | The evidence cannot support any other claim |
+
+The rules that keep `unknown` honest:
+
+- No attempts and no overdue schedule: `unknown / no_evidence` (no data yet), never healthy.
+- A scheduled job with no observer, an unhealthy observer, or an observer older than `ObserverStaleAfter` cannot be called `succeeded` or `running`: the verdict is `unknown` with reason `no_schedule_observer`, `schedule_observer_unhealthy` or `schedule_observer_stale`. SDK silence is never inferred as success, and SDK/source loss is never inferred as missed.
+- `late`/`missed` additionally need `CompleteThrough` to cover the span and no declared incomplete interval overlapping it. Otherwise: `unknown / evidence_of_absence_incomplete`.
+- An incomplete interval (observer-declared, or a committed project `RecordEvidenceGap` covering job attempts or all signals) that overlaps the time after the newest attempt's result makes a positive verdict `unknown / evidence_gap_overlaps`. A gap before the attempt's result cannot hide that result and does not downgrade it.
+- A negative verdict that was observed (`failed`, `cancelled`, `late`, `missed`, `running_too_long`) is never hidden by incomplete evidence; it is reported with `complete=false` and the reason.
+
+Every verdict carries its `evidence`: occurrence key, run, attempt, attempt state and count, expected instant and window end, cause trace/error references, definition revision, observer state (including `stale`), gap IDs and skipped local times. Cause references are IDs only; reading the trace or error needs its own grant.
+
+The stored `CurrentHealth` in a job state is as of the newest observer observation (no staleness). Reads (`Service.Health`) re-evaluate with the service clock and the project's committed gaps and also return every known interval so unknown stretches of history stay annotated.
+
+## Corrections
+
+`Service.Correct` records an audited later assertion about a terminal attempt: command ID, expected job-state version, attempt ID, an explicit newer correction version, the corrected state and a reason. It requires `policy.write`; the actor is the scope's principal, never a request field. The original terminal event stays untouched; the attempt's *effective* result becomes the newest correction's, and run status and health derive from the effective result. The same version with the same content is an idempotent retry; the same version with other content, or an older version, is a conflict. A correction of a non-terminal attempt is a conflict. Reasons are required, at most 1024 bytes, without control characters.
+
+## Isolation and permissions
+
+Every operation revalidates the opaque scope and then requires the exact permission: `policy.write` for `ApplyAttempt`, `ObserveSchedule` and `Correct` (the journal worker and the observer are real project-scoped service principals), `telemetry.read` for `Health`. A project outside the scope, another organization's job and a job that does not exist all return the same `not_found`. State is keyed by organization, project and job.
+
+## Bounded state
+
+A job state keeps the newest `MaxRetainedRuns` (512) runs. Older runs leave the state with an explicit `compaction` record (count and frontier); the data-group journal remains the complete history. Evidence for a run older than the frontier is ignored with outcome `ignored`. Per run: at most 256 attempts, 16 events and 16 corrections per attempt; at most 64 definition revisions and 256 incomplete intervals per job; exceeding them is `quota`.
+
+## What is wired to real data today
+
+Implemented and tested: the pure reducer (`Reduce`, `ReduceEvent`, `Observe`, `ApplyCorrection`, `Evaluate`, `ExpectedOccurrences`) and the service (`ApplyAttempt`, `ObserveSchedule`, `Correct`, `Health`) against real `auth.Scope` authority, with a control-backed store (`jobs.NewControlStore`, constructed in `internal/appcore/app.go`; the `UpdateJob` handler is `Store.BindJobUpdate`, `internal/control/job_update.go`; per-job state is `ControlState.JobBooks`, `internal/model/control.go`).
+
+Read side: `POST /api/v1/jobs/list` and `POST /api/v1/jobs/view` (`internal/httpapi/jobs_view.go`) return job state with `jobs.Health`.
+
+Write side (`internal/httpapi/jobs_write.go`), each needing `policy.write` on the project (a session with its CSRF binding, or a bearer token of the observer's service principal); the body names the organization and project as selectors, the acting principal is always the caller's own, and any unknown body field is refused:
+
+- `POST /api/v1/jobs/schedule-evidence` is the external schedule observer's feed (`ObserveSchedule`): `org`, `project`, `job`, `command_id` (a retry of the same command is idempotent), `observer`, `observed_ns`, `complete_through_ns`, `healthy`, an optional `definition` (revision, `effective_from_ns`, `schedule {cron, timezone}`, `grace_ns`, `max_runtime_ns`, `observer_stale_after_ns`, `overlap`) and optional `incomplete` intervals. An observation whose clock is ahead of the server by more than the allowed skew is refused.
+- `POST /api/v1/jobs/correct` is the audited correction (`Correct`): `org`, `project`, `job`, `command_id`, `expected_version` (the view's `source.version`), `attempt`, `version`, `state`, `reason`. The original result stays; the correction appears beside it with the actor, time and reason.
+
+Both answer `{state: "committed", job, version}`.
+
+## Schedule catalogue
+
+The schedule catalogue is the committed set of schedule definitions of a project's jobs, kept in control state (`ControlState.JobDefinitions`, key `org:project:job`; `internal/control/job_definitions.go`, `internal/jobs/catalogue.go`). It is written through the same `UpdateJob` command as the job books (kinds `define_job` and `retire_job`), so it has the same scope check, and nothing else stores it. `App.JobCatalogue()` is the node's catalogue.
+
+`POST /api/v1/jobs/definitions` (`internal/httpapi/jobs_definitions.go`) is the authoring route. The body is closed (an unknown field, a missing field of the operation or a field the operation does not take is refused) and names the organization and project as selectors:
+
+- `operation: "list"` returns `{org, project_id, can_author, jobs[]}`: every catalogue entry of the project, retired ones included, in job ID order, each with its catalogue `revision`, `retired`, `created_ns`, `updated_ns` and `definition`. It needs `telemetry.read` on the project; `can_author` says whether the caller also holds `policy.write`.
+- `operation: "save"` takes `command_id`, `job_id`, `expected_revision`, `reason` and `definition` (the fields of `schedule-evidence`'s `definition`) and answers `{state: "committed", job}` with the entry as committed.
+- `operation: "retire"` takes `command_id`, `job_id`, `expected_revision` and `reason`. The entry and its definition history stay; a retired job is no longer fed to the observer, retiring it again changes nothing, and saving its next definition brings it back.
+
+Who may author: a human principal with `policy.write` on exactly this project, the permission every other job mutation needs. The runner's system scope reads the catalogue and can never write it; a scope of another project or organization gets the same not-found an absent project gives. Every save and retirement is one audit entry (`jobs.define`, `jobs.retire`) with the actor and the reason, never the definition.
+
+Rules of a save, all checked before anything is committed:
+
+- `expected_revision` is the catalogue revision the author read (`0` = the job is not in the catalogue yet); a stale author gets a conflict instead of overwriting, and a retirement is never silently undone by a save made from an older read;
+- `definition.revision` is the previous definition's revision plus one (`1` for a new job), `effective_from_ns` is not earlier than the previous definition's and not more than 400 days ahead of the server clock, and the schedule is validated exactly as `ObserveSchedule` validates it (five-field cron, IANA zone, grace, runtime and staleness bounds);
+- the command ID makes a retry of the latest command idempotent; a retry of an older command gets a conflict;
+- a definition is at most 8 KiB and a project holds at most 64 catalogue entries, retired ones included.
+
+A retirement of the owning project or organization drops its catalogue entries with the deletion.
+
+The background runner:
+
+- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). Its position is a per-group origin cursor (every row at or below it has been applied): a pass reads only what reached the journal after it (`storage.ScanRequest.After` skips the rest at the index, without reading a page), so an event that arrives late, however far behind the newest event time it is stamped, is applied by the very next pass; there is no sweep and no lookback window. The position is kept in memory: after a restart the first reads go through the journal again and the reducer reports the rows it already holds as duplicates.
+- The runner's observer stage feeds the schedule catalogue (above) to `ObserveSchedule`: for every non-retired catalogue entry of a project it submits the entry's definition under one fixed system observer ID with `healthy: true`, at the runner's clock, at most once per quarter of the definition's `observer_stale_after` (default 10 minutes), and `complete_through` = the least, over the sources that delivered that job's events, of the newest event time each source has delivered (as of a read that reached the end of the journal), minus the 15-minute late-arrival allowance, never after the observation's own time (zero for a job no source has delivered an event for; nothing is observed until the first read after a start has reached the journal's end). That attestation says only that the product's own journal is processed up to the newest evidence the job's sources delivered, less the allowance. It never says that a source was producing: a source that went silent stops advancing the attestation of its own jobs, so the runner never infers a missed run from that silence; a job whose runs stop while its source keeps delivering other events is attested through them and its missed occurrences are declared.
+
+Still not wired:
+
+- The SDKs send `manual.<run id>` unless the caller supplies the scheduled instant.

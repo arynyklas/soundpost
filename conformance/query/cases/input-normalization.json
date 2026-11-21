@@ -1,0 +1,1307 @@
+{
+  "description": "Input-normalization corpus for the isolated OpenMetrics, remote-write and Loki-push translators (internal/adapters/queryinput). Each row names a format, a semantic input (fixture or inline) that the test harness encodes to the real wire format, a profile override and the exact normalized records or typed rejection reason. Expected values are authored from the format specifications, not recorded from an upstream parser; binding_scope says so on every row.",
+  "projection": "records are compared after dropping the derived record id and the resource, sorted by canonical JSON; uint64/int64 are decimal strings, floats are IEEE-754 bit patterns in hex",
+  "cases": [
+    {
+      "id": "input-openmetrics-families-created-exemplar",
+      "format": "openmetrics",
+      "fixture": "adapters/openmetrics.txt",
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "records": [
+          {
+            "kind": "metric",
+            "ts": "1700000000123456789",
+            "name": "http_requests_total",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "4028000000000000",
+            "unit": "requests",
+            "type": "counter",
+            "start": "1699999000500000000",
+            "trace": "0af7651916cd43dd8448eb211c80319c",
+            "span": "b7ad6b7169203331"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "queue_depth",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "float",
+            "bits": "7ff8000000000001",
+            "unit": "1",
+            "type": "gauge"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "queue_depth",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "8000000000000000",
+            "unit": "1",
+            "type": "gauge"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000001000000000",
+            "name": "queue_depth",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "7ff0000000000000",
+            "unit": "1",
+            "type": "gauge"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency_bucket",
+            "labels": {
+              "job": "api",
+              "le": "0.5"
+            },
+            "sample": "float",
+            "bits": "4008000000000000",
+            "unit": "1",
+            "type": "histogram",
+            "start": "1699999000500000000"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency_bucket",
+            "labels": {
+              "job": "api",
+              "le": "+Inf"
+            },
+            "sample": "float",
+            "bits": "4010000000000000",
+            "unit": "1",
+            "type": "histogram",
+            "start": "1699999000500000000"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency_count",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "4010000000000000",
+            "unit": "1",
+            "type": "histogram",
+            "start": "1699999000500000000"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency_sum",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "3ff8000000000000",
+            "unit": "1",
+            "type": "histogram",
+            "start": "1699999000500000000"
+          }
+        ],
+        "report": {
+          "help_text_discarded": 1,
+          "exemplar_value_timestamp_labels_discarded": 1,
+          "created_timestamp_applied": 2
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-lossless-kinds",
+      "format": "remote_write_v2",
+      "fixture": "adapters/remote-write-v2.json",
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "records": [
+          {
+            "kind": "metric",
+            "ts": "1700000000123000000",
+            "name": "requests_total",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "4028000000000000",
+            "unit": "requests",
+            "type": "counter",
+            "start": "1699999000500000000",
+            "trace": "0af7651916cd43dd8448eb211c80319c",
+            "span": "b7ad6b7169203331"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "temperature",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "float",
+            "bits": "7ff8000000000123",
+            "unit": "1",
+            "type": "gauge"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000001000000000",
+            "name": "temperature",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "stale",
+            "bits": "7ff0000000000002",
+            "unit": "1",
+            "type": "gauge"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "integer_histogram",
+            "unit": "1",
+            "type": "histogram",
+            "start": "1699999000000000000",
+            "hist": {
+              "flavor": "counter",
+              "reset": "reset",
+              "schema": 3,
+              "count": "27021597764222982",
+              "zero_count": "3",
+              "sum": "4059000000000000",
+              "zero_threshold": "3f50624dd2f1a9fc",
+              "positive": {
+                "spans": [
+                  [
+                    0,
+                    2
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "deltas": [
+                  "9007199254740993",
+                  "-1",
+                  "-5"
+                ]
+              },
+              "negative": {
+                "spans": [
+                  [
+                    -1,
+                    1
+                  ]
+                ],
+                "deltas": [
+                  "7"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency_custom",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "integer_histogram",
+            "unit": "1",
+            "type": "histogram",
+            "hist": {
+              "flavor": "counter",
+              "reset": "unknown",
+              "schema": -53,
+              "count": "9",
+              "zero_count": "0",
+              "sum": "4014000000000000",
+              "zero_threshold": "0000000000000000",
+              "positive": {
+                "spans": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "deltas": [
+                  "3",
+                  "1",
+                  "-2"
+                ]
+              },
+              "negative": {
+                "spans": [],
+                "deltas": []
+              },
+              "custom": [
+                "3fe0000000000000",
+                "3ff0000000000000"
+              ]
+            }
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "size_distribution",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "float_histogram",
+            "unit": "1",
+            "type": "histogram",
+            "hist": {
+              "flavor": "gauge",
+              "reset": "gauge",
+              "schema": 0,
+              "count": "4024000000000000",
+              "zero_count": "4000000000000000",
+              "sum": "4044000000000000",
+              "zero_threshold": "0000000000000000",
+              "positive": {
+                "spans": [
+                  [
+                    0,
+                    2
+                  ]
+                ],
+                "counts": [
+                  "4008000000000000",
+                  "4014000000000000"
+                ]
+              },
+              "negative": {
+                "spans": [],
+                "counts": []
+              }
+            }
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000002000000000",
+            "name": "gone_distribution",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "stale",
+            "bits": "7ff0000000000002",
+            "unit": "1",
+            "type": "histogram"
+          }
+        ],
+        "report": {
+          "help_text_discarded": 1,
+          "exemplar_value_timestamp_labels_discarded": 1,
+          "stale_histogram_marker_as_stale_sample": 1
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v1-lossless-kinds",
+      "format": "remote_write_v1",
+      "fixture": "adapters/remote-write-v1.json",
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "records": [
+          {
+            "kind": "metric",
+            "ts": "1700000000123000000",
+            "name": "requests_total",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "float",
+            "bits": "4028000000000000",
+            "unit": "requests",
+            "type": "counter",
+            "trace": "0af7651916cd43dd8448eb211c80319c"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000001123000000",
+            "name": "requests_total",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "stale",
+            "bits": "7ff0000000000002",
+            "unit": "requests",
+            "type": "counter"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "rpc_duration_sum",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "float",
+            "bits": "3ff8000000000000",
+            "unit": "1",
+            "type": "unknown"
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "latency",
+            "labels": {
+              "job": "api"
+            },
+            "sample": "integer_histogram",
+            "unit": "1",
+            "type": "histogram",
+            "hist": {
+              "flavor": "counter",
+              "reset": "not_reset",
+              "schema": 3,
+              "count": "27021597764222982",
+              "zero_count": "3",
+              "sum": "4059000000000000",
+              "zero_threshold": "3f50624dd2f1a9fc",
+              "positive": {
+                "spans": [
+                  [
+                    0,
+                    2
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "deltas": [
+                  "9007199254740993",
+                  "-1",
+                  "-5"
+                ]
+              },
+              "negative": {
+                "spans": [
+                  [
+                    -1,
+                    1
+                  ]
+                ],
+                "deltas": [
+                  "7"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "size_distribution",
+            "labels": {
+              "job": "worker"
+            },
+            "sample": "float_histogram",
+            "unit": "1",
+            "type": "histogram",
+            "hist": {
+              "flavor": "counter",
+              "reset": "unknown",
+              "schema": 0,
+              "count": "4024000000000000",
+              "zero_count": "4000000000000000",
+              "sum": "4044000000000000",
+              "zero_threshold": "0000000000000000",
+              "positive": {
+                "spans": [
+                  [
+                    0,
+                    2
+                  ]
+                ],
+                "counts": [
+                  "4008000000000000",
+                  "4014000000000000"
+                ]
+              },
+              "negative": {
+                "spans": [],
+                "counts": []
+              }
+            }
+          }
+        ],
+        "report": {
+          "help_text_discarded": 1,
+          "exemplar_value_timestamp_labels_discarded": 1,
+          "type_mapped_to_unknown": 1
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-json-equal-time-multiplicity",
+      "format": "loki_push",
+      "fixture": "adapters/loki-push.json",
+      "encoding": "json",
+      "expected": {
+        "records": [
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456790",
+            "stream": {
+              "app": "web",
+              "region": "us"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          }
+        ]
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-json-gzip-equal-time-multiplicity",
+      "format": "loki_push",
+      "fixture": "adapters/loki-push.json",
+      "encoding": "json_gzip",
+      "expected": {
+        "records": [
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456790",
+            "stream": {
+              "app": "web",
+              "region": "us"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          }
+        ]
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-protobuf-snappy-equal-time-multiplicity",
+      "format": "loki_push",
+      "fixture": "adapters/loki-push.json",
+      "encoding": "protobuf_snappy",
+      "expected": {
+        "records": [
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456789",
+            "stream": {
+              "app": "web",
+              "region": "eu"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "beta",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          },
+          {
+            "kind": "log",
+            "ts": "1700000000123456790",
+            "stream": {
+              "app": "web",
+              "region": "us"
+            },
+            "template": "migrated.meta@1",
+            "fields": {
+              "line": "alpha",
+              "tenant": "t1"
+            },
+            "metadata": {
+              "tenant": "t1"
+            }
+          }
+        ]
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-integer-above-2^53-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx 9007199254740993 1700000000\n# EOF\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-missing-eof-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx 1 1700000000\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "malformed"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-gaugehistogram-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gaugehistogram\nx_bucket{le=\"+Inf\"} 1 1700000000\n# EOF\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-duplicate-label-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx{job=\"api\",job=\"worker\"} 1 1700000000\n# EOF\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "duplicate_label"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-sub-nanosecond-timestamp-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx 1 1700000000.1234567891\n# EOF\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-conflicting-equal-timestamp-rejected",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx 1 1700000000\nx 2 1700000000\n# EOF\n"
+      },
+      "expected": {
+        "error": {
+          "reason": "conflicting_duplicate"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-exact-duplicate-collapses",
+      "format": "openmetrics",
+      "inline": {
+        "text": "# TYPE x gauge\nx 1 1700000000\nx 1 1700000000\n# EOF\n"
+      },
+      "expected": {
+        "records": [
+          {
+            "kind": "metric",
+            "ts": "1700000000000000000",
+            "name": "x",
+            "labels": {},
+            "sample": "float",
+            "bits": "3ff0000000000000",
+            "unit": "1",
+            "type": "gauge"
+          }
+        ],
+        "report": {
+          "exact_duplicate_collapsed": 1
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-exemplar-needs-opt-in",
+      "format": "openmetrics",
+      "fixture": "adapters/openmetrics.txt",
+      "profile": {
+        "exemplars": "reject",
+        "help": "discard"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-openmetrics-help-needs-opt-in",
+      "format": "openmetrics",
+      "fixture": "adapters/openmetrics.txt",
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "reject"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-histograms-rejected-by-profile",
+      "format": "remote_write_v2",
+      "fixture": "adapters/remote-write-v2.json",
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard",
+        "histograms": "reject"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-exemplar-only-series-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x",
+              "job": "api"
+            },
+            "exemplars": [
+              {
+                "labels": {
+                  "trace_id": "0af7651916cd43dd8448eb211c80319c"
+                },
+                "value_bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-samples-and-histograms-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ],
+            "histograms": [
+              {
+                "count_int": "0",
+                "sum_bits": "0000000000000000",
+                "schema": 0,
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "malformed"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-duplicate-label-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "label_pairs": [
+              [
+                "__name__",
+                "x"
+              ],
+              [
+                "job",
+                "api"
+              ],
+              [
+                "job",
+                "worker"
+              ]
+            ],
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "duplicate_label"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-empty-label-value-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "label_pairs": [
+              [
+                "__name__",
+                "x"
+              ],
+              [
+                "job",
+                ""
+              ]
+            ],
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "malformed"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-conflicting-equal-timestamp-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              },
+              {
+                "bits": "4000000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "conflicting_duplicate"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-timestamp-before-bounds-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "timestamp_out_of_range"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-info-type-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "metadata": {
+              "type": "info"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v2-exemplar-without-point-rejected",
+      "format": "remote_write_v2",
+      "inline": {
+        "version": 2,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              },
+              {
+                "bits": "4000000000000000",
+                "timestamp_ms": "1700000001000"
+              }
+            ],
+            "exemplars": [
+              {
+                "labels": {
+                  "trace_id": "0af7651916cd43dd8448eb211c80319c"
+                },
+                "value_bits": "3ff0000000000000",
+                "timestamp_ms": "1700000002000"
+              }
+            ]
+          }
+        ]
+      },
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v1-custom-buckets-rejected",
+      "format": "remote_write_v1",
+      "inline": {
+        "version": 1,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "histograms": [
+              {
+                "count_int": "1",
+                "sum_bits": "0000000000000000",
+                "schema": -53,
+                "zero_threshold_bits": "0000000000000000",
+                "positive_spans": [
+                  [
+                    0,
+                    1
+                  ]
+                ],
+                "positive_deltas": [
+                  "1"
+                ],
+                "custom_values_bits": [
+                  "3ff0000000000000"
+                ],
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-remote-write-v1-exemplar-without-trace-rejected",
+      "format": "remote_write_v1",
+      "inline": {
+        "version": 1,
+        "timeseries": [
+          {
+            "labels": {
+              "__name__": "x"
+            },
+            "samples": [
+              {
+                "bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ],
+            "exemplars": [
+              {
+                "labels": {
+                  "request": "abc"
+                },
+                "value_bits": "3ff0000000000000",
+                "timestamp_ms": "1700000000000"
+              }
+            ]
+          }
+        ]
+      },
+      "profile": {
+        "exemplars": "trace_link",
+        "help": "discard"
+      },
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-undeclared-structured-metadata-rejected",
+      "format": "loki_push",
+      "inline": {
+        "streams": [
+          {
+            "labels": {
+              "app": "web",
+              "region": "eu"
+            },
+            "entries": [
+              {
+                "ts_ns": "1700000000123456789",
+                "line": "alpha",
+                "metadata": {
+                  "tenant": "t1",
+                  "other": "x"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "json",
+      "expected": {
+        "error": {
+          "reason": "unrepresentable"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-line-above-limit-rejected",
+      "format": "loki_push",
+      "inline": {
+        "streams": [
+          {
+            "labels": {
+              "app": "web",
+              "region": "eu"
+            },
+            "entries": [
+              {
+                "ts_ns": "1700000000123456789",
+                "line": "alphabet-soup-too-long",
+                "metadata": {
+                  "tenant": "t1"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "json",
+      "profile": {
+        "max_line_bytes": 8
+      },
+      "expected": {
+        "error": {
+          "reason": "too_large"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-empty-stream-labels-rejected",
+      "format": "loki_push",
+      "inline": {
+        "streams": [
+          {
+            "labels": {},
+            "entries": [
+              {
+                "ts_ns": "1700000000123456789",
+                "line": "alpha",
+                "metadata": {
+                  "tenant": "t1"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "json",
+      "expected": {
+        "error": {
+          "reason": "malformed"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    },
+    {
+      "id": "input-loki-push-timestamp-before-bounds-rejected",
+      "format": "loki_push",
+      "inline": {
+        "streams": [
+          {
+            "labels": {
+              "app": "web",
+              "region": "eu"
+            },
+            "entries": [
+              {
+                "ts_ns": "5",
+                "line": "alpha",
+                "metadata": {
+                  "tenant": "t1"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "json",
+      "expected": {
+        "error": {
+          "reason": "timestamp_out_of_range"
+        }
+      },
+      "binding_scope": "authored from the format specifications (OpenMetrics 1.0, Prometheus remote-write 1.0/2.0 published protobuf schemas, Loki push API); not an observation of any upstream parser"
+    }
+  ]
+}

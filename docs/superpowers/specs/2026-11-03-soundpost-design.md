@@ -1,6 +1,6 @@
 # Soundpost product architecture and design
 
-Date: 2026-11-03. **Proposed for owner approval; not approved for implementation.** Author: Aryn Yklas. Technical choices below are the design author's proposals, not inherited owner decisions. The owner has authorized repository initialization, requirements preservation and design preparation only.
+Date: 2026-11-03. **Approved by Aryn Yklas for implementation.** Author and copyright owner: Aryn Yklas. The owner approved the complete design/contracts and selected subagent-driven implementation using m1 implementers and m2 reviewers. Technical choices and budgets below are approved implementation requirements; runtime support, performance and durability remain to be demonstrated. Publication and customer production changes are not authorized.
 
 Normative intake: [selected requirements](2026-11-03-soundpost-requirements.md). Evidence: [active research digest](../../research/2026-11-03-primary-source-research.md), with the original reports archived separately. Module interfaces: [contracts](2026-11-03-soundpost-contracts.md). Execution map: [plan index](../plans/2026-11-03-soundpost-plan-index.md). Approval of this document must include the contracts, support limits and proposed budgets; a green document review is not product acceptance.
 
@@ -266,7 +266,7 @@ Release requires all three customer journeys plus denial and outage drills with 
 
 ## 16. Delivery sequence, risk register and approval
 
-Implementation after approval follows vertical order: durable isolated capture/read; whole query engines and adapters; actual SDK critical-path/error/artifact/job integrations; replay and native/runtime profiling; unified investigation and canonical lifecycle; production packaging/failure/conformance; authorized customer cutover. Work on independent modules can overlap once contracts are frozen, but integration gates remain cumulative. No delivery method was selected yet.
+Implementation follows vertical order: durable isolated capture/read; whole query engines and adapters; actual SDK critical-path/error/artifact/job integrations; replay and native/runtime profiling; unified investigation and canonical lifecycle; production packaging/failure/conformance; authorized customer cutover. Independent modules can overlap after contracts freeze; integration gates remain cumulative. The owner selected m1 implementation subagents with m2 reviewers.
 
 | Risk | Required mitigation/gate |
 |---|---|
@@ -278,7 +278,7 @@ Implementation after approval follows vertical order: durable isolated capture/r
 | Digest/ACK conceals failing source | Three separate entities, unknown-data state, source-version ordering and impact-revision tests |
 | Capacity or SDK overhead exceeds budget | Reproducible bytes/cardinality/workload measurements; reject admission honestly, never silent post-ACK drops or scope cuts |
 
-Approval request: accept or revise the proposed stack, no-external-metadata topology, complete compatibility profiles/read surface, explicit browser/native support limits, privacy/artifact contract, initial numerical policies/budgets, retention/deletion and milestone gates. Naming and selected own-engine/custom-SDK/native/full-query scope are not reopened. Until approval, plans are drafts and no product code, dependency installation or deployment is authorized.
+Approval recorded on 2026-11-03: Aryn Yklas approved the stack, no-external-metadata topology, complete compatibility profiles/read surface, browser/native limits, privacy/artifact contract, initial numerical policies/budgets, retention/deletion and milestone gates, and selected m1 implementation subagents with m2 reviewers. Product implementation and dependency installation are authorized. Publication and customer environment changes remain separate decisions.
 
 ## Evidence added during design
 

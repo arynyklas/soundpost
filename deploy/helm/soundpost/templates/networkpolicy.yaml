@@ -1,0 +1,60 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+{{- if .Values.networkPolicy.enabled }}
+{{- $name := default "soundpost" .Values.nameOverride }}
+# Members reach each other ONLY on the mutual-TLS peer port. Public ingress is allowed only
+# from the peers you list (none by default). Egress is limited to the members' peer port and
+# DNS, plus whatever you add in networkPolicy.extraEgress (for example an object store for
+# off-host backup). The policy is enforced by your CNI; a cluster whose CNI ignores
+# NetworkPolicy gets no isolation from it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-members
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: member
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: member
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.peer }}}
+{{- if .Values.networkPolicy.publicIngressFrom }}
+    - from:
+{{- range $peer := .Values.networkPolicy.publicIngressFrom }}
+        - {{ toJson $peer }}
+{{- end }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.public }}}
+{{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: member
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.peer }}}
+    - to:
+        - namespaceSelector:
+            matchLabels: {{ toJson .Values.networkPolicy.dnsNamespaceSelector }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+{{- range $rule := .Values.networkPolicy.extraEgress }}
+    - {{ toJson $rule }}
+{{- end }}
+{{- end }}

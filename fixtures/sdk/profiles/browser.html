@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- Copyright 2026 Aryn Yklas -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en"><head><meta charset="utf-8"><title>profile fixture</title></head>
+<body>
+<p>JS Self-Profiling fixture page. The scripts below are served by the spec through page.route.</p>
+<script src="/assets/workload.js"></script>
+<script src="/assets/query.js?token=CANARY_QUERY_7#CANARY_FRAGMENT"></script>
+<script src="https://cdn.soundpost.test/vendor.js"></script>
+<script type="module">
+import {startProfile} from "/profile.js";
+window.__startProfile = startProfile;
+window.__ready = true;
+</script>
+</body></html>

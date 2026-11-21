@@ -1,0 +1,4179 @@
+{
+  "schema": "soundpost-authored-logql-cases-v1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "phases": [
+    "syntax",
+    "pipeline"
+  ],
+  "cases": [
+    {
+      "id": "owned-logql-aggregate-approx_topk-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "approx_topk"
+      ],
+      "obligation": "logql-loki-3.5.2/aggregate/approx_topk",
+      "input": {
+        "expression": "approx_topk(3,vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-avg-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/avg",
+      "input": {
+        "expression": "avg(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-bottomk-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/bottomk",
+      "input": {
+        "expression": "bottomk(3,vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-count-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/count",
+      "input": {
+        "expression": "count(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-max-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/max",
+      "input": {
+        "expression": "max(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-min-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/min",
+      "input": {
+        "expression": "min(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-sort-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/sort",
+      "input": {
+        "expression": "sort(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-sort_desc-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/sort_desc",
+      "input": {
+        "expression": "sort_desc(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-stddev-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/stddev",
+      "input": {
+        "expression": "stddev(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-stdvar-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/stdvar",
+      "input": {
+        "expression": "stdvar(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-sum-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/sum",
+      "input": {
+        "expression": "sum(vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-aggregate-topk-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/aggregate/topk",
+      "input": {
+        "expression": "topk(3,vector(2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-binary-matching-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/binary-matching",
+      "input": {
+        "expression": "vector(2) + on(app) group_left(region) vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-decolorize-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/decolorize",
+      "input": {
+        "expression": "{app=\"api\"}|decolorize"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-drop-keep-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/drop-keep",
+      "input": {
+        "expression": "{app=\"api\"}|drop noisy,level=\"debug\"|keep app,region=~\"north.*\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-first-last-ties-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/first-last-ties",
+      "input": {
+        "expression": "first_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-ip-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/ip",
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"192.0.2.0/24\")|peer!=ip(\"2001:db8::1\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-iterator-entry-merge-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/iterator-entry-merge",
+      "input": {
+        "expression": "{app=\"api\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-iterator-sample-merge-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/iterator-sample-merge",
+      "input": {
+        "expression": "rate({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-json-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/json",
+      "input": {
+        "expression": "{app=\"api\"}|json result=\"payload.result\", item=\"items[0]\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-label-filter-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/label-filter",
+      "input": {
+        "expression": "{app=\"api\"}|n>2 or (d<=20ms and bytes>=2KiB)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-label-format-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/label-format",
+      "input": {
+        "expression": "{app=\"api\"}|label_format copy=original, rendered=\"{{ .app }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-label-replace-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/label-replace",
+      "input": {
+        "expression": "label_replace(vector(1),\"dst\",\"$1\",\"src\",\"(.*)\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-lexical-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/lexical",
+      "input": {
+        "expression": "# independent fixture\n{app=`api`}|n>=1.5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-line-filters-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/line-filters",
+      "input": {
+        "expression": "{app=\"api\"}|=\"complete\" or \"finished\"!=\"noise\"|~\"[0-9]\"!~\"debug\"|>\"<_> request <_>\"!>\"<_> health <_>\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-log-order-limit-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/log-order-limit",
+      "input": {
+        "expression": "{app=\"api\"}|=\"done\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-logfmt-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/logfmt",
+      "input": {
+        "expression": "{app=\"api\"}|logfmt --strict --keep-empty status=code,user"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-add-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/add",
+      "input": {
+        "expression": "vector(2) + vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-div-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/div",
+      "input": {
+        "expression": "vector(2) / vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-eq-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/eq",
+      "input": {
+        "expression": "vector(2) == vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-ge-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/ge",
+      "input": {
+        "expression": "vector(2) >= vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-gt-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/gt",
+      "input": {
+        "expression": "vector(2) > vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-le-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/le",
+      "input": {
+        "expression": "vector(2) <= vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-lt-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/lt",
+      "input": {
+        "expression": "vector(2) < vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-mod-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/mod",
+      "input": {
+        "expression": "vector(2) % vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-mul-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/mul",
+      "input": {
+        "expression": "vector(2) * vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-ne-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/ne",
+      "input": {
+        "expression": "vector(2) != vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-pow-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/pow",
+      "input": {
+        "expression": "vector(2) ^ vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-operator-sub-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/operator/sub",
+      "input": {
+        "expression": "vector(2) - vector(3)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-pattern-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/pattern",
+      "input": {
+        "expression": "{app=\"api\"}|pattern \"<verb> <_> <status>\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-pipeline-order-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/pipeline-order",
+      "input": {
+        "expression": "{app=\"api\"}|json|n=\"2\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-primitive-numeric-string-stdlib-version-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/primitive/numeric-string-stdlib-version",
+      "input": {
+        "expression": "{app=\"api\"}|n>1e-3"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-primitive-regexp-engine-identity-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/primitive/regexp-engine-identity",
+      "input": {
+        "expression": "{app=\"api\"}|~`\\p{L}+`"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-primitive-template-version-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/primitive/template-version",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ if .app }}{{ .app }}{{ end }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-primitive-time-stdlib-version-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/primitive/time-stdlib-version",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ __timestamp__ }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-primitive-unicode-case-version-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/primitive/unicode-case-version",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ upper .app }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range-time",
+      "input": {
+        "expression": "rate({app=\"api\"}[2m] offset 30s)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-absent_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/absent_over_time",
+      "input": {
+        "expression": "absent_over_time({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-avg_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/avg_over_time",
+      "input": {
+        "expression": "avg_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-bytes_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/bytes_over_time",
+      "input": {
+        "expression": "bytes_over_time({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-bytes_rate-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/bytes_rate",
+      "input": {
+        "expression": "bytes_rate({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-count_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/count_over_time",
+      "input": {
+        "expression": "count_over_time({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-first_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/first_over_time",
+      "input": {
+        "expression": "first_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-last_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/last_over_time",
+      "input": {
+        "expression": "last_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-max_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/max_over_time",
+      "input": {
+        "expression": "max_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-min_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/min_over_time",
+      "input": {
+        "expression": "min_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-quantile_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/quantile_over_time",
+      "input": {
+        "expression": "quantile_over_time(0.75,{app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-rate-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/rate",
+      "input": {
+        "expression": "rate({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-rate_counter-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/rate_counter",
+      "input": {
+        "expression": "rate_counter({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-stddev_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/stddev_over_time",
+      "input": {
+        "expression": "stddev_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-stdvar_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/stdvar_over_time",
+      "input": {
+        "expression": "stdvar_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-range-sum_over_time-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/range/sum_over_time",
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|unwrap n[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-regexp-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/regexp",
+      "input": {
+        "expression": "{app=\"api\"}|regexp \"(?P<status>[0-9]+)\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-selectors-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/selectors",
+      "input": {
+        "expression": "{app=\"api\",zone!=\"\",region=~\"north|south\",instance!~\"temporary.*\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-set-operators-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/set-operators",
+      "input": {
+        "expression": "vector(1) and on(app) vector(2) or vector(3) unless vector(4)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-shard-capability-domain-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "approx_topk"
+      ],
+      "obligation": "logql-loki-3.5.2/shard-capability-domain",
+      "input": {
+        "expression": "approx_topk(3,vector(1))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-structured-metadata-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/structured-metadata",
+      "input": {
+        "expression": "{app=\"api\"}|region=\"north\"|label_format area=region"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-capabilities-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template-capabilities",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ printf `%s` .app }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-runtime-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template-runtime",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ .missing }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-Replace-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/Replace",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ Replace }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-ToLower-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/ToLower",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ ToLower }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-ToUpper-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/ToUpper",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ ToUpper }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-Trim-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/Trim",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ Trim }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-TrimLeft-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/TrimLeft",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ TrimLeft }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-TrimPrefix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/TrimPrefix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ TrimPrefix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-TrimRight-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/TrimRight",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ TrimRight }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-TrimSpace-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/TrimSpace",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ TrimSpace }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-TrimSuffix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/TrimSuffix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ TrimSuffix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-__line__-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/__line__",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ __line__ }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-__timestamp__-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/__timestamp__",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ __timestamp__ }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-add-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/add",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ add }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-addf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/addf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ addf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-alignLeft-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/alignLeft",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ alignLeft }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-alignRight-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/alignRight",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ alignRight }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-b64dec-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/b64dec",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ b64dec }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-b64enc-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/b64enc",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ b64enc }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-bytes-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/bytes",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ bytes }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-ceil-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/ceil",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ ceil }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-contains-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/contains",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ contains }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-count-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/count",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ count }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-date-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/date",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ date }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-default-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/default",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ default }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-div-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/div",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ div }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-divf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/divf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ divf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-duration-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/duration",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ duration }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-duration_seconds-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/duration_seconds",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ duration_seconds }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-float64-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/float64",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ float64 }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-floor-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/floor",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ floor }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-fromJson-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/fromJson",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ fromJson }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-hasPrefix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/hasPrefix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ hasPrefix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-hasSuffix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/hasSuffix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ hasSuffix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-indent-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/indent",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ indent }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-int-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/int",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ int }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-lower-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/lower",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ lower }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-max-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/max",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ max }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-maxf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/maxf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ maxf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-min-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/min",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ min }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-minf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/minf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ minf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-mod-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/mod",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ mod }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-mul-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/mul",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ mul }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-mulf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/mulf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ mulf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-nindent-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/nindent",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ nindent }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-now-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/now",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ now }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-regexReplaceAll-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/regexReplaceAll",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ regexReplaceAll }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-regexReplaceAllLiteral-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/regexReplaceAllLiteral",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ regexReplaceAllLiteral }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-repeat-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/repeat",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ repeat }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-replace-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/replace",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ replace }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-round-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/round",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ round }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-sub-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/sub",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ sub }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-subf-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/subf",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ subf }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-substr-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/substr",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ substr }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-title-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/title",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ title }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-toDate-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/toDate",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ toDate }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-toDateInZone-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/toDateInZone",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ toDateInZone }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-trim-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/trim",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ trim }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-trimAll-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/trimAll",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ trimAll }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-trimPrefix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/trimPrefix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ trimPrefix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-trimSuffix-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/trimSuffix",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ trimSuffix }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-trunc-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/trunc",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ trunc }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-unixEpoch-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/unixEpoch",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ unixEpoch }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-unixEpochMillis-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/unixEpochMillis",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ unixEpochMillis }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-unixEpochNanos-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/unixEpochNanos",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ unixEpochNanos }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-unixToTime-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/unixToTime",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ unixToTime }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-upper-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/upper",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ upper }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-urldecode-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/urldecode",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ urldecode }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-template-urlencode-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/template/urlencode",
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ urlencode }}\""
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-unpack-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/unpack",
+      "input": {
+        "expression": "{app=\"api\"}|unpack"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-unwrap-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/unwrap",
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|unwrap duration_seconds(elapsed)|__error__=\"\"[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-variants-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "multi-variant-queries"
+      ],
+      "obligation": "logql-loki-3.5.2/variants",
+      "input": {
+        "expression": "variants(rate({app=\"api\"}[2m]),count_over_time({app=\"api\"}[2m])) of ({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-vector-syntax",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "obligation": "logql-loki-3.5.2/vector",
+      "input": {
+        "expression": "vector(-2.5)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "binding_scope": "syntax-only; runtime owned by 02.06 or 02.07 where applicable"
+    },
+    {
+      "id": "owned-logql-invalid-empty-selector",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{}"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-empty-compatible-selector",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=~\".*\"}"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-regex-no-capture",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|regexp \"(x)\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-bad-regex",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|regexp \"[\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-bad-pattern",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|pattern \"<a><b>\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-filter-named-pattern",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|>\"<a> done\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-bad-json-path",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json x=\"items[\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-duplicate-label-format",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|label_format x=a,x=b"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-reserved-error-destination",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|label_format __error__=\"hidden\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-unknown-template-function",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|line_format \"{{ env `PATH` }}\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-invalid-ip",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"192.0.2.900\")"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-reverse-ip-range",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"192.0.2.9-192.0.2.1\")"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-ip-regex-operator",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|~ip(\"192.0.2.1\")"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-bare-unwrap",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|unwrap n"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-wrong-unwrap-overload",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "bytes_rate({app=\"api\"}|unwrap n[1m])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-missing-unwrap",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}[1m])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-stage-after-unwrap",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|unwrap n|json[1m])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-range-no-duration",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate({app=\"api\"}[])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-scalar-comparison-bool",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 == bool 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "owned-logql-invalid-scalar-vector-matching",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 + on(app) vector(2)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "owned-logql-invalid-set-scalar",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(2) or 1"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-duplicate-matching",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(1) + on(app,app) vector(2)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "owned-logql-invalid-unknown-stage",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|not_a_stage"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-byte-overflow",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|n>999999999999999999999TiB"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-disabled-approx",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "approx_topk(3,vector(1))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "owned-logql-disabled-variants",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "variants(rate({app=\"api\"}[2m]),count_over_time({app=\"api\"}[2m])) of ({app=\"api\"}[2m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-json-before-filter",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|n=\"2\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"2\"}",
+        "labels_subset": [
+          {
+            "name": "n",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-filter-before-json",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|n=\"2\"|json",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-json-error-label",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{broken",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{broken",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "JSONParserErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-json-error-explicit-filter",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|__error__=\"\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{broken",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-numeric-error",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|n>2",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"invalid\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"invalid\"}",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LabelFilterErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-duration-error",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|n>2ms",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"invalid\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"invalid\"}",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LabelFilterErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-byte-error",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|n>2KiB",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"invalid\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"invalid\"}",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LabelFilterErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-nested-json",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"payload\":{\"a-b\":7},\"items\":[1]}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"payload\":{\"a-b\":7},\"items\":[1]}",
+        "labels_subset": [
+          {
+            "name": "payload_a_b",
+            "value": "7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-json-expression",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json second=\"items[1].name\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"items\":[{}, {\"name\":\"second\"}]}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"items\":[{}, {\"name\":\"second\"}]}",
+        "labels_subset": [
+          {
+            "name": "second",
+            "value": "second"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-logfmt-empty",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|logfmt --keep-empty",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "empty= status=201",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "empty= status=201",
+        "labels_subset": [
+          {
+            "name": "empty",
+            "value": ""
+          },
+          {
+            "name": "status",
+            "value": "201"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-logfmt-strict",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|logfmt --strict",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "status=\"unterminated",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "status=\"unterminated",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LogfmtParserErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-regexp-capture",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|regexp \"(?P<code>[0-9]+)\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "reply 201",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "reply 201",
+        "labels_subset": [
+          {
+            "name": "code",
+            "value": "201"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-regexp-no-match",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|regexp \"(?P<code>[0-9]+)\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "no number",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "no number",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-pattern-capture",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|pattern \"<verb> <_> <code>\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "GET /example 201",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "GET /example 201",
+        "labels_subset": [
+          {
+            "name": "code",
+            "value": "201"
+          },
+          {
+            "name": "verb",
+            "value": "GET"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-pattern-no-match-retained",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|pattern \"prefix <code>\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "unmatched",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "unmatched",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-pattern-line-filter",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|>\"<_> request <_> done\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "worker request 9 done",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "worker request 9 done",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-pattern-line-reject",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|>\"prefix <_>\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "other line",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-ipv4-subnet",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"192.0.2.0/24\")",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "peer=192.0.2.8",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "peer=192.0.2.8",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-ipv6-subnet",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"2001:db8::/32\")",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "peer=[2001:db8::8]",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "peer=[2001:db8::8]",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-ip-range-reject",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=ip(\"192.0.2.8-192.0.2.10\")",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "192.0.2.11",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-left-to-right-label-boolean",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|n=2 or method=\"GET\" and size>2KiB",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2\",\"method\":\"POST\",\"size\":\"1KiB\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"2\",\"method\":\"POST\",\"size\":\"1KiB\"}",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          },
+          {
+            "name": "method",
+            "value": "POST"
+          },
+          {
+            "name": "n",
+            "value": "2"
+          },
+          {
+            "name": "size",
+            "value": "1KiB"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-parser-first-duplicate",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"first\",\"n\":\"last\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"first\",\"n\":\"last\"}",
+        "labels_subset": [
+          {
+            "name": "n",
+            "value": "last"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-missing-equals-empty",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|absent=\"\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "safe",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "safe",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-line-regex-search",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|~\"[0-9]+\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "prefix 44 suffix",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "prefix 44 suffix",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-line-regex-dot-newline",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|~\"a.b\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a\nb",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-line-alternative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|=\"request\" or \"response\"",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "response finished",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "response finished",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-decolorize",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|decolorize",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "\u001b[31mred\u001b[0m",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "red",
+        "labels_subset": []
+      }
+    },
+    {
+      "id": "owned-logql-pipeline-unpack",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|unpack",
+        "entry": {
+          "timestamp_ns": "1234567890123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"_entry\":\"safe admitted\",\"region\":\"north\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "safe admitted",
+        "labels_subset": [
+          {
+            "name": "region",
+            "value": "north"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-json-bare-selection",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json items"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "streams"
+      }
+    },
+    {
+      "id": "owned-logql-scalar-comparison",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 == 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "owned-logql-uppercase-words",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "SUM BY(app)(RATE({app=\"api\"}[2m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "owned-logql-invalid-sort-grouping",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort by(app)(vector(1))"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-invalid-fractional-range",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate({app=\"api\"}[1.5m])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-json-stream-collision",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "7",
+          "line": "{\"level\":\"parsed\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "level",
+              "value": "stream"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"level\":\"parsed\"}",
+        "labels_subset": [
+          {
+            "name": "level",
+            "value": "stream"
+          },
+          {
+            "name": "level_extracted",
+            "value": "parsed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-json-bracket-key",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json chosen=\"payload[\\\"a]b\\\"]\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "owned-logql-json-bare-array",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json items",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"items\":[1,2]}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"items\":[1,2]}",
+        "labels_subset": [
+          {
+            "name": "items",
+            "value": "[1,2]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-metadata-filter-rename",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|region=\"north\"|label_format area=region|keep area",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "safe",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "region",
+              "value": "north"
+            }
+          ],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "safe",
+        "labels_subset": [
+          {
+            "name": "area",
+            "value": "north"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-metadata-not-selector",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{region=\"north\"}",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "safe",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "region",
+              "value": "north"
+            }
+          ],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "owned-logql-keep-preserves-error",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|keep app",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{broken",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{broken",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "JSONParserErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-explicit-error-drop",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"}|json|drop __error__,__error_details__",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{broken",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{broken",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ],
+        "absent_labels": [
+          "__error__",
+          "__error_details__"
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-number",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap n[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2.5\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"2.5\"}",
+        "unwrapped_bits": "4004000000000000"
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-bytes",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap bytes(n)[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2KiB\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"2KiB\"}",
+        "unwrapped_bits": "40a0000000000000"
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-duration",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap duration(n)[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"250ms\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"250ms\"}",
+        "unwrapped_bits": "3fd0000000000000"
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-duration-seconds",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap duration_seconds(n)[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"2s\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"2s\"}",
+        "unwrapped_bits": "4000000000000000"
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-error-label",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap n[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"invalid\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"n\":\"invalid\"}",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "SampleExtractionErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "owned-logql-unwrap-error-filter",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"}|json|unwrap n|__error__=\"\"[1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"n\":\"invalid\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    }
+  ]
+}

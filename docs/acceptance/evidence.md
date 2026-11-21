@@ -1,0 +1,111 @@
+<!-- Copyright 2026 Aryn Yklas -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Protected application investigation: evidence acceptance (task 09.06)
+
+This is the cross-module acceptance of the artifact, symbolication, replay and
+profile evidence paths with the scope, deletion and restore lifecycle. It has two
+halves that deliberately differ in reach, and every row that cannot be satisfied is
+reported as `NOT SATISFIED` with its reason. Nothing is mocked into a success.
+
+| Half | Where | What it drives |
+| --- | --- | --- |
+| In-process acceptance | `tests/acceptance/evidence_test.go`, `TestEvidenceRealFrameReplayAndScopeLifecycle` | A real in-process node (`appcore.Open`: control Raft group, auth, C03 admission, C05 storage, artifact service, retention saga) behind real HTTPS (`httpapi.NewServer(..., app.Register)`), every read and write through the committed scope-first routes with a real session cookie and CSRF binding. |
+| Subprocess smoke | `go run ./tools/smoke evidence` (`tools/smoke/evidence.go`, `RunEvidence`) | A real `soundpost serve` subprocess over HTTPS: real bootstrap and login, the same routes. It can only reach what the served process exposes, so it exits non-zero today. |
+
+## Running
+
+```sh
+# Real Vite-generated throwing map and its thrown position (Node 22 + repository Vite).
+node fixtures/artifacts/generate.mjs "$FIXTURE_DIR"
+
+# In-process acceptance. The symbolication sandbox is the documented OCI mode and is
+# derived from the local image tag below (override with SOUNDPOST_SYMBOLICATE_IMAGE);
+# without a usable image the typed sandbox_unavailable answer is asserted instead.
+SOUNDPOST_SOURCEMAP_FIXTURE_DIR="$FIXTURE_DIR" go test ./tests/acceptance -run TestEvidence -count=1 -v
+
+# Smoke against a real served process (builds ./cmd/soundpost unless --binary is given).
+go run ./tools/smoke evidence --artifact-dir "$OUT" --fixture-dir "$FIXTURE_DIR"
+```
+
+A missing fixture directory is a failure, not a skip. The sandbox image is the one
+built by `docs/operations/symbolication.md` (`soundpost-symbolicate:qualification`);
+the test reads its immutable ID and worker-hash label with `docker image inspect`
+and the service independently re-verifies them (label and executable-hash
+handshake). If the host is loaded, the sandbox's own 100 ms frame / 5 s call bounds
+can answer the typed `deadline`; the test retries the request (the bounds are never
+widened) and reports how many attempts it needed.
+
+`tools/smoke/main.go` must register the smoke (parent-owned):
+
+```go
+case "evidence":
+	smoke, stage = "evidence", "evidence_dispatch"
+	return RunEvidence(os.Args[2:])
+```
+
+## Rows
+
+Required rows must all be satisfied for the smoke to exit zero. The in-process test
+fails (not merely reports) on any contradiction; its `NOT SATISFIED` rows are the
+documented gaps and are asserted to be the typed unavailable answer, never a
+canned success.
+
+| Row | In-process test | Served-process smoke |
+| --- | --- | --- |
+| `artifact_upload_read_policy`: real multipart upload of the Vite map, `sourcesContent` canary stripped, private-source read refused, telemetry-only reader refused | satisfied | satisfied |
+| `error_occurrence_ingest`: real occurrence with exact build and artifact frame over HTTPS, message-bearing payload refused without echo | satisfied | satisfied |
+| `frame_real_mapping`: thrown generated position resolves to the known original `simple.ts:4:8` | satisfied with the OCI sandbox (typed `sandbox_unavailable` otherwise) | NOT SATISFIED by default on a host where the native startup probe fails (the typed `sandbox_unavailable` answer, with the serve log's `symbolicator:` line). With an explicit OCI `--symbolicate-config` (smoke env `SOUNDPOST_SMOKE_SYMBOLICATE_CONFIG`) it is SATISFIED in 4 of 4 parent runs and 6 of 6 worker runs after the OCI-only 400 ms transport allowance (docs/operations/symbolication.md); before it the row was satisfied in 2 of 6 runs and the rest answered a typed `deadline`. A fresh container is still launched per frame (about 0.4 to 0.6 s cold start); one host, one image, one Docker daemon |
+| `frame_scope_and_build_exactness` | satisfied | (covered by the frames request above) |
+| `release_registry_view` | satisfied | not exercised (no registration route) |
+| `issue_evidence_of_ingested_error` | satisfied (run l3w12-acc4): a real issue-producer pass (`App.IssueProducer`) groups the ingested occurrence; `/api/v1/evidence/issue` reads its stored evidence section Ready with the same occurrence and fingerprint (the whole view is incomplete for an administrator without telemetry read: the occurrence payload detail is a section of its own) | satisfied (run l3w12-sm1): the served process's own issue producer groups the occurrence; an organization administrator reads the evidence section Ready (issue ID computed from `issues.Fingerprint`) |
+| `trace_view_and_link` | satisfied | not exercised |
+| `investigate_replay_profile_links` | satisfied: `/api/v1/investigate` navigates from the error's replay and profile IDs to each (Ready link) for a caller holding `replay.read` / `profiles.read`; a telemetry-only reader gets the typed `separate_grant_required` with no link and no echo of the target; an unknown target is the one 404 | not exercised |
+| `replay_closed_format_stream_and_gap` | satisfied (explicit `missing_chunk` gap, masked text only) | closed-format ingest and the stream satisfied (`replay_closed_format_ingest`, `replay_stream_readable_with_gap`) |
+| `replay_real_recorder_chunks` | satisfied after task 11.02 (the real recorder's golden chunks, `fixtures/replays/recorder`, are admitted unconverted and read back as one continuous chain with the recorder's own hashes) | satisfied (same chunks over the real route) |
+| `replay_stream_readable_with_gap` | (the in-process stream row above) | satisfied (smoke run l3w12-sm1: the replay admitted over the real route reads back through `/api/v1/replays/stream` with the explicit gap; admission runs the index step, see Wiring status) |
+| `profile_assembler_export_view` | satisfied (real assembler and exporter, real HTTPS route) | satisfied by `profile_real_view`: a profile chunk and its capability record go through the real ingest route of an onboarded source whose policy lists Profile and Capability, and `/api/v1/profiles/view` returns 3 samples, the linked capability record and the frame's artifact link as available (the chunk is runtime-format, not the native exporter's) |
+| `profile_real_capture_or_sdk` | satisfied on a host that can take a real capture (a C compiler, Linux, `perf_event_open` of CPU-clock samples of the workload's own process allowed, `perf_event_paranoid` at most 1 or the capability): a REAL perf capture of the compiled `fixtures/nativeperf/cpu/loop.c` through the in-process native helper (`fixtures/nativeperf/realcapture`) is exported by the real exporter, admitted over the real HTTPS route and read through `/api/v1/profiles/view` with the probe's own capability records (off-CPU and run-queue split read `unsupported` where tracefs is unavailable); the run fails when such a host leaves the row unsatisfied. On a host that cannot capture the row is NOT SATISFIED and names why (`evNeedsCapture`); constructed events never satisfy it. The Python, Node and Bun SDK profiles are delivered by `web/e2e/replay-profile.spec.ts` | not exercised (the smoke takes no capture) |
+| `isolation_same_ids_other_org` | satisfied (15 route variants, byte-identical to random IDs) | satisfied (7 variants) |
+| `lifecycle_grant_revoke_halts_stream` | satisfied (mid-stream: typed `revoke`/`authority_revoked`, nothing after) | revoke denies later reads; mid-stream NOT SATISFIED (no readable replay) |
+| `lifecycle_deletion_halts_stream` | satisfied (C12 entity deletion of a replay and an artifact root mid-stream: typed `revoke`/`deleted`) | satisfied for `retire_project` through `POST /api/v1/admin/deletions` (202 fencing) while a reader has a replay open: the stream ends with one typed `revoke`/`authority_revoked`, nothing after, and a re-read answers 404; the entity mode is not driven over HTTP by the smoke |
+| `restore_keeps_current_deletion_authority`, `restore_old_credentials_inactive`, `restore_deleted_not_revived` | satisfied (restore from the pre-deletion backup; activation applies the authority's current head; old sessions, source credential and accounts inactive; deleted replay and artifact not revived by restore, a retried chunk, a receipt lookup or a re-upload) | `restore_keeps_current_deletion_authority` is now driven (CLI backup of the stopped served installation before a `retire_project` deletion over HTTPS, completion, restore of that older backup into a fresh root, activation, serve) and is NOT SATISFIED by a product defect the smoke observed: `soundpost serve` has no restore-authority option, so the served deletion never reaches the authority journal (2 journal files at the backup, still 2 after the completed deletion) and the restore cannot carry it. The restored view lists 0 organizations (quarantine), so project presence after restore is not observable from the served process; the other two rows are not exercised |
+| `canary_responses_logs`, `canary_storage_scan` | satisfied (the storage scan requires a positive control, else it reports inconclusive) | responses and process log |
+
+Canaries: a distinct sentinel in the source map `sourcesContent`, in replay node
+text and in an error `message` field is asserted absent from every HTTP response,
+the process log and (in-process) every file of the live and restored data roots.
+
+## Browser rows (09.06-W4)
+
+`tools/browserevidence` exports three named rows beside the per-test `playwright/...` rows, each derived from real Playwright tests that run against a served instance: `browser/mapped_frame` (trace to the issue's frames mapped by the real source map), `browser/masked_replay_viewer` (the masked replay in the sandboxed viewer, including the one recorded by the real browser SDK recorder) and `browser/profile_view` (the native profile and the SDK-produced profile). A row passes only when every test it names (`BrowserViews` in `tools/browserevidence/browserevidence.go`, by spec file and title prefix) is in the Playwright list AND passed in the run; a renamed or dropped test fails its row, and without results the row stays missing. `TestBrowserViewsNameRealSpecTests` pins the names to `web/e2e`.
+
+## Browser matrix and certificate trust (10.19-W3)
+
+The committed `web/playwright.config.ts` never sets `ignoreHTTPSErrors`: pointed at a server whose certificate the browser trusts it runs strict. The Linux worker's acceptance runs (`web/e2e-harness/h.sh`) serve a short-lived private CA and leaf on loopback, so:
+
+- Chromium is launched with `--ignore-certificate-errors-spki-list=<the run's leaf key pin>` (a pin of one key, not a blanket ignore).
+- Firefox and WebKit have no such switch and run with certificate verification on (no `ignoreHTTPSErrors`; `zz-pw.other.config.ts` no longer sets it). The harness makes them trust the run's CA without root: Firefox reads an enterprise policy file (`PLAYWRIGHT_FIREFOX_POLICIES_JSON`, `Certificates.Install` of the run CA), and WebKit, which only reads the system CA bundle, runs in a private user+mount namespace (`web/e2e-harness/in-trust-ns.sh`) in which the bundle's directory is overlaid with one that also lists the run CA (set `E2E_WEBKIT_TRUST=system` when an administrator installed the CA instead). `web/e2e/tls-trust.spec.ts` asserts, per browser, that the run origin loads verified and that a server whose leaf chains to another CA is refused (the same server loads in a context with verification off, so the refusal is the trust check). Red/green on Linux (a lab VM, Firefox 157, WebKit 27.2): old harness with the new spec: 2 of 2 failed on both browsers (`ignoreHTTPSErrors` true; untrusted CA accepted); new harness: 2 of 2 pass on Chromium, Firefox and WebKit; trust withheld (policy names a missing file, overlay without the CA): Firefox `SEC_ERROR_UNKNOWN_ISSUER`, WebKit `Unacceptable TLS certificate`. Logs: `.superpowers/sdd/approved-product/l1w28-evidence/l1w28-browser/e2e-*.log` (private ledger). Windows Firefox/WebKit trust is BLOCKED_INFRA: there is no Windows test host (the owner forbids loading the Windows workstation), so it is neither run nor declared out of scope.
+- Re-run at HEAD 4bd8897 (l1w30, a lab VM, Debian 13, Chromium 156, Firefox 157, WebKit 27.2 WPE, Playwright 1.64.1): `tls-trust.spec.ts` passes 2 of 2 on each of the three browsers, and no `ignoreHTTPSErrors` is set in `web/playwright.config.ts`, `playwright.provision.config.ts` or any `zz-pw.*.config.ts` the harness generates (grep finds none; the spec's first test asserts it per project). Negative controls on a scratch copy of the harness: Firefox with a policy file that installs no certificate fails the first test with `SEC_ERROR_UNKNOWN_ISSUER`; WebKit with `E2E_WEBKIT_TRUST=system` and no CA installed fails it with `Unacceptable TLS certificate`; the refusal test passes in both. This is a Linux result only: no Windows host was run (the owner forbids loading the Windows workstation), so Windows Firefox/WebKit trust (10.19#10 as worded) is unproven; `in-trust-ns.sh` and `h.sh` use `unshare` and `systemd-run` and are not Windows tools.
+
+## Wiring status
+
+`soundpost serve` applies the symbolication configuration itself: after `appcore.Open` it
+calls `App.ConfigureSymbolicator` (flags `--symbolicate-sandbox`, `--symbolicate-config`,
+`--symbolicate-cgroup-root`; `docs/operations/symbolication.md`), which probes the sandbox
+and only then installs the real service. `appcore.Open` itself answers the typed
+`sandbox_unavailable` reason until then, never `symbolicator_not_wired`. Under a
+delegated cgroup subtree (the shipped `deploy/systemd/soundpost.service`, which carries
+`RestrictNamespaces=yes` and `SystemCallFilter=seccomp`) the native sandbox starts without
+privilege: when `clone3` into a cgroup is unusable the worker is staged (migrated into its
+cgroup, then released and exec'd), and `frame_real_mapping` is SATISFIED through the
+served native sandbox (`.superpowers/sdd/approved-product/10.22-report.md`, measured on
+systemd 255, amd64). Only a host that provides neither a delegated cgroup nor a usable
+OCI backend answers `sandbox_unavailable` (probe `probe_file_sandbox_unavailable`), and
+then the served-process row stays NOT SATISFIED. arm64 and the OCI backend under the
+staged launcher are not exercised.
+
+Replay admission runs the stateless closed-format gate before the durable append and
+`replays.Service.CheckIndex`/`RecordScope` around it (`appcore.NewReplayIndexingAppender`).
+The replay service is NOT yet registered as a retention `References` source: the one
+binding `retention.Service.UseReferences` takes is the artifact lifecycle's, so whoever wires
+replays must compose both sources (`docs/protocol/replay-v1.md`).

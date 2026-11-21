@@ -1,0 +1,21 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+{{- $name := default "soundpost" .Values.nameOverride }}
+{{- if ne (int .Values.podDisruptionBudget.minAvailable) 2 }}{{ fail "podDisruptionBudget.minAvailable must be 2: with three voters, evicting a second member loses quorum" }}{{ end }}
+# Voluntary evictions (node drain, autoscaler) may take down at most ONE member at a time. The
+# budget does not govern StatefulSet updates or involuntary loss; see docs/operations/upgrade.md.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}-members
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: member

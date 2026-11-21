@@ -1,0 +1,47 @@
+# Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
+# Optional installation recipe; installation and capability grant require operator approval.
+# Provision the dedicated soundpost-perf account and root-owned /etc/soundpost/perf-policy.json.
+# The local exporter runs as the same dedicated UID; tenant ingress must not run as this UID.
+[Unit]
+Description=Soundpost fixed local perf acquisition helper
+After=local-fs.target
+
+[Service]
+Type=simple
+User=soundpost-perf
+Group=soundpost-perf
+ExecStart=/usr/libexec/soundpost-perf-acquire
+RuntimeDirectory=soundpost-perf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+UMask=0077
+CapabilityBoundingSet=CAP_PERFMON
+AmbientCapabilities=CAP_PERFMON
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service perf_event_open pidfd_open pidfd_send_signal
+# Memory-inspection, tracing and eBPF syscalls are denied even where a group admits them.
+SystemCallFilter=~kcmp userfaultfd bpf ptrace process_vm_readv process_vm_writev pidfd_getfd
+SystemCallErrorNumber=EPERM
+LimitNOFILE=256
+# A crashed helper must never write a core file (its transient buffers hold borrowed kernel records).
+LimitCORE=0
+MemoryMax=64M
+TasksMax=16
+Restart=no
+TimeoutStopSec=5s
+
+[Install]
+WantedBy=multi-user.target

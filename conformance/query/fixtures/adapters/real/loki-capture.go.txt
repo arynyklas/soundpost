@@ -1,0 +1,132 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+
+// Capture program for the real Loki push fixtures (02.08#12), kept as text (the .txt suffix keeps it out of the
+// module and records it next to the bytes it produced). It is copied into a source tree of the pinned Loki
+// (grafana/loki 257d2f62, vendored) as _soundpost_capture/main.go and built there, so the bytes come from the
+// unmodified upstream promtail client code (clients/pkg/promtail/client: logproto.PushRequest marshalled by the
+// upstream gogo/protobuf, the golang/snappy block encoder, the client's own HTTP headers). The program only feeds
+// entries to that client and stores what an HTTP server receives; nothing of upstream is copied into Soundpost.
+//
+//	cp loki-capture.go.txt <loki>/_soundpost_capture/main.go
+//	cd <loki> && GOTOOLCHAIN=go1.24.5 GOFLAGS=-mod=vendor go run ./_soundpost_capture <outdir>
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/go-kit/log"
+	"github.com/grafana/dskit/backoff"
+	"github.com/grafana/dskit/flagext"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
+
+	"github.com/grafana/loki/v3/clients/pkg/promtail/api"
+	"github.com/grafana/loki/v3/clients/pkg/promtail/client"
+	"github.com/grafana/loki/v3/pkg/logproto"
+)
+
+type sentEntry struct {
+	Labels   map[string]string `json:"labels"`
+	TimeNS   int64             `json:"timestamp_ns"`
+	Line     string            `json:"line"`
+	Metadata map[string]string `json:"structured_metadata,omitempty"`
+}
+
+func main() {
+	out := os.Args[1]
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		panic(err)
+	}
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		n++
+		id := n
+		mu.Unlock()
+		name := fmt.Sprintf("loki-push-%03d", id)
+		_ = os.WriteFile(filepath.Join(out, name+".bin"), body, 0o644)
+		headers := map[string]string{"method": r.Method, "path": r.URL.Path}
+		for _, h := range []string{"Content-Type", "Content-Encoding", "X-Scope-OrgID"} {
+			if v := r.Header.Get(h); v != "" {
+				headers[h] = v
+			}
+		}
+		raw, _ := json.MarshalIndent(headers, "", " ")
+		_ = os.WriteFile(filepath.Join(out, name+".headers.json"), append(raw, '\n'), 0o644)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL + "/loki/api/v1/push")
+	cfg := client.Config{
+		URL:           flagext.URLValue{URL: u},
+		BatchWait:     300 * time.Millisecond,
+		BatchSize:     1 << 20,
+		Timeout:       5 * time.Second,
+		BackoffConfig: backoff.Config{MinBackoff: 100 * time.Millisecond, MaxBackoff: time.Second, MaxRetries: 2},
+		TenantID:      "soundpost-capture",
+	}
+	c, err := client.New(client.NewMetrics(prometheus.NewRegistry()), cfg, 0, 0, false, log.NewNopLogger())
+	if err != nil {
+		panic(err)
+	}
+	base := int64(1_760_000_000_000_000_000)
+	long := strings.Repeat("0123456789abcdef", 256) // 4 KiB
+	waves := [][]sentEntry{
+		{ // wave 1: two streams, an exact-duplicate timestamp, a unicode line, a line with a newline
+			{Labels: map[string]string{"job": "real-loki", "app": "a"}, TimeNS: base + 1, Line: "first line"},
+			{Labels: map[string]string{"job": "real-loki", "app": "a"}, TimeNS: base + 2, Line: "same instant, first"},
+			{Labels: map[string]string{"job": "real-loki", "app": "a"}, TimeNS: base + 2, Line: "same instant, second"},
+			{Labels: map[string]string{"job": "real-loki", "app": "a"}, TimeNS: base + 3, Line: "unicode \u00e9\u4e16\u754c \U0001F680"},
+			{Labels: map[string]string{"job": "real-loki", "app": "b"}, TimeNS: base + 4, Line: "line one\nline two"},
+		},
+		{ // wave 2: structured metadata and a large line
+			{Labels: map[string]string{"job": "real-loki", "app": "b"}, TimeNS: base + 1_000_000_000, Line: "with metadata",
+				Metadata: map[string]string{"trace_id": "0af7651916cd43dd8448eb211c80319c", "level": "warn"}},
+			{Labels: map[string]string{"job": "real-loki", "app": "b"}, TimeNS: base + 1_000_000_001, Line: long},
+		},
+		{ // wave 3: a single entry in a stream with many labels
+			{Labels: map[string]string{"job": "real-loki", "app": "c", "env": "prod", "region": "eu", "zone": "z1", "pod": "c-0"}, TimeNS: base + 2_000_000_000, Line: "many labels"},
+		},
+	}
+	var expected []sentEntry
+	for _, wave := range waves {
+		for _, e := range wave {
+			ls := model.LabelSet{}
+			for k, v := range e.Labels {
+				ls[model.LabelName(k)] = model.LabelValue(v)
+			}
+			entry := logproto.Entry{Timestamp: time.Unix(0, e.TimeNS).UTC(), Line: e.Line}
+			keys := make([]string, 0, len(e.Metadata))
+			for k := range e.Metadata {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				entry.StructuredMetadata = append(entry.StructuredMetadata, logproto.LabelAdapter{Name: k, Value: e.Metadata[k]})
+			}
+			c.Chan() <- api.Entry{Labels: ls, Entry: entry}
+			expected = append(expected, e)
+		}
+		time.Sleep(900 * time.Millisecond) // past BatchWait: each wave is its own request
+	}
+	c.Stop()
+	raw, _ := json.MarshalIndent(expected, "", " ")
+	if err = os.WriteFile(filepath.Join(out, "loki-push-sent.json"), append(raw, '\n'), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("requests captured:", n, "entries sent:", len(expected))
+}

@@ -1,0 +1,594 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000014",
+        "policy_revision": "1",
+        "route_slot": 6,
+        "records": [
+          {
+            "id": "88888888888888888888888888888888",
+            "kind": "error",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "occurrence_id": "88888888888888888888888888888888",
+              "exception_class": "Error",
+              "mechanism": "manual",
+              "frames": [],
+              "exception_graph": {
+                "nodes": [
+                  {
+                    "id": 0,
+                    "exception_class": "Error",
+                    "frames": [],
+                    "context_suppressed": false
+                  }
+                ],
+                "edges": [],
+                "reasons": []
+              },
+              "code": null,
+              "build_id": "44444444444444444444444444444444",
+              "handled": true,
+              "fatal": false
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000014\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"88888888888888888888888888888888\",\"kind\":\"error\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"build_id\":\"44444444444444444444444444444444\",\"code\":null,\"exception_class\":\"Error\",\"exception_graph\":{\"edges\":[],\"nodes\":[{\"context_suppressed\":false,\"exception_class\":\"Error\",\"frames\":[],\"id\":0}],\"reasons\":[]},\"fatal\":false,\"frames\":[],\"handled\":true,\"mechanism\":\"manual\",\"occurrence_id\":\"88888888888888888888888888888888\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":6,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "fbfbc0bf438e02354eb28076a5ce85339ddfab474ef7a9c34ec6a6826841db8e"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000015",
+        "policy_revision": "1",
+        "route_slot": 8,
+        "records": [
+          {
+            "id": "00000000000000000000000000000009",
+            "kind": "log",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "severity": "error",
+              "template_id": "operation.failed",
+              "template_revision": "1",
+              "fields": {
+                "status": 503
+              },
+              "line": "operation failed: 503",
+              "stream_labels": [],
+              "structured_metadata": {},
+              "source_class": "structured"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000015\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000009\",\"kind\":\"log\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"fields\":{\"status\":503},\"line\":\"operation failed: 503\",\"severity\":\"error\",\"source_class\":\"structured\",\"stream_labels\":[],\"structured_metadata\":{},\"template_id\":\"operation.failed\",\"template_revision\":\"1\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":8,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "a6b0be45d85623a6861fb4aa8f8ae12314ed93c07c9f09044f4fcc8960c569be"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000016",
+        "policy_revision": "1",
+        "route_slot": 15,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000a",
+            "kind": "metric",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "name": "latency_😀",
+              "labels": [
+                {
+                  "name": "a",
+                  "value": "é"
+                },
+                {
+                  "name": "",
+                  "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                },
+                {
+                  "name": "𐀀",
+                  "value": "雪"
+                }
+              ],
+              "sample_kind": "integer_histogram",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "0000000000000000",
+                  "count": "9007199254740993",
+                  "zero_count": "9007199254740993",
+                  "positive_spans": [],
+                  "negative_spans": [],
+                  "positive_buckets": [],
+                  "negative_buckets": [],
+                  "reset_hint": "unknown"
+                }
+              },
+              "unit": "seconds",
+              "type": "histogram"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000016\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000a\",\"kind\":\"metric\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"histogram\":{\"integer\":{\"count\":\"9007199254740993\",\"flavor\":\"counter\",\"negative_buckets\":[],\"negative_spans\":[],\"positive_buckets\":[],\"positive_spans\":[],\"reset_hint\":\"unknown\",\"schema\":0,\"sum\":\"0000000000000000\",\"zero_count\":\"9007199254740993\",\"zero_threshold\":\"0000000000000000\"}},\"labels\":[{\"name\":\"a\",\"value\":\"é\"},{\"name\":\"\",\"value\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"},{\"name\":\"𐀀\",\"value\":\"雪\"}],\"name\":\"latency_😀\",\"sample_kind\":\"integer_histogram\",\"type\":\"histogram\",\"unit\":\"seconds\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":15,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "51fe6cb29adf10ec7e3d0d115232dc5fe317ac5c814717fddec110d33fad398e"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000017",
+        "policy_revision": "1",
+        "route_slot": 23,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000b",
+            "kind": "span",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "span_id": "dddddddddddddddd",
+              "parent_id": null,
+              "span_kind": "internal",
+              "operation": "operation",
+              "start": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "end": {
+                "wall_ns": "9007199254740994",
+                "mono_ns": "9007199254740994",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "status": "ok",
+              "dependency_alias": "",
+              "links": [],
+              "sample_probability": "3ff0000000000000",
+              "sample_decision": "keep"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000017\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000b\",\"kind\":\"span\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"dependency_alias\":\"\",\"end\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740994\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740994\"},\"links\":[],\"operation\":\"operation\",\"parent_id\":null,\"sample_decision\":\"keep\",\"sample_probability\":\"3ff0000000000000\",\"span_id\":\"dddddddddddddddd\",\"span_kind\":\"internal\",\"start\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"status\":\"ok\",\"trace_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":23,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "1d367c6f8a378a34aa0cadf19bf9db5fe4dba324f28731c92d322e7cb4e0ae94"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000018",
+        "policy_revision": "1",
+        "route_slot": 5,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000c",
+            "kind": "job_attempt",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "job_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "run_id": "dddddddddddddddddddddddddddddddd",
+              "attempt_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "schedule_occurrence": "daily",
+              "ordinal": "9007199254740993",
+              "producer_epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "sequence": "9007199254740993",
+              "state": "succeeded",
+              "observed_ns": "9007199254740993",
+              "terminal_ns": "9007199254740994"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000018\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000c\",\"kind\":\"job_attempt\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"attempt_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"job_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"observed_ns\":\"9007199254740993\",\"ordinal\":\"9007199254740993\",\"producer_epoch\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"run_id\":\"dddddddddddddddddddddddddddddddd\",\"schedule_occurrence\":\"daily\",\"sequence\":\"9007199254740993\",\"state\":\"succeeded\",\"terminal_ns\":\"9007199254740994\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":5,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "07ae64a6a4176e7d41e112154b93d89f4991b7bda5f27e3afd8e934143363874"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000019",
+        "policy_revision": "1",
+        "route_slot": 3,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000d",
+            "kind": "replay_chunk",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "replay_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "session_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "recorder_version": "1",
+              "sequence": "0",
+              "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "checkpoint_sequence": "0",
+              "checkpoint_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "clock": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "nodes": [],
+              "events": [],
+              "loss": "0",
+              "gap": true,
+              "capture_policy_revision": "1"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000019\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000d\",\"kind\":\"replay_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capture_policy_revision\":\"1\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"0\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"events\":[],\"gap\":true,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"sequence\":\"0\",\"session_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":3,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "bc6b514969c51b1d43a63e2325539a2a32e680b9cfd64b20ea6aa9f15b7e01b9"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "0000000000000000000000000000001a",
+        "policy_revision": "1",
+        "route_slot": 44,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000e",
+            "kind": "profile_chunk",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "profile_id": "ffffffffffffffffffffffffffffffff",
+              "process_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "capability_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "method": "runtime_cpu",
+              "units": "samples",
+              "start_ns": "9007199254740993",
+              "end_ns": "9007199254740994",
+              "clock": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "frames": [],
+              "stacks": [],
+              "samples": [],
+              "intervals": [],
+              "loss": "0",
+              "truncated": false
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"0000000000000000000000000000001a\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000e\",\"kind\":\"profile_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capability_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"end_ns\":\"9007199254740994\",\"frames\":[],\"intervals\":[],\"loss\":\"0\",\"method\":\"runtime_cpu\",\"process_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"profile_id\":\"ffffffffffffffffffffffffffffffff\",\"samples\":[],\"stacks\":[],\"start_ns\":\"9007199254740993\",\"truncated\":false,\"units\":\"samples\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":44,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "a9fcfb2d2241bb6b809e36c5574927a4c87092ea48d8c51eace2abd892b71e68"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "0000000000000000000000000000001b",
+        "policy_revision": "1",
+        "route_slot": 14,
+        "records": [
+          {
+            "id": "0000000000000000000000000000000f",
+            "kind": "capability",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "runtime": "node",
+              "version": "22.23.4",
+              "build": "44444444444444444444444444444444",
+              "os": "linux",
+              "arch": "x64",
+              "signal": "profile_chunk",
+              "method": "runtime_cpu",
+              "status": "unsupported",
+              "reason": "not_captured",
+              "coverage": {
+                "frames": "none",
+                "threads": "none",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "clock_domain": {
+                "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "runtime": "cccccccccccccccccccccccccccccccc"
+              },
+              "expires_ns": "9007199254740994"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"0000000000000000000000000000001b\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000f\",\"kind\":\"capability\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"arch\":\"x64\",\"build\":\"44444444444444444444444444444444\",\"clock_domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"coverage\":{\"frames\":\"none\",\"tasks\":\"none\",\"threads\":\"none\",\"workers\":\"none\"},\"expires_ns\":\"9007199254740994\",\"method\":\"runtime_cpu\",\"os\":\"linux\",\"reason\":\"not_captured\",\"runtime\":\"node\",\"signal\":\"profile_chunk\",\"status\":\"unsupported\",\"version\":\"22.23.4\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":14,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "f81c9184411d16de5c0989edb708c92126d6b314dd4f3359b13dcad225764163"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "0000000000000000000000000000001c",
+        "policy_revision": "1",
+        "route_slot": 6,
+        "records": [
+          {
+            "id": "00000000000000000000000000000010",
+            "kind": "loss",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "source": "33333333333333333333333333333333",
+              "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "producer_epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "start_ns": "9007199254740993",
+              "end_ns": "9007199254740994",
+              "signal": "error",
+              "reason": "transport",
+              "count": "9007199254740993",
+              "last_ack": {
+                "group": "ffffffffffffffffffffffffffffffff",
+                "index": "9007199254740993"
+              },
+              "queue_bytes": "2097152",
+              "queue_records": "1024"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"0000000000000000000000000000001c\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000010\",\"kind\":\"loss\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"count\":\"9007199254740993\",\"end_ns\":\"9007199254740994\",\"last_ack\":{\"group\":\"ffffffffffffffffffffffffffffffff\",\"index\":\"9007199254740993\"},\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"producer_epoch\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"queue_bytes\":\"2097152\",\"queue_records\":\"1024\",\"reason\":\"transport\",\"signal\":\"error\",\"source\":\"33333333333333333333333333333333\",\"start_ns\":\"9007199254740993\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":6,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "839659a095e582a836db5a36d4b11d6156fc0a9527ceb37211c1f28063b56fd6"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "0000000000000000000000000000001d",
+        "policy_revision": "1",
+        "route_slot": 53,
+        "records": [
+          {
+            "id": "00000000000000000000000000000011",
+            "kind": "condition",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "condition_id": "99999999999999999999999999999999",
+              "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "sequence": "9007199254740993",
+              "event_ns": "9007199254740993",
+              "status": "unknown",
+              "severity": "warning",
+              "labels": [],
+              "links": []
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"0000000000000000000000000000001d\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000011\",\"kind\":\"condition\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"condition_id\":\"99999999999999999999999999999999\",\"epoch\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"event_ns\":\"9007199254740993\",\"labels\":[],\"links\":[],\"sequence\":\"9007199254740993\",\"severity\":\"warning\",\"status\":\"unknown\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":53,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "4fd4e9d34aa0b17a7dfb99337a12b89263a2345f1c1e1a110f3c1b49f884b8c5"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000046",
+        "policy_revision": "1",
+        "route_slot": 15,
+        "records": [
+          {
+            "id": "00000000000000000000000000000032",
+            "kind": "metric",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "name": "start_counter_0",
+              "labels": [],
+              "sample_kind": "float",
+              "value": "3ff0000000000000",
+              "start_timestamp_ns": "9007199254741993",
+              "unit": "seconds",
+              "type": "counter"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000046\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000032\",\"kind\":\"metric\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"labels\":[],\"name\":\"start_counter_0\",\"sample_kind\":\"float\",\"start_timestamp_ns\":\"9007199254741993\",\"type\":\"counter\",\"unit\":\"seconds\",\"value\":\"3ff0000000000000\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":15,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "c92331596beccae712322ac95566562e78e01ad6c9a300afb34cc00b1227a26c"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000047",
+        "policy_revision": "1",
+        "route_slot": 17,
+        "records": [
+          {
+            "id": "00000000000000000000000000000033",
+            "kind": "metric",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "name": "start_counter_1",
+              "labels": [],
+              "sample_kind": "float",
+              "value": "3ff0000000000000",
+              "start_timestamp_ns": "-9007199254740993",
+              "unit": "seconds",
+              "type": "counter"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000047\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000033\",\"kind\":\"metric\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"labels\":[],\"name\":\"start_counter_1\",\"sample_kind\":\"float\",\"start_timestamp_ns\":\"-9007199254740993\",\"type\":\"counter\",\"unit\":\"seconds\",\"value\":\"3ff0000000000000\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":17,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "d28a8a8e49cd8a7f4c9fd7ada34a89f934c80f6994e28c120c6e443777f98be1"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000048",
+        "policy_revision": "1",
+        "route_slot": 29,
+        "records": [
+          {
+            "id": "00000000000000000000000000000034",
+            "kind": "metric",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "name": "start_counter_2",
+              "labels": [],
+              "sample_kind": "float",
+              "value": "3ff0000000000000",
+              "start_timestamp_ns": "0",
+              "unit": "seconds",
+              "type": "counter"
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000048\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000034\",\"kind\":\"metric\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"labels\":[],\"name\":\"start_counter_2\",\"sample_kind\":\"float\",\"start_timestamp_ns\":\"0\",\"type\":\"counter\",\"unit\":\"seconds\",\"value\":\"3ff0000000000000\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":29,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "7723263eafdd8a84107eabd9d082f37579a94f1d298c44690a104a0a7588920b"
+    }
+  ]
+}

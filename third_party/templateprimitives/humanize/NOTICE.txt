@@ -1,0 +1,5 @@
+ParseBytes and its strictly necessary byte-size constants/table from github.com/dustin/go-humanize.
+Copyright (c) 2005-2008 Dustin Sallings. MIT terms are retained in LICENSE.
+This is an individually licensed generic quantity parser, not Loki telemetry/parser/evaluator code.
+Only the selected function/table/constants are included; no upstream tests or unrelated humanize helpers are included.
+Exact pinned vendor source URLs, original/extracted/adapted SHA-256 and all adaptations are in provenance.json.

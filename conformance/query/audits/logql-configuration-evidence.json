@@ -1,0 +1,1017 @@
+{
+  "profile": "logql-loki-3.5.2",
+  "configuration": [
+    {
+      "name": "compactor.deletion-mode",
+      "registered_default": "\"filter-and-delete\"",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        "disabled",
+        "filter-only",
+        "filter-and-delete"
+      ],
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ]
+    },
+    {
+      "name": "compactor.retention-enabled",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "config.expand-env",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "config.file",
+      "registered_default": "\"config.yaml,config/config.yaml\"",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ]
+    },
+    {
+      "name": "dataobj-querier-enabled",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "dataobj-querier-from",
+      "registered_default": "zero time (unset)",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "RFC3339 time or unset",
+        "unset": "zero time"
+      },
+      "boundary_cases": [
+        "unset",
+        "before/equal/after wall clock",
+        "invalid timestamp rejected by typed parser"
+      ]
+    },
+    {
+      "name": "distributor.max-line-size",
+      "registered_default": "256KB",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled."
+    },
+    {
+      "name": "distributor.max-line-size-truncate",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "frontend.max-querier-bytes-read",
+      "registered_default": "150GB",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "frontend.max-query-bytes-read",
+      "registered_default": 0,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "ingester.query-store-max-look-back-period",
+      "registered_default": 0,
+      "effective_default_rule": "For shipper target all, zero becomes max_chunk_age + shard/upload delay + index-cache validity + 3*resync interval +5m; initQuerier propagates nonzero value and overrides query_ingesters_within precedence.",
+      "source_refs": [
+        "pkg/loki/modules.go:1084@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+        "pkg/loki/modules.go:2187@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+        "pkg/querier/querier.go:292@25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba",
+        "pkg/ingester/ingester.go:1598@d097270542ab5676e1f5533826c04f2c3183258add5fdde84257cb5f206b7881"
+      ],
+      "valid_domain": "Go duration; exact -1ns is whole-history querier sentinel; zero target-dependent; positive must meet computed minimum for filesystem shipper target all",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Registered0. Target all computes horizon when zero and sets QueryStore=true. Nonfilesystem object store rejects nonzero values in calculateMaxLookBack. Filesystem positive below computed minimum rejects; negative values pass calculator, but only exact -1ns triggers querier whole-history branch. Ingester adjustQueryStartTime clamps only positive durations."
+    },
+    {
+      "name": "ingester.unordered-writes",
+      "registered_default": "true",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "legacy-read-mode",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "limits.block-ingestion-until",
+      "registered_default": "zero time (unset)",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "RFC3339 time or unset",
+        "unset": "zero time"
+      },
+      "boundary_cases": [
+        "unset",
+        "before/equal/after wall clock",
+        "invalid timestamp rejected by typed parser"
+      ]
+    },
+    {
+      "name": "limits.enable-multi-variant-queries",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "limits.max-structured-metadata-entries-count",
+      "registered_default": "128",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled."
+    },
+    {
+      "name": "limits.max-structured-metadata-size",
+      "registered_default": "64KB",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled."
+    },
+    {
+      "name": "limits.per-user-override-config",
+      "registered_default": "",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ]
+    },
+    {
+      "name": "limits.per-user-override-period",
+      "registered_default": "10s",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "querier.align-querier-with-step",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "querier.engine.max-count-min-sketch-heap-size",
+      "registered_default": "10000",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/count_min_sketch.go:172@35a5bbca94d6140e8bf0a7afc7359b4961cc6384939ff8dfdab6d13351100aca"
+      ],
+      "valid_domain": "signed int parser; meaningful approximation heap domain >=0; negative configuration is not constructor-validated",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Default 10000. Zero immediately removes each pushed label candidate; -1 produces zero initial capacity and also removes every candidate; values below -1 produce invalid negative slice capacity on initialization, a runtime failure rather than accepted useful domain. No invented config validation rejection."
+    },
+    {
+      "name": "querier.engine.max-lookback-period",
+      "registered_default": "30s",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/engine.go:173@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/logql/evaluator.go:304@207893d2ddf2ffd2f28640c46649ed407ae98d6475e9adeff8e041c98267273a"
+      ],
+      "valid_domain": "signed Go duration; zero restored to 30s",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Instant log selector subtracts effective lookback from start. Positive looks backward; negative moves start forward; applyDefault normalizes only exact zero."
+    },
+    {
+      "name": "querier.instant-metric-query-split-align",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "querier.max-query-lookback",
+      "registered_default": 0,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:93@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "valid_domain": "duration parser domain; positive bound, nonpositive disables this validation branch",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Lookback clamps start to wall-clock minus bound only when >0. Length rejects only when >0 and post-clamp span exceeds bound. End-before-effective-start errors independently."
+    },
+    {
+      "name": "querier.max-query-range",
+      "registered_default": 0,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/engine.go:386@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:46@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "valid_domain": "duration parsed into int64 nanoseconds; Limits.Validate adds no nonnegative constraint",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Smallest strictly positive tenant duration bounds range selector. Zero and negative limits are skipped by this reducer; all nonpositive means no range bound."
+    },
+    {
+      "name": "querier.max-query-series",
+      "registered_default": "500",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/engine.go:458@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:10@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "valid_domain": "int; no registration/limits validation rejection of nonpositive values",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Consumer takes minimum across tenants without discarding nonpositive values despite helper name. First vector and accumulated unique range series fail if count > limit: 0 rejects nonempty; negative rejects even zero count."
+    },
+    {
+      "name": "querier.max-streams-matcher-per-query",
+      "registered_default": "1000",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:39@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "valid_domain": "signed int; no zero-disable sentinel",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Reject when matcher count exceeds limit; zero permits no matcher, negative causes any nonnegative count to exceed bound."
+    },
+    {
+      "name": "querier.per-request-limits-enabled",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "querier.query-ingester-only",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "constraints": [
+        "Cannot both be true; Config.Validate rejects this pair."
+      ]
+    },
+    {
+      "name": "querier.query-ingesters-within",
+      "registered_default": "3h0m0s",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/querier/querier.go:281@25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba",
+        "pkg/loki/modules.go:559@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44"
+      ],
+      "valid_domain": "signed Go duration; zero means unbounded only absent nonzero inherited store horizon",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Registered3h. Nonzero IngesterQueryStoreMaxLookback takes precedence. Exact duration -1ns in inherited horizon activates whole-ingester interval; zero alone can be overwritten indirectly by target initialization."
+    },
+    {
+      "name": "querier.query-store-only",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "constraints": [
+        "Cannot both be true; Config.Validate rejects this pair."
+      ]
+    },
+    {
+      "name": "querier.query-timeout",
+      "registered_default": "1m",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/engine.go:307@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:46@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "valid_domain": "duration; effective positive-min reducer then context deadline",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Smallest positive configured tenant timeout feeds WithTimeout. When every value is nonpositive the reducer returns zero and the context expires immediately; zero is not unlimited execution."
+    },
+    {
+      "name": "querier.shard-aggregations",
+      "registered_default": [],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/logql/shardmapper.go:31@11bfdd0318a345400975eb1f545eb3a4c1efb909eaa8600cc33d91333b07ab1b",
+        "pkg/logql/count_min_sketch.go:249@35a5bbca94d6140e8bf0a7afc7359b4961cc6384939ff8dfdab6d13351100aca"
+      ],
+      "valid_domain": {
+        "type": "list",
+        "recognized": [
+          "first_over_time",
+          "last_over_time",
+          "quantile_over_time",
+          "approx_topk"
+        ],
+        "duplicates": "idempotent",
+        "unknown": "ignored"
+      },
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "consumer_effect": "Four independent memberships; approx query requires positive k, no grouping and instant result type."
+    },
+    {
+      "name": "runtime-config.file",
+      "registered_default": [],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ]
+    },
+    {
+      "name": "runtime-config.reload-period",
+      "registered_default": "10s",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "schema-config-file",
+      "registered_default": "",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ]
+    },
+    {
+      "name": "store.cardinality-limit",
+      "registered_default": "100000",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "signed platform int (oracle linux/amd64: 64-bit)",
+        "validation": "No general nonnegative check in Limits.Validate; consumer-specific comparison below determines effect."
+      },
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ]
+    },
+    {
+      "name": "store.max-query-length",
+      "registered_default": "30d1h",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:93@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "valid_domain": "duration parser domain; positive bound, nonpositive disables this validation branch",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Lookback clamps start to wall-clock minus bound only when >0. Length rejects only when >0 and post-clamp span exceeds bound. End-before-effective-start errors independently."
+    },
+    {
+      "name": "store.query-chunk-limit",
+      "registered_default": "2000000",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:697@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": "signed int flag; deprecated/no-op in frozen overrides path",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Registration default2000000, but Overrides.MaxChunksPerQueryFromStore returns constant0; do not invent active chunk limit semantics from name/help."
+    },
+    {
+      "name": "store.retention",
+      "registered_default": 0,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "target",
+      "registered_default": "all",
+      "effective_default_rule": "Target controls module initialization; all differs from querier/read/ruler async-store mode and backend/index-gateway modes. Freeze target and post-initialization configuration, not only CLI help defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ]
+    },
+    {
+      "name": "validation.allow-structured-metadata",
+      "registered_default": "true",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "validation.create-grace-period",
+      "registered_default": "10m",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    },
+    {
+      "name": "validation.discover-log-levels",
+      "registered_default": "true",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/field_detection.go:88@de97c33ff466f41814fcee409c1c52107f79f66333078e8e04149369e153e3de"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "constraints": [
+        "Effective discovery requires both allow_structured_metadata and discover_log_levels; set discover_log_levels=false to prevent detected_level:unknown enrichment."
+      ]
+    },
+    {
+      "name": "validation.discover-service-name",
+      "registered_default": "[service app application app_name name app_kubernetes_io_name container container_name k8s_container_name component workload job k8s_job_name]",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ]
+    },
+    {
+      "name": "validation.enforced-labels",
+      "registered_default": [],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ]
+    },
+    {
+      "name": "validation.increment-duplicate-timestamps",
+      "registered_default": false,
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "validation.log-level-fields",
+      "registered_default": "[level LEVEL Level Severity severity SEVERITY lvl LVL Lvl severity_text Severity_Text SEVERITY_TEXT]",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ]
+    },
+    {
+      "name": "validation.log-level-from-json-max-depth",
+      "registered_default": "2",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:309@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd",
+        "pkg/distributor/field_detection.go:88@de97c33ff466f41814fcee409c1c52107f79f66333078e8e04149369e153e3de"
+      ],
+      "valid_domain": "signed int; <=0 unbounded; >0 bounds JSON search depth",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Default2. Negative/zero do not disable discovery; disable discover_log_levels explicitly to avoid detected_level enrichment."
+    },
+    {
+      "name": "validation.max-entries-limit",
+      "registered_default": "5000",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/querier/http.go:270@1a6e4b18cf6efde8cca0ef3e77a3d78f760c202f2fa31496200a9ca40dd8dec3",
+        "pkg/util/validation/limits.go:28@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "valid_domain": "signed int; positive tenant values bound request count; nonpositive skipped",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Positive nonzero minimum bounds log request limit; all nonpositive yields no request bound. Metric requests bypass this limit."
+    },
+    {
+      "name": "validation.max-label-names-per-series",
+      "registered_default": "15",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate."
+    },
+    {
+      "name": "validation.max-length-label-name",
+      "registered_default": "1024",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate."
+    },
+    {
+      "name": "validation.max-length-label-value",
+      "registered_default": "2048",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "consumer_effect": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate."
+    },
+    {
+      "name": "validation.reject-old-samples",
+      "registered_default": "true",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": [
+        false,
+        true
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "name": "validation.reject-old-samples.max-age",
+      "registered_default": "1w",
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ]
+    }
+  ],
+  "facts_policy": "Defaults are registration/help facts; representable parser domain is distinct from consumer useful domain, and runtime failure is not called validation rejection.",
+  "oracle_normalization": {
+    "target": "all",
+    "object_store": "filesystem",
+    "ingester.query_store_max_look_back_period": "-1ns",
+    "querier.query_ingesters_within": "0s",
+    "limits_config.discover_service_name": [],
+    "limits_config.discover_log_levels": false,
+    "limits_config.increment_duplicate_timestamp": false
+  },
+  "normalization_reason": "query_ingesters_within zero alone does not survive nonzero inherited target-all horizon precedence; exact duration -1ns is required for historical ingester fixtures."
+}

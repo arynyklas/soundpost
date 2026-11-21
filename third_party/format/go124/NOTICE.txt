@@ -1,0 +1,6 @@
+Generic formatting and numeric/string conversion primitives from Go 1.24.5.
+Copyright 2009-2024 The Go Authors. All rights reserved.
+Redistributed under the BSD-3-Clause terms in LICENSE.
+Original and adapted SHA-256 hashes, exact source URLs and import/byte-operation adaptations are recorded in provenance.json.
+The Soundpost-owned template interpreter is separately authored by Aryn Yklas under Apache-2.0; these generic primitives are not telemetry query code.
+No Go compiler/runtime, upstream telemetry implementation or AGPL source/test corpus is vendored here.

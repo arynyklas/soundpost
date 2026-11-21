@@ -1,0 +1,16 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+services:
+  postgres:
+    image: postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55
+    environment:
+      POSTGRES_DB: soundpost_fixture
+      POSTGRES_USER: soundpost_fixture
+      POSTGRES_PASSWORD: ${SOUNDPOST_FIXTURE_PG_PASSWORD:?Set a private fixture password}
+    ports:
+      - "127.0.0.1:${SOUNDPOST_FIXTURE_PG_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soundpost_fixture -d soundpost_fixture"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+# Stands in for the Firefox executable of Playwright's `moz-firefox` channel; see bidi-proxy.ts. Needs SOUNDPOST_FIREFOX_BINARY (the stock
+# Firefox 144.0.2 binary) and SOUNDPOST_BUN (default: bun on PATH).
+here=$(dirname "$0")
+exec "${SOUNDPOST_BUN:-bun}" "$here/bidi-proxy.ts" "$@"

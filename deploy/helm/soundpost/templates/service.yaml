@@ -1,0 +1,42 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+{{- $name := default "soundpost" .Values.nameOverride }}
+# Headless peer service: stable per-pod DNS (<pod>.<name>-peer.<namespace>.svc) that members
+# dial for mTLS. It publishes not-ready addresses on purpose: a starting member must be
+# reachable by the others, otherwise a quorum could never form after a full restart.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-peer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: member
+  ports:
+    - {name: peer, port: {{ .Values.ports.peer }}, targetPort: peer}
+---
+# Public service: only READY members receive traffic (the /readyz decision), so a member that
+# lost quorum or is applying a backlog is out of rotation instead of answering 503 to users.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: member
+  ports:
+    - {name: public, port: {{ .Values.ports.public }}, targetPort: public}

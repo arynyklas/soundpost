@@ -1,0 +1,7 @@
+# 02.12-W3 part A: selector regex of literal alternatives that are not UTF-8, quoted U+FFFD
+./internal/query/regexcompat TestLabelPatternOfLiteralAlternativesMayBeInvalidUTF8
+./internal/query/regexcompat TestInvalidUTF8PatternWithMetacharacterOrOutsideLabelModeStillFails
+./internal/query/regexcompat TestLiteralLabelPatternThroughQueryScope
+./internal/query/promql TestSelectorRegexOfLiteralInvalidUTF8
+./internal/query/promql TestQuotedStringRefusesRawReplacementCharacter
+./internal/conformance/query TestOwnedMatchesRecordedNativeRegexUTF8Observations

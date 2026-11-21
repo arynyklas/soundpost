@@ -1,0 +1,356 @@
+{
+  "schema": "soundpost-live-smoke/1",
+  "description": "Authored smoke flow for the owned C06 live stream over real admitted data and the real C05 committed change feed: an established stream receives only records committed after it opened, a disconnect and reconnect with Last-Event-ID continue exactly once, a forced replay-buffer eviction is an explicit gap with exact sequence bounds, and revocation and deletion end the stream with a typed terminal event before any further record. It names only generic projects, sources and principals. Expected values are authored from the fixture, never observed from an upstream engine. The stream is a push stream with explicit gaps; it makes no Loki WebSocket, tail or lossless-delivery claim.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "http": "own",
+    "profiles": [
+      "logql-loki-3.5.2"
+    ]
+  },
+  "fixture": {
+    "projects": [
+      "project-a",
+      "project-b"
+    ],
+    "sources": [
+      {
+        "id": "source-a",
+        "project": "project-a",
+        "class": "structured",
+        "kinds": [
+          "log"
+        ],
+        "labels": {
+          "app": [
+            "web"
+          ]
+        },
+        "template": {
+          "id": "signin",
+          "revision": 1,
+          "line": "user {name} signed in",
+          "field": "name",
+          "values": [
+            "alice",
+            "bob",
+            "carol",
+            "dave",
+            "erin",
+            "frank"
+          ]
+        }
+      },
+      {
+        "id": "source-b",
+        "project": "project-b",
+        "class": "structured",
+        "kinds": [
+          "log"
+        ],
+        "labels": {
+          "app": [
+            "web"
+          ]
+        },
+        "template": {
+          "id": "signin",
+          "revision": 1,
+          "line": "user {name} signed in",
+          "field": "name",
+          "values": [
+            "alice",
+            "bob",
+            "carol",
+            "dave",
+            "erin",
+            "frank"
+          ]
+        }
+      }
+    ],
+    "principals": [
+      {
+        "id": "reader",
+        "grants": {
+          "project-a": [
+            "telemetry.read"
+          ]
+        }
+      },
+      {
+        "id": "sibling-reader",
+        "grants": {
+          "project-b": [
+            "telemetry.read"
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "ticket",
+      "method": "POST",
+      "route": "/api/v1/live-tickets",
+      "as": "reader",
+      "body": {
+        "profile": "logql-loki-3.5.2",
+        "expression": "{app=\"web\"}",
+        "projects": [
+          "project-a"
+        ],
+        "budget": {
+          "timeout_ns": "0",
+          "memory_bytes": "0",
+          "max_returned": "2"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "ticket_is_non_secret_identifier": true,
+        "expression_absent_from_every_url": true
+      },
+      "save": "ticket-1"
+    },
+    {
+      "id": "foreign-project-ticket-is-guessed-project",
+      "method": "POST",
+      "route": "/api/v1/live-tickets",
+      "as": "sibling-reader",
+      "body": {
+        "profile": "logql-loki-3.5.2",
+        "expression": "{app=\"web\"}",
+        "projects": [
+          "project-a"
+        ]
+      },
+      "expect": {
+        "status": 404,
+        "code": "not_found",
+        "same_body_as_nonexistent_project": true,
+        "feed_subscriptions_opened": 0
+      }
+    },
+    {
+      "id": "ticket-copied-to-another-session",
+      "method": "GET",
+      "route": "/api/v1/live",
+      "query": {
+        "ticket": "$ticket-1"
+      },
+      "as": "sibling-reader",
+      "expect": {
+        "status": 404,
+        "code": "not_found",
+        "ticket_still_usable_by_issuer": true
+      }
+    },
+    {
+      "id": "open-stream",
+      "method": "GET",
+      "route": "/api/v1/live",
+      "query": {
+        "ticket": "$ticket-1"
+      },
+      "as": "reader",
+      "stream": true,
+      "expect": {
+        "status": 200,
+        "content_type": "text/event-stream",
+        "events": [
+          {
+            "type": "open",
+            "has_stream_id": true,
+            "sequence": null
+          }
+        ],
+        "no_record_for_data_committed_before_open": true
+      },
+      "save": "stream-1"
+    },
+    {
+      "id": "append-while-established",
+      "append": [
+        {
+          "source": "source-a",
+          "field": "alice"
+        },
+        {
+          "source": "source-b",
+          "field": "bob"
+        },
+        {
+          "source": "source-a",
+          "field": "carol"
+        }
+      ],
+      "stream_expect": {
+        "records": [
+          {
+            "id": "1",
+            "project": "project-a",
+            "line": "user alice signed in"
+          },
+          {
+            "id": "2",
+            "project": "project-a",
+            "line": "user carol signed in"
+          }
+        ],
+        "never_delivered_lines": [
+          "user bob signed in"
+        ],
+        "feed_subscriptions_opened": 1,
+        "steady_state_scan_polls": 0
+      }
+    },
+    {
+      "id": "disconnect",
+      "disconnect_stream": "stream-1",
+      "expect": {
+        "stream_retained_for_replay_seconds": 60
+      }
+    },
+    {
+      "id": "append-while-disconnected",
+      "append": [
+        {
+          "source": "source-a",
+          "field": "dave"
+        },
+        {
+          "source": "source-a",
+          "field": "erin"
+        },
+        {
+          "source": "source-a",
+          "field": "frank"
+        }
+      ]
+    },
+    {
+      "id": "reconnect-after-eviction",
+      "method": "POST",
+      "route": "/api/v1/live-tickets",
+      "as": "reader",
+      "body": {
+        "profile": "logql-loki-3.5.2",
+        "expression": "{app=\"web\"}",
+        "projects": [
+          "project-a"
+        ],
+        "budget": {
+          "timeout_ns": "0",
+          "memory_bytes": "0",
+          "max_returned": "2"
+        },
+        "resume_stream_id": "$stream-1"
+      },
+      "then_connect": {
+        "route": "/api/v1/live",
+        "last_event_id": "2"
+      },
+      "expect": {
+        "events": [
+          {
+            "type": "open",
+            "same_stream_id_as": "stream-1"
+          },
+          {
+            "type": "gap",
+            "id": "3",
+            "reason": "replay_evicted",
+            "from_sequence": "3",
+            "to_sequence": "3",
+            "never_an_apparently_complete_empty_stream": true
+          },
+          {
+            "type": "record",
+            "id": "4",
+            "project": "project-a",
+            "line": "user erin signed in"
+          },
+          {
+            "type": "record",
+            "id": "5",
+            "project": "project-a",
+            "line": "user frank signed in"
+          }
+        ],
+        "each_event_exactly_once": true,
+        "feed_subscriptions_opened": 1
+      }
+    },
+    {
+      "id": "revoke-mid-stream",
+      "revoke": "reader grant on project-a",
+      "append": [
+        {
+          "source": "source-a",
+          "field": "alice"
+        }
+      ],
+      "stream_expect": {
+        "terminal": {
+          "type": "revoke",
+          "reason": "scope_revoked",
+          "no_entry": true
+        },
+        "records_after_revocation": 0,
+        "stream_body_ends": true
+      }
+    },
+    {
+      "id": "delete-mid-stream",
+      "regrant": "reader grant on project-a",
+      "reopen_stream": true,
+      "delete": "project-a retained logs",
+      "append": [
+        {
+          "source": "source-a",
+          "field": "bob"
+        }
+      ],
+      "stream_expect": {
+        "terminal": {
+          "type": "revoke",
+          "reason": "deleted",
+          "no_entry": true
+        },
+        "records_after_deletion": 0,
+        "stream_body_ends": true
+      }
+    },
+    {
+      "id": "teardown-releases-everything",
+      "expect": {
+        "open_iterators": 0,
+        "open_subscriptions": 0,
+        "accounted_memory_bytes": 0,
+        "live_streams": 0,
+        "goroutines_owned_by_live_service": 0
+      }
+    }
+  ],
+  "forbidden": {
+    "query_string_fields": [
+      "expression",
+      "selector",
+      "token",
+      "org",
+      "project"
+    ],
+    "upstream_shaped_routes": [
+      "/loki/api/v1/tail",
+      "/api/v1/tail"
+    ],
+    "claims": [
+      "websocket",
+      "lossless_delivery",
+      "loki_tail_compatibility"
+    ],
+    "upstream_engine_clients": "none: a smoke run that observes any outbound connection to a Prometheus or Loki process fails"
+  }
+}

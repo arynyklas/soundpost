@@ -1,0 +1,3 @@
+22 1 0:20 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+25 1 0:23 / /proc rw,nosuid,nodev,noexec,relatime shared:5 - proc proc rw
+30 25 0:30 / /proc/sys/fs/binfmt_misc rw,relatime shared:9 - binfmt_misc binfmt_misc rw

@@ -1,0 +1,40 @@
+{
+  "primitive": "ParseBytes with strictly necessary byte-size constants/table",
+  "module": "github.com/dustin/go-humanize v1.0.1",
+  "license": "MIT",
+  "approved_by": "Main, approved02.06 narrow MIT quantity-parser approval",
+  "source_container": "conformance/query source lock: Loki commit 257d2f62bf8a81b44dea6fe88968d1d28c8e01e7; underlying primitive retains its independent MIT license",
+  "files": [
+    {
+      "path": "bytes.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/dustin/go-humanize/bytes.go",
+      "original_sha256": "9fb2391c3896a42cd4091279701f6274c19f3c3f15145503477229a67835d5da",
+      "extraction_original_line_ranges": [
+        [
+          1,
+          63
+        ],
+        [
+          103,
+          143
+        ]
+      ],
+      "extracted_original_sha256": "e3595a0a612f94941bddcf15a7366dd66fbb2880bf0cb3313ef2e4c66fcbe753",
+      "adapted_sha256": "aab6eaa4b06f6033c25572d33493a680c5ad2c904c01db66f600d117e41eace4",
+      "adaptations": [
+        "Include only ParseBytes and its constants/table; exclude logn/humanateBytes/Bytes/IBytes unrelated helpers.",
+        "Relocate fmt/strconv imports to approved Go1.24.5 primitives and unicode to existing unchanged Go1.24 Unicode15 primitive.",
+        "Express only source suffix lowercase/whitespace through strings.Map(unicode.ToLower) and strings.TrimFunc(unicode.IsSpace) to avoid host Unicode17; remaining strings operations are stable byte/rune primitives.",
+        "Remove See Also comment naming intentionally omitted display helpers."
+      ]
+    },
+    {
+      "path": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/dustin/go-humanize/LICENSE",
+      "original_sha256": "a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71",
+      "adapted_sha256": "a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71",
+      "adaptations": []
+    }
+  ],
+  "safety": "The caller must admit argument/error/intermediate allocations and work before invocation. Generic primitive error text is wrapped into explicit authorized language detail; never automatic diagnostic output."
+}

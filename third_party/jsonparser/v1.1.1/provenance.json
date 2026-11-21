@@ -1,0 +1,69 @@
+{
+  "primitive": "Lenient streaming JSON object iteration (ObjectEach), value typing and Unescape used by the LogQL json stage",
+  "module": "github.com/buger/jsonparser v1.1.1",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2016 Leonid Bugaev",
+  "approved_by": "Main, 2026-11-04: generic MIT JSON primitive, same approval class as the pinned regex/fmt/timezone primitives. Not a telemetry engine; stage logic remains first-party.",
+  "source_container": "conformance/query source lock: Loki commit 257d2f62bf8a81b44dea6fe88968d1d28c8e01e7 (vendored v1.1.1, called by pkg/logql/log/parser.go via ObjectEach/Unescape); bytes independently verified equal to the Go module proxy v1.1.1 zip",
+  "files": [
+    {
+      "path": "bytes.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/bytes.go",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "dc31aca3ce85efae8c4cc1ebce9f21f5c8cc82b25654bb384c9b6a674b196d97",
+      "adapted_sha256": "dc31aca3ce85efae8c4cc1ebce9f21f5c8cc82b25654bb384c9b6a674b196d97",
+      "adaptations": []
+    },
+    {
+      "path": "bytes_safe.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/bytes_safe.go",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "8d96c89cb327029256d2c62f260166f77939df6695fe04944305b89a4bcaaa83",
+      "adapted_sha256": "8d96c89cb327029256d2c62f260166f77939df6695fe04944305b89a4bcaaa83",
+      "adaptations": []
+    },
+    {
+      "path": "bytes_unsafe.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/bytes_unsafe.go",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "5bf19d20083ae54b4f3e5578d522f3dc0430697de3ef56248de45a18a4a26529",
+      "adapted_sha256": "5bf19d20083ae54b4f3e5578d522f3dc0430697de3ef56248de45a18a4a26529",
+      "adaptations": []
+    },
+    {
+      "path": "escape.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/escape.go",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "f9e4c1af9a1f7242f2e1b1a2535637836a4c440dda61fcd2217c316e9e2cca84",
+      "adapted_sha256": "f9e4c1af9a1f7242f2e1b1a2535637836a4c440dda61fcd2217c316e9e2cca84",
+      "adaptations": []
+    },
+    {
+      "path": "parser.go",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/parser.go",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "af71a1f9f9d88164d6ad85b9b7c2a6bcba94842934921277e591e090e306149b",
+      "adapted_sha256": "af71a1f9f9d88164d6ad85b9b7c2a6bcba94842934921277e591e090e306149b",
+      "adaptations": []
+    },
+    {
+      "path": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/vendor/github.com/buger/jsonparser/LICENSE",
+      "module_proxy_url": "https://proxy.golang.org/github.com/buger/jsonparser/@v/v1.1.1.zip",
+      "original_sha256": "632b59709152e1b5bfd3e2794848bcd2f4c70e3e175646726dbf53439ea1dbe1",
+      "adapted_sha256": "632b59709152e1b5bfd3e2794848bcd2f4c70e3e175646726dbf53439ea1dbe1",
+      "adaptations": []
+    }
+  ],
+  "excluded": [
+    {
+      "path": "fuzz.go",
+      "reason": "gofuzz-tagged harness, not needed"
+    },
+    {
+      "path": "Dockerfile/Makefile/README.md/oss-fuzz-build.sh",
+      "reason": "non-Go project files"
+    }
+  ],
+  "safety": "Unmodified. Caller must charge input size and every retained label/detail allocation before invocation and honour context cancellation between objects; error text is query-visible language detail only (__error_details__), never default diagnostics/logs. bytes_unsafe.go uses unsafe string/byte aliasing exactly as upstream; callers must not retain returned slices past the input lifetime."
+}

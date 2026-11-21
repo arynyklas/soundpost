@@ -1,0 +1,10 @@
+# 02.12-W4 (and 02.04-W3): generated cases executed through the differential phase runners inside the release gate
+./internal/conformance/query TestReleaseCountsGeneratedCasesPerSeed
+./internal/conformance/query TestReleaseRejectsAMismatchingGeneratedCaseAndMinimizesIt
+./internal/conformance/query TestReleaseCountsAnUnobservedGeneratedCaseAsUnrun
+./internal/conformance/query TestReleaseRejectsZeroExecutedGeneratedCases
+./internal/conformance/query TestPlannedGeneratedRowsAreDeterministicAndCoverEveryPhaseAndFeatureSet
+./internal/conformance/query TestPlannedGeneratedRowsCarryTheConcreteInputKinds
+./internal/conformance/query TestGeneratedFilesAreContentLockedForTheRunners
+./internal/conformance/query TestGeneratedMinimizerShrinksThroughThePhaseRunners
+./internal/conformance/query TestWriteRegressionsCreatesCaseFilesAndMergesTheIndex

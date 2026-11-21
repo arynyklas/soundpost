@@ -1,0 +1,382 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+
+//go:build linux
+
+package host
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func realCollect(t *testing.T, p HostPolicy) (HostBatch, Capabilities) {
+	t.Helper()
+	b, caps, err := Collect(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b, caps
+}
+
+func spin(d time.Duration, workers int) {
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(d)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			x := uint64(1)
+			for time.Now().Before(deadline) {
+				for i := 0; i < 20000; i++ {
+					x = x*6364136223846793005 + 1442695040888963407
+				}
+			}
+			if x == 42 { // keep the loop observable to the compiler
+				runtime.Gosched()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func sum(b HostBatch, name string, skip ...string) float64 {
+	total := 0.0
+outer:
+	for _, s := range b.Samples {
+		if s.Name != name {
+			continue
+		}
+		for _, l := range s.Labels {
+			for _, x := range skip {
+				if l.Value == x {
+					continue outer
+				}
+			}
+		}
+		total += s.Value
+	}
+	return total
+}
+
+func TestRealHostCPULoadDelta(t *testing.T) {
+	p := HostPolicy{Allow: []Group{GroupCPU, GroupCgroup}}
+	before, caps := realCollect(t, p)
+	mustCap(t, caps, GroupCPU, "", StatusSupported, ReasonNone)
+	t0 := time.Now()
+	workers := min(runtime.NumCPU(), 4)
+	spin(500*time.Millisecond, workers)
+	after, _ := realCollect(t, p)
+	wall := time.Since(t0).Seconds()
+
+	busy := func(b HostBatch) float64 { return sum(b, "host_cpu_seconds_total", "idle", "iowait") }
+	total := func(b HostBatch) float64 { return sum(b, "host_cpu_seconds_total") }
+	busyDelta := busy(after) - busy(before)
+	// Each worker burns ~0.5 CPU-seconds; demand only a quarter of the ideal.
+	if want := 0.125 * float64(workers); busyDelta < want {
+		t.Fatalf("busy CPU delta %.3fs, want at least %.3fs for %d spinning workers", busyDelta, want, workers)
+	}
+	var cpus float64
+	for _, s := range after.Samples {
+		if s.Name == "host_cpu_logical_count" {
+			cpus = s.Value
+		}
+	}
+	if cpus < float64(runtime.NumCPU()) {
+		t.Fatalf("logical count %v below runtime.NumCPU %d", cpus, runtime.NumCPU())
+	}
+	if got, ideal := total(after)-total(before), wall*cpus; got < 0.5*ideal || got > 1.5*ideal {
+		t.Fatalf("all-mode delta %.2fs inconsistent with wall %.2fs x %v cpus = %.2fs", got, wall, cpus, ideal)
+	}
+	if busy(after) < busy(before) {
+		t.Fatal("counter went backwards")
+	}
+
+	if c, _ := caps.Find(GroupCgroup, ""); c.Status == StatusSupported {
+		cg := func(b HostBatch) float64 { return sum(b, "host_cgroup_cpu_seconds_total") }
+		if d := cg(after) - cg(before); d < 0.125*float64(workers) {
+			t.Fatalf("cgroup CPU delta %.3fs too small for %d spinning workers", d, workers)
+		}
+	} else if c.Reason != ReasonCgroupV2Required && c.Reason != ReasonNotPresent {
+		t.Fatalf("cgroup %+v", c)
+	}
+}
+
+// kernelFS is what the kernel reports for dir right now (the unit is f_frsize, as statvfs).
+func kernelFS(t *testing.T, dir string) (size, free, avail float64) {
+	t.Helper()
+	var st unix.Statfs_t
+	if err := unix.Statfs(dir, &st); err != nil {
+		t.Fatal(err)
+	}
+	unit := float64(st.Frsize)
+	if st.Frsize == 0 {
+		unit = float64(st.Bsize)
+	}
+	return float64(st.Blocks) * unit, float64(st.Bfree) * unit, float64(st.Bavail) * unit
+}
+
+// The scratch directory lives on a filesystem the machine shares with other writers (a tmpfs /tmp
+// on the test VMs), whose creates and removals move the free bytes between and during the two
+// collections, so a fixed drop after this test's own write is not a property of the collector. What
+// is: a collected value is one the kernel itself reported between the statfs calls that bracket that
+// collection (a constant or a cached first reading falls outside the bracket on every attempt once the
+// 16 MiB write has landed), and the size does not move. A collection whose bracket was crossed by
+// writers that both added and freed space inside it proves nothing and is repeated, up to eight times.
+func TestRealHostFilesystemChange(t *testing.T) {
+	dir := t.TempDir()
+	p := HostPolicy{Allow: []Group{GroupFilesystem}, Filesystems: []FilesystemTarget{{Alias: "scratch", Path: dir}}}
+	free := "host_filesystem_bytes{mount=scratch,state=free,}"
+	avail := "host_filesystem_bytes{mount=scratch,state=available,}"
+	size := "host_filesystem_bytes{mount=scratch,state=size,}"
+	read := func(label string) map[string]float64 {
+		t.Helper()
+		miss := ""
+		for range 8 {
+			ks0, kf0, ka0 := kernelFS(t, dir)
+			b, caps := realCollect(t, p)
+			ks1, kf1, ka1 := kernelFS(t, dir)
+			mustCap(t, caps, GroupFilesystem, "scratch", StatusSupported, ReasonNone)
+			v := values(b)
+			if ks0 != ks1 || v[size] != ks0 {
+				t.Fatalf("%s: size %v, the kernel reports %v then %v", label, v[size], ks0, ks1)
+			}
+			if v[free] < min(kf0, kf1) || v[free] > max(kf0, kf1) {
+				miss = fmt.Sprintf("free bytes %v are outside what the kernel reported around the collection (%v, %v)", v[free], kf0, kf1)
+				continue
+			}
+			if v[avail] < min(ka0, ka1) || v[avail] > max(ka0, ka1) {
+				miss = fmt.Sprintf("available bytes %v are outside what the kernel reported around the collection (%v, %v)", v[avail], ka0, ka1)
+				continue
+			}
+			return v
+		}
+		t.Fatalf("%s: eight collections in a row: %s", label, miss)
+		return nil
+	}
+	chunk := make([]byte, 1<<20)
+	for i := range chunk {
+		chunk[i] = byte(i*7 + 1)
+	}
+	// The collector must also see this test's own 16 MiB write: free and available bytes fall by at
+	// least 2 MiB between the two collections. Other writers on the shared filesystem can free as much
+	// as the write takes in the same interval; such an attempt shows no drop in the kernel's numbers
+	// either, so the blob is removed and the write repeated, up to eight times, never skipped.
+	var before, after map[string]float64
+	dropped := ""
+	for attempt := range 8 {
+		before = read("before the write")
+		name := filepath.Join(dir, fmt.Sprintf("blob%d", attempt))
+		f, err := os.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 16 {
+			if _, err := f.Write(chunk); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.Sync(); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		after = read("after the write")
+		df, da := before[free]-after[free], before[avail]-after[avail]
+		if df >= 2<<20 && da >= 2<<20 {
+			dropped = ""
+			break
+		}
+		dropped = fmt.Sprintf("free fell by %.0f and available by %.0f after a 16 MiB write, want at least 2 MiB each", df, da)
+		if err := os.Remove(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if dropped != "" {
+		t.Fatalf("eight writes in a row: %s", dropped)
+	}
+
+	if before[size] == 0 || after[size] != before[size] {
+		t.Fatalf("size changed or is zero: %v -> %v", before[size], after[size])
+	}
+	if after[avail] > after[free] || after[free] > after[size] {
+		t.Fatalf("inconsistent: avail %v free %v size %v", after[avail], after[free], after[size])
+	}
+	if tot, ok := after["host_filesystem_inodes{mount=scratch,state=total,}"]; ok && tot != before["host_filesystem_inodes{mount=scratch,state=total,}"] {
+		t.Fatal("inode total changed")
+	}
+
+	// Real error mapping, with the path absent from the capability.
+	missing := filepath.Join(dir, "no-such-dir-xyz")
+	_, caps := realCollect(t, HostPolicy{Allow: []Group{GroupFilesystem}, Filesystems: []FilesystemTarget{{Alias: "gone", Path: missing}}})
+	mustCap(t, caps, GroupFilesystem, "gone", StatusUnknown, ReasonNotPresent)
+	if os.Geteuid() != 0 {
+		locked := filepath.Join(dir, "locked")
+		if err := os.Mkdir(locked, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+		_, caps = realCollect(t, HostPolicy{Allow: []Group{GroupFilesystem}, Filesystems: []FilesystemTarget{{Alias: "locked", Path: filepath.Join(locked, "inner")}}})
+		mustCap(t, caps, GroupFilesystem, "locked", StatusDenied, ReasonPermission)
+	}
+}
+
+func TestRealHostProcessCountRises(t *testing.T) {
+	p := HostPolicy{Allow: []Group{GroupProcessCount}}
+	count := func() float64 {
+		b, caps := realCollect(t, p)
+		mustCap(t, caps, GroupProcessCount, "", StatusSupported, ReasonNone)
+		return values(b)["host_processes_total{}"]
+	}
+	base := count()
+	if base < 1 {
+		t.Fatalf("process count %v", base)
+	}
+	var cmds []*exec.Cmd
+	t.Cleanup(func() {
+		for _, c := range cmds {
+			_ = c.Process.Kill()
+			_ = c.Wait()
+		}
+	})
+	for range 5 {
+		c := exec.Command("sleep", "30")
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds = append(cmds, c)
+	}
+	var got float64
+	for i := 0; i < 50; i++ {
+		if got = count(); got-base >= 5 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got-base < 5 {
+		t.Fatalf("count rose from %v to %v after starting 5 processes", base, got)
+	}
+	for _, c := range cmds {
+		_ = c.Process.Kill()
+		_ = c.Wait()
+	}
+	cmds = nil
+	if after := count(); after > got-5+3 {
+		t.Fatalf("count %v did not fall after killing 5 processes (was %v)", after, got)
+	}
+}
+
+func TestRealHostMemoryLoadAndPrivacy(t *testing.T) {
+	b, caps := realCollect(t, HostPolicy{Allow: []Group{GroupMemory, GroupLoad, GroupCgroup}})
+	mustCap(t, caps, GroupMemory, "", StatusSupported, ReasonNone)
+	mustCap(t, caps, GroupLoad, "", StatusSupported, ReasonNone)
+	v := values(b)
+
+	// Independent read of the same kernel files.
+	raw, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total uint64
+	sc := bufio.NewScanner(strings.NewReader(string(raw)))
+	for sc.Scan() {
+		if rest, ok := strings.CutPrefix(sc.Text(), "MemTotal:"); ok {
+			total, _ = strconv.ParseUint(strings.Fields(rest)[0], 10, 64)
+		}
+	}
+	if got := v["host_memory_bytes{state=total,}"]; got != float64(total*1024) || total == 0 {
+		t.Fatalf("total %v, /proc/meminfo says %d kB", got, total)
+	}
+	if v["host_memory_bytes{state=available,}"] > v["host_memory_bytes{state=total,}"] || v["host_memory_bytes{state=available,}"] <= 0 {
+		t.Fatalf("available %v vs total %v", v["host_memory_bytes{state=available,}"], v["host_memory_bytes{state=total,}"])
+	}
+	la, _ := os.ReadFile("/proc/loadavg")
+	one, _ := strconv.ParseFloat(strings.Fields(string(la))[0], 64)
+	if d := v["host_load_average{window=1m,}"] - one; d > 2 || d < -2 {
+		t.Fatalf("1m load %v vs /proc/loadavg %v", v["host_load_average{window=1m,}"], one)
+	}
+
+	if c, _ := caps.Find(GroupCgroup, ""); c.Status == StatusSupported {
+		if v["host_cgroup_pids{state=current,}"] < 1 {
+			t.Fatalf("cgroup pids.current %v", v["host_cgroup_pids{state=current,}"])
+		}
+		self, _ := os.ReadFile("/proc/self/cgroup")
+		line, _, _ := strings.Cut(strings.TrimPrefix(string(self), "0::"), "\n")
+		j, _ := json.Marshal(b.Samples)
+		if strings.Trim(line, "/") != "" && strings.Contains(string(j), strings.Trim(line, "/")) {
+			t.Fatalf("cgroup path %q leaked into samples", line)
+		}
+	}
+}
+
+// TestRealHostProcessCountOnAHidepidMount runs the collector against a REAL /proc
+// mount, not a fixture (07.03-W4). The mount is made by the caller, who sets
+// SOUNDPOST_REAL_HIDEPID to what it set up (internal/host/hidepid_real.sh is the
+// recipe: a user and pid namespace with /proc remounted hidepid=2, run as a
+// non-root and as the namespace's root):
+//
+//	restricted: hidepid mount, euid != 0: the group is unknown/process_visibility_restricted and no sample is emitted
+//	exempt:     hidepid mount, euid 0: the agent is assumed to see every process, so it counts
+//	plain:      an ordinary /proc: it counts
+//
+// Without the variable the test is skipped: the host it runs on decides the mount.
+func TestRealHostProcessCountOnAHidepidMount(t *testing.T) {
+	mode := os.Getenv("SOUNDPOST_REAL_HIDEPID")
+	if mode == "" {
+		t.Skip("SOUNDPOST_REAL_HIDEPID is not set: this test needs a /proc mount made for it (internal/host/hidepid_real.sh)")
+	}
+	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidepid := false
+	for _, line := range strings.Split(string(mountinfo), "\n") {
+		if f := strings.Fields(line); len(f) > 4 && f[4] == "/proc" && strings.Contains(line, "hidepid=") {
+			hidepid = true
+		}
+	}
+	b, caps := realCollect(t, HostPolicy{Allow: []Group{GroupProcessCount}})
+	switch mode {
+	case "restricted":
+		if !hidepid || os.Geteuid() == 0 {
+			t.Fatalf("not the restricted setup: hidepid mount %v, euid %d", hidepid, os.Geteuid())
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusUnknown, ReasonProcessVisibility)
+		if len(b.Samples) != 0 {
+			t.Fatalf("a restricted process view emitted samples: %+v", b.Samples)
+		}
+	case "exempt":
+		if !hidepid || os.Geteuid() != 0 {
+			t.Fatalf("not the exempt setup: hidepid mount %v, euid %d", hidepid, os.Geteuid())
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusSupported, ReasonNone)
+		if values(b)["host_processes_total{}"] < 1 {
+			t.Fatalf("no process counted: %+v", b.Samples)
+		}
+	case "plain":
+		if hidepid {
+			t.Fatal("the plain setup has a hidepid mount")
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusSupported, ReasonNone)
+		if values(b)["host_processes_total{}"] < 1 {
+			t.Fatalf("no process counted: %+v", b.Samples)
+		}
+	default:
+		t.Fatalf("unknown SOUNDPOST_REAL_HIDEPID %q", mode)
+	}
+}

@@ -1,0 +1,1356 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"math"
+	"net/http/cookiejar"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
+)
+
+// RunJourneys provisions an isolated product (a REAL `soundpost serve` process over HTTPS), a REAL
+// PostgreSQL 16 server (a container, or an unprivileged server from --pg-local), a deterministic HTTP
+// dependency, the Python API and jobs, the Bun gateway and the Vite-built web app, drives them (HTTP, a
+// real headless Chrome, a job run), then reads the admitted evidence back through the product's own
+// routes and evaluates every journey row (journeys_assert.go). It exits nonzero while any REQUIRED row
+// is unsatisfied.
+//
+// With --cluster-attach FILE no product is started here: the journeys run against the three-member cluster that its owner (tools/drills
+// --scenario node-loss-journeys) bootstrapped, put through a node loss and recovered; see journeys_cluster.go.
+//
+// Registered as: case "journeys": return RunJourneys(os.Args[2:]).
+func RunJourneys(args []string) (result error) {
+	fs := flag.NewFlagSet("journeys", flag.ContinueOnError)
+	var j journeyRun
+	fs.StringVar(&j.artDir, "artifact-dir", "", "output directory for the report (required)")
+	fs.StringVar(&j.root, "root", ".", "repository root")
+	fs.StringVar(&j.binary, "binary", "", "soundpost static binary (default: build/release output under --release)")
+	fs.StringVar(&j.release, "release", "/tmp/n0704-dist", "directory of `go run ./build release` output")
+	fs.StringVar(&j.bun, "bun", "/opt/bun/bin/bun", "Linux Bun")
+	fs.StringVar(&j.nodeLinux, "node-linux", "", "Linux Node 22 (default: extracted from /tmp/node22.tar.xz after its sha256 check)")
+	fs.StringVar(&j.python, "python", "python3", "Python 3")
+	fs.StringVar(&j.chrome, "chrome", "", "Linux Chrome (default: <root>/.tools/chrome-linux156/chrome-linux64/chrome)")
+	fs.StringVar(&j.pgImage, "pg-image", "", "container mode: PostgreSQL 16 image pinned by id (sha256:<64 hex>) or digest (name@sha256:<64 hex>); never pulled; default: the digest in "+referenceComposeRel)
+	fs.StringVar(&j.dependencyImage, "dependency-image", "", "container mode: Python image of the dependency (and the base of the estate image), pinned like --pg-image; default: the digest in "+referenceComposeRel)
+	fs.StringVar(&j.nodeImage, "node-image", "", "container mode: use this node image (sha256:<64 hex>) instead of building deploy/Dockerfile over --binary")
+	fs.StringVar(&j.estateImage, "estate-image", "", "container mode: use this estate image (sha256:<64 hex>) instead of building examples/reference/Dockerfile.estate")
+	fs.StringVar(&j.toolsImage, "tools-image", "", "container mode: use this provisioning image (sha256:<64 hex>) instead of building examples/reference/Dockerfile.tools")
+	fs.StringVar(&j.wheelDir, "estate-wheels", "", "container mode: directory of the hash-locked wheels for the estate image's interpreter (default: the image build reaches pip's index; the lock's hashes decide)")
+	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server and run the whole estate as host processes instead of the compose estate")
+	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup; REQUIRED in container mode, where the node container gets it mounted)")
+	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications; host-process mode)")
+	fs.StringVar(&j.attachPath, "cluster-attach", "", "run against the recovered distributed cluster this JSON document describes (tools/drills --scenario node-loss-journeys) instead of starting a node")
+	var svc provisionService
+	fs.BoolVar(&svc.enabled, "provision-service", false, "INTERNAL (the compose service `provision`): wait for the node, bootstrap it, create the journeys' organizations, users and sources and write each application's source configuration")
+	fs.StringVar(&svc.nodeURL, "node-url", "", "provision service: the node's HTTPS origin")
+	fs.StringVar(&svc.tlsDir, "tls-dir", "", "provision service: directory with ca.pem, leaf.pem and leaf.key")
+	fs.StringVar(&svc.nodeData, "node-data", "", "provision service: the node's data directory (read-only; holds the one-time bootstrap token)")
+	fs.StringVar(&svc.cfgDir, "cfg-dir", "", "provision service: the directory the source configurations are written to")
+	fs.StringVar(&svc.gatewayOrigin, "gateway-origin", "", "provision service: host:port the browser reaches the gateway at (the browser source's allowed origin)")
+	fs.StringVar(&svc.browserIngest, "browser-ingest", "", "provision service: host:port the browser sends telemetry to")
+	fs.StringVar(&svc.serverIngest, "server-ingest", "", "provision service: host:port the applications send telemetry to")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if svc.enabled {
+		j.svc = &svc
+		if err := svc.validate(); err != nil {
+			return err
+		}
+		return j.runProvisionService()
+	}
+	if j.artDir == "" {
+		return errors.New("--artifact-dir is required")
+	}
+	if j.attachPath != "" {
+		if j.hold {
+			return errors.New("--hold cannot be combined with --cluster-attach")
+		}
+		raw, err := os.ReadFile(j.attachPath)
+		if err != nil {
+			return err
+		}
+		if j.attach, err = parseJourneyAttach(raw); err != nil {
+			return err
+		}
+	}
+	// With a container runtime (no --pg-local) and no attached cluster the whole estate runs under compose.
+	j.estate = !j.localPG() && j.attach == nil
+	if j.estate && j.hold {
+		return errors.New("--hold needs host processes: use --pg-local")
+	}
+	if j.estate && j.cgroupRoot == "" {
+		return errors.New("container mode needs --symbolicate-cgroup-root: the node container gets that delegated, empty cgroup v2 subtree mounted for its native symbolication sandbox")
+	}
+	j.rep = map[string]any{}
+	j.logs = map[string]*syncBuffer{}
+	j.csrf = map[*installSite]string{}
+	defer func() {
+		j.cleanup()
+		if result == nil && !j.hold {
+			result = j.finish()
+		}
+	}()
+	return j.run()
+}
+
+type journeyRun struct {
+	artDir, root, binary, release, bun, nodeLinux, python, chrome, pgImage, dependencyImage, pgLocal, cgroupRoot string
+	nodeImage, estateImage, toolsImage, wheelDir                                                                 string
+	spkiPin                                                                                                      string
+	hold                                                                                                         bool
+
+	// The compose estate (journeys_estate.go): in container mode without --cluster-attach the node, the applications, PostgreSQL and
+	// the dependency all run as the services of examples/reference/compose.yaml (j.estate); svc is set only inside the `provision`
+	// service, which is this same binary.
+	estate      bool
+	builtImages []string // images this run built from the tree (removed at the end)
+	svc         *provisionService
+
+	work       string
+	pki        *journeyPKI
+	rep        map[string]any
+	logs       map[string]*syncBuffer
+	procs      []*jproc
+	compose    *referenceCompose // container mode: the backing services of examples/reference/compose.yaml (nil with --pg-local)
+	composeEnv []string
+	pgDir      string
+	pgLog      string
+	pgPort     string
+	pgPass     string
+	nodeDir    string
+	nodeAddr   string
+	node       *jproc
+	site       *installSite
+	owner      auth.Session
+
+	exp   journeyExpected
+	obs   journeyObservation
+	rows  []journeyRow
+	apps  map[string]*appCfg
+	cfgs  string
+	gw    string // gateway host:port
+	built struct{ out, asset string }
+	order struct {
+		Drive map[string]any
+		Frame map[string]any
+	}
+	pyPath   string
+	token    string // artifact write token
+	reader   map[string]*installSite
+	cookie   map[string]string
+	csrf     map[*installSite]string
+	depStats []byte
+
+	// Attach mode (--cluster-attach), journeys_cluster.go: the recovered cluster the journeys run against, the channel to the
+	// owner that holds its member processes, and the member the logins and reads currently go to.
+	attachPath string
+	attach     *journeyAttach
+	ctl        *journeyControl
+	cur        uint64
+}
+
+type appCfg struct {
+	Name     string
+	Source   model.ID
+	Build    model.ID
+	Service  model.ID
+	Path     string
+	Browser  bool
+	Onboard  auth.SourceOnboarded
+	Resource model.Resource
+}
+
+func (j *journeyRun) logf(f string, a ...any) { fmt.Fprintf(os.Stderr, "journeys: "+f+"\n", a...) }
+
+func (j *journeyRun) cleanup() {
+	for i := len(j.procs) - 1; i >= 0; i-- {
+		if !j.procs[i].exited() {
+			_ = j.procs[i].cmd.Process.Kill()
+		}
+	}
+	j.cleanupEstate()
+	j.stopPostgres()
+	if j.work != "" {
+		os.RemoveAll(j.work)
+	}
+}
+
+func (j *journeyRun) track(p *jproc) *jproc {
+	j.procs = append(j.procs, p)
+	j.logs[p.name] = p.err
+	j.logs[p.name+".stdout"] = p.out
+	return p
+}
+
+func (j *journeyRun) run() error {
+	var err error
+	if j.root, err = filepath.Abs(j.root); err != nil {
+		return err
+	}
+	if err = os.MkdirAll(j.artDir, 0o700); err != nil {
+		return err
+	}
+	if j.work, err = os.MkdirTemp("", "journeys-"); err != nil {
+		return err
+	}
+	if j.chrome == "" {
+		j.chrome = filepath.Join(j.root, ".tools", "chrome-linux156", "chrome-linux64", "chrome")
+	}
+	node := j.startNode
+	if j.attach != nil {
+		node = j.attachCluster
+	}
+	steps := []struct {
+		name string
+		fn   func() error
+	}{
+		{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"postgres", j.startPostgres}, {"node", node},
+		{"provision", j.provision}, {"web_build", j.buildWeb}, {"estate", j.startEstate},
+		{"journeys", j.drive}, {"stop_estate", j.stopEstate}, {"collect", j.collect}, {"reads", j.readsAfterRestart}, {"verdict", j.verdict},
+	}
+	if j.estate {
+		// The whole estate under compose: images built from this tree, then one `compose up` (init, node, provision, web build,
+		// PostgreSQL, dependency, API, gateway); the node's credentials never leave the provision service's volume.
+		steps = []struct {
+			name string
+			fn   func() error
+		}{
+			{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"images", j.buildImages}, {"estate", j.estateUp},
+			{"journeys", j.drive}, {"stop_estate", j.stopEstate}, {"collect", j.collect}, {"reads", j.readsAfterRestart}, {"verdict", j.verdict},
+		}
+	}
+	for _, s := range steps {
+		if s.name == "web_build" && j.hold {
+			if err = j.holdFile(); err != nil {
+				return err
+			}
+			return j.waitHold()
+		}
+		j.logf("step %s", s.name)
+		if err = s.fn(); err != nil {
+			return &smokeFailure{Smoke: "journeys", Stage: s.name, Code: sanitizeErr(err)}
+		}
+	}
+	return nil
+}
+
+func sanitizeErr(err error) string {
+	s := err.Error()
+	if len(s) > 300 {
+		s = s[:300]
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 32 {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// ---- toolchain / versions ----
+
+func (j *journeyRun) toolchain() error {
+	v := map[string]string{"go": runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH}
+	j.obs.Versions = v
+	if out, err := runOut(j.root, nil, "go", "version"); err == nil {
+		v["go"] = out
+	} else if out, err = runOut(j.root, nil, filepath.Join(j.root, ".tools/linux/go/bin/go"), "version"); err == nil {
+		v["go"] = out
+	}
+	var err error
+	if !j.estate {
+		if v["bun"], err = runOut(j.root, nil, j.bun, "--version"); err != nil {
+			return err
+		}
+	}
+	if j.nodeLinux == "" {
+		if j.nodeLinux, err = j.extractNode(); err != nil {
+			return err
+		}
+	}
+	if v["node_linux"], err = runOut(j.root, nil, j.nodeLinux, "--version"); err != nil {
+		return err
+	}
+	if !j.estate {
+		if v["python"], err = runOut(j.root, nil, j.python, "--version"); err != nil {
+			return err
+		}
+	}
+	if j.localPG() {
+		if v["postgres_server_binary"], err = j.localPostgresBinaryVersion(); err != nil {
+			return err
+		}
+	} else {
+		if v["docker_server"], err = runOut(j.root, nil, "docker", "version", "--format", "{{.Server.Version}}"); err != nil {
+			return err
+		}
+		if v["docker_compose"], err = runOut(j.root, nil, "docker", "compose", "version", "--short"); err != nil {
+			return err
+		}
+		// The compose file's own variables name the same images; a run started by something that cannot pass flags (the drills, the
+		// fresh-install matrix) exports them, and they are held to the same pin as the flags.
+		if j.pgImage == "" {
+			j.pgImage = os.Getenv("REFERENCE_PG_IMAGE")
+		}
+		if j.dependencyImage == "" {
+			j.dependencyImage = os.Getenv("REFERENCE_PYTHON_IMAGE")
+		}
+		// An image the operator names is checked before anything starts; the compose file's own digests are pinned by construction.
+		for name, ref := range map[string]string{"--pg-image": j.pgImage, "--dependency-image": j.dependencyImage, "--node-image": j.nodeImage, "--estate-image": j.estateImage, "--tools-image": j.toolsImage} {
+			if ref == "" {
+				continue
+			}
+			if err = pinnedImageRef(ref); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		}
+	}
+	v["kernel"], _ = runOut(j.root, nil, "uname", "-r")
+	if j.binary == "" {
+		j.binary = filepath.Join(j.release, "linux-amd64", "soundpost")
+	}
+	out, err := runOut(j.root, nil, j.binary, "version", "--json")
+	if err != nil {
+		return fmt.Errorf("soundpost binary: %w", err)
+	}
+	var sv struct{ Version, Commit, Platform, GoVersion string }
+	_ = json.Unmarshal([]byte(out), &sv)
+	v["soundpost"] = sv.Version + " " + sv.Commit + " " + sv.Platform + " built with " + sv.GoVersion
+	sum, err := fileSHA256(j.binary)
+	if err != nil {
+		return err
+	}
+	v["soundpost_binary_sha256"] = sum
+	if ok, err := installStaticELF(j.binary); err != nil || !ok {
+		return &smokeFailure{Stage: "binary_static", Code: "not_static_elf"}
+	}
+	if j.estate {
+		// The estate's Python packages are installed in the estate image (hash-locked); the host runs none of the applications.
+		return nil
+	}
+	pysite := filepath.Join(j.root, "examples/reference/pysite.sh")
+	if out, err = runOut(j.root, []string{"REFERENCE_PYTHON=" + j.python}, "sh", pysite, filepath.Join(j.work, "pysite")); err != nil {
+		return err
+	}
+	j.pyPath = lastLine(out)
+	return nil
+}
+
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[i+1:])
+	}
+	return s
+}
+
+func (j *journeyRun) extractNode() (string, error) {
+	dest := "/tmp/n0704node"
+	bin := filepath.Join(dest, "bin", "node")
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+	sums, err := os.ReadFile("/tmp/SHASUMS256.txt")
+	if err != nil {
+		return "", fmt.Errorf("no Linux Node: pass --node-linux or provide /tmp/node22.tar.xz and /tmp/SHASUMS256.txt: %w", err)
+	}
+	want := ""
+	for _, l := range strings.Split(string(sums), "\n") {
+		if strings.HasSuffix(l, " node-v22.23.4-linux-x64.tar.xz") {
+			want = strings.Fields(l)[0]
+		}
+	}
+	have, err := fileSHA256("/tmp/node22.tar.xz")
+	if err != nil || want == "" || want != have {
+		return "", errors.New("node tarball sha256 does not match SHASUMS256.txt")
+	}
+	tmp := dest + "-x"
+	os.RemoveAll(tmp)
+	if err = os.MkdirAll(tmp, 0o755); err != nil {
+		return "", err
+	}
+	if _, err = runOut(".", nil, "tar", "-xJf", "/tmp/node22.tar.xz", "-C", tmp, "--strip-components=1"); err != nil {
+		return "", err
+	}
+	return bin, os.Rename(tmp, dest)
+}
+
+// ---- PKI, PostgreSQL, node ----
+
+func (j *journeyRun) startPostgres() error {
+	if j.localPG() {
+		if err := j.startLocalPostgres(); err != nil {
+			return err
+		}
+		if err := j.applyLocalSchema(filepath.Join(j.root, "examples/reference/api/schema.sql")); err != nil {
+			return err
+		}
+		v, err := j.psql("select version()")
+		if err != nil {
+			return err
+		}
+		j.obs.Versions["postgres"] = v
+		return nil
+	}
+	return j.startComposePostgres()
+}
+
+func (j *journeyRun) psql(q string) (string, error) {
+	if j.localPG() {
+		return j.pgRun("reference", q)
+	}
+	return runOut(j.root, j.composeEnv, j.compose.command("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", "reference", "-Atc", q)...)
+}
+
+func (j *journeyRun) dsn() string {
+	return "postgresql://postgres:" + j.pgPass + "@127.0.0.1:" + j.pgPort + "/reference"
+}
+
+func (j *journeyRun) startNode() error {
+	j.nodeDir = filepath.Join(j.work, "node-data")
+	return j.launchNode()
+}
+
+func (j *journeyRun) launchNode() error {
+	if j.estate {
+		return j.estateStartNode()
+	}
+	if j.nodeAddr == "" {
+		addr, err := freeAddress()
+		if err != nil {
+			return err
+		}
+		j.nodeAddr = addr
+	}
+	if err := os.MkdirAll(j.nodeDir, 0o700); err != nil {
+		return err
+	}
+	argv := []string{j.binary, "serve", "--mode=single", "--data-dir", j.nodeDir, "--listen", j.nodeAddr, "--tls-cert", j.pki.Cert, "--tls-key", j.pki.Key}
+	if j.cgroupRoot != "" {
+		argv = append(argv, "--symbolicate-cgroup-root", j.cgroupRoot)
+	}
+	p, err := startJProc("node", j.root, nil, argv...)
+	if err != nil {
+		return err
+	}
+	j.node = j.track(p)
+	j.site = &installSite{base: "https://" + j.nodeAddr, client: j.pki.client()}
+	j.site.client.Jar, _ = cookiejar.New(nil)
+	return waitHTTPS(j.pki.client(), "https://"+j.nodeAddr+"/readyz", p, 60*time.Second)
+}
+
+func (j *journeyRun) stopNode() error {
+	if j.estate {
+		return j.estateStopNode()
+	}
+	err := j.node.stop(30 * time.Second)
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return nil
+		}
+	}
+	return err
+}
+
+// ---- provisioning: orgs, users, sources, configs ----
+
+var (
+	journeyOps  = []string{"request", "http.call", "db.execute", "job.run", "ui.action"}
+	journeyDeps = []string{"api", "postgres", "dependency", "gateway"}
+)
+
+func (j *journeyRun) adminCommand(org model.ID, kind string, p auth.AdminPayload) error {
+	p.Reason = "reference journeys"
+	payload, _ := json.Marshal(p)
+	command := model.NewID() // one command id for every repeat of this command
+	for attempt := 0; ; attempt++ {
+		status, raw, err := j.post(j.site, "/api/v1/admin/read", map[string]string{"kind": "organizations"}, j.owner.CSRF, "")
+		if err = requireSmokeResponse("admin_read", status, 200, raw, err); err != nil {
+			return err
+		}
+		var view auth.AdminView
+		if err = json.Unmarshal(raw, &view); err != nil {
+			return err
+		}
+		status, raw, err = j.site.post("/api/v1/admin/commands", auth.AdminCommandRequest{CommandID: command, ExpectedRevision: view.Revision, OrgID: org, Kind: kind, Payload: payload}, j.owner.CSRF, "")
+		// Against a cluster, a command that lost its index race or whose revision moved between the read and the command committed
+		// nothing: read the revision again and send the same command again.
+		if err == nil && j.attach != nil && retryableClusterAnswer(status, raw) && attempt < 40 {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		return requireSmokeResponse("admin_"+kind, status, 200, raw, err)
+	}
+}
+
+func (j *journeyRun) provision() error {
+	if err := j.establishOwner(); err != nil {
+		return err
+	}
+	var (
+		status int
+		raw    []byte
+		err    error
+	)
+	e := j.setExpectations()
+	readerA, readerB, builder, analyst := journeyID("user/reader-a"), journeyID("user/reader-b"), journeyID("user/builder"), journeyID("user/analyst")
+	pwd := func(n string) string { return n + " journeys password 2026" }
+	for _, c := range []struct {
+		org  model.ID
+		kind string
+		p    auth.AdminPayload
+	}{
+		{e.Org, "create_org", auth.AdminPayload{Name: "reference journeys A"}},
+		{e.Org, "create_project", auth.AdminPayload{ID: e.Project, Name: "reference"}},
+		{e.Org, "create_user", auth.AdminPayload{ID: readerA, Email: "reader-a@journeys.invalid", Password: pwd("reader-a")}},
+		{e.Org, "membership", auth.AdminPayload{UserID: readerA, Enabled: true}},
+		{e.Org, "grant", auth.AdminPayload{UserID: readerA, ProjectID: e.Project, Enabled: true, Permissions: []string{string(auth.Read)}}},
+		{e.Org, "create_user", auth.AdminPayload{ID: builder, Email: "builder@journeys.invalid", Password: pwd("builder")}},
+		{e.Org, "membership", auth.AdminPayload{UserID: builder, Enabled: true}},
+		{e.Org, "grant", auth.AdminPayload{UserID: builder, ProjectID: e.Project, Enabled: true, Permissions: []string{"artifacts.write", "artifacts.read"}}},
+		// The analyst is an organization administrator who also holds telemetry.read: the issue and error-occurrence evidence routes
+		// answer stored error detail only to such a caller (administration alone never reads telemetry). profiles.read is the separate
+		// grant a profile read needs.
+		{e.Org, "create_user", auth.AdminPayload{ID: analyst, Email: "analyst@journeys.invalid", Password: pwd("analyst")}},
+		{e.Org, "membership", auth.AdminPayload{UserID: analyst, Enabled: true}},
+		{e.Org, "grant", auth.AdminPayload{UserID: analyst, ProjectID: e.Project, Enabled: true, Permissions: []string{string(auth.Read), "profiles.read"}}},
+		{e.Org, "org_admin", auth.AdminPayload{UserID: analyst, Enabled: true}},
+		{e.OtherOrg, "create_org", auth.AdminPayload{Name: "reference journeys B"}},
+		{e.OtherOrg, "create_project", auth.AdminPayload{ID: e.OtherProject, Name: "other"}},
+		{e.OtherOrg, "create_user", auth.AdminPayload{ID: readerB, Email: "reader-b@journeys.invalid", Password: pwd("reader-b")}},
+		{e.OtherOrg, "membership", auth.AdminPayload{UserID: readerB, Enabled: true}},
+		{e.OtherOrg, "grant", auth.AdminPayload{UserID: readerB, ProjectID: e.OtherProject, Enabled: true, Permissions: []string{string(auth.Read)}}},
+	} {
+		if err = j.adminCommand(c.org, c.kind, c.p); err != nil {
+			return err
+		}
+	}
+	// Artifact-write credential for the build, issued to the builder, scoped to this project only.
+	status, raw, err = j.post(j.site, "/api/v1/admin/tokens/issue", map[string]any{"org_id": e.Org, "principal": builder, "projects": []model.ID{e.Project}, "permissions": []string{"artifacts.write"}, "expires": fmt.Sprint(time.Now().Add(2 * time.Hour).Unix()), "reason": "reference journeys build"}, j.owner.CSRF, "")
+	if err = requireSmokeResponse("token_issue", status, 200, raw, err); err != nil {
+		return err
+	}
+	var issued struct{ Token string }
+	if err = json.Unmarshal(raw, &issued); err != nil || issued.Token == "" {
+		return &smokeFailure{Stage: "token_issue", Code: "decode"}
+	}
+	j.token = issued.Token
+	// Sources.
+	if j.svc != nil {
+		// Inside the provision service the browser's origin and the configuration volume are given.
+		j.gw, j.cfgs = j.svc.gatewayOrigin, j.svc.cfgDir
+	} else {
+		gwAddr, err := freeAddress()
+		if err != nil {
+			return err
+		}
+		j.gw = gwAddr
+		j.cfgs = filepath.Join(j.work, "cfg")
+	}
+	if err = os.MkdirAll(j.cfgs, 0o700); err != nil {
+		return err
+	}
+	j.apps = map[string]*appCfg{}
+	env := journeyID("environment/reference")
+	for _, a := range journeyAppSpecs {
+		c := journeyAppIdentity(a.name, e.WebBuild)
+		retention := map[model.Kind]uint32{}
+		for _, k := range a.kinds {
+			retention[k] = 14
+		}
+		policy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: a.kinds,
+			Resources:  model.ResourceRegistry{Services: []model.ID{c.Service}, Environments: []model.ID{env}, Builds: []model.ID{c.Build}, Instances: []string{c.Resource.Instance}},
+			Operations: journeyOps, Dependencies: journeyDeps, Codes: journeyOps, RetentionDays: retention, MaxBytes: 1 << 30, MaxSeries: 1000, Replay: a.replay}
+		ob := auth.SourceOnboarding{CommandID: model.NewID(), Org: e.Org, Project: e.Project, Source: c.Source, Browser: a.browser, Expires: model.UnixNano(time.Now().Add(2 * time.Hour).UnixNano()), Policy: policy, Reason: "reference journeys"}
+		if a.browser {
+			ob.Origins = []string{"https://" + j.gw}
+		}
+		status, raw, err := j.post(j.site, "/api/v1/sources", ob, j.owner.CSRF, "")
+		if err = requireSmokeResponse("source_onboard_"+a.name, status, 200, raw, err); err != nil {
+			return err
+		}
+		if err = json.Unmarshal(raw, &c.Onboard); err != nil {
+			return err
+		}
+		if err = j.writeConfig(c, env); err != nil {
+			return err
+		}
+		j.apps[a.name] = c
+	}
+	j.obs.Expected = *e
+	return nil
+}
+
+func (j *journeyRun) writeConfig(c *appCfg, env model.ID) error {
+	cfg := map[string]any{
+		"org": j.exp.Org, "project": j.exp.Project, "source": c.Source, "credential": c.Onboard.Credential, "build": c.Build,
+		"endpoint": "https://" + j.ingestAddress(c.Name) + "/ingest/v1/batches", "ca_file": j.pki.CA,
+		"policy": c.Onboard.Policy, "trusted_keys": c.Onboard.TrustedKeys, "descriptor": c.Onboard.Descriptor,
+		"resource":     map[string]any{"service_id": c.Service, "environment_id": env, "build_id": c.Build, "instance_pseudonym": c.Resource.Instance},
+		"job_registry": map[string]any{"reference.catalog.refresh": j.exp.Job},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	c.Path = filepath.Join(j.cfgs, c.Name+".json")
+	return j.writePrivateConfig(c.Path, raw)
+}
+
+func (j *journeyRun) holdFile() error {
+	h := map[string]any{"work": j.work, "node": "https://" + j.nodeAddr, "ca": j.pki.CA, "cert": j.pki.Cert, "key": j.pki.Key, "gateway_listen": j.gw,
+		"database_url": j.dsn(), "artifact_token": j.token, "configs": map[string]string{}, "binary": j.binary, "python_path": j.pyPath}
+	if j.compose != nil {
+		h["compose_project"], h["compose_file"] = j.compose.Project, j.compose.File
+	}
+	for n, a := range j.apps {
+		h["configs"].(map[string]string)[n] = a.Path
+	}
+	raw, _ := json.MarshalIndent(h, "", "  ")
+	return os.WriteFile(filepath.Join(j.artDir, "hold.json"), raw, 0o600)
+}
+
+func (j *journeyRun) waitHold() error {
+	j.logf("hold: provisioned; hold.json written; SIGINT to tear down")
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	<-ch
+	return nil
+}
+
+// ---- web build ----
+
+func (j *journeyRun) buildWeb() error {
+	out := filepath.Join(j.work, "web-dist")
+	web := j.apps["web"]
+	env := []string{"REFERENCE_ORG=" + j.exp.Org.String(), "REFERENCE_PROJECT=" + j.exp.Project.String(), "REFERENCE_SOURCE=" + j.apps["webbuild"].Source.String(),
+		"REFERENCE_BUILD_ID=" + web.Build.String(), "REFERENCE_ENDPOINT=https://" + j.ingestAddress("webbuild"), "REFERENCE_ARTIFACT_TOKEN=" + j.token,
+		"REFERENCE_OUT_DIR=" + out, "NODE_EXTRA_CA_CERTS=" + j.pki.CA}
+	stdout, err := runOut(j.root, env, j.nodeLinux, "examples/reference/web/build.mjs")
+	if err != nil {
+		return fmt.Errorf("vite build: %w", err)
+	}
+	var res struct {
+		BuildID string `json:"build_id"`
+		Upload  string `json:"upload"`
+		Assets  []struct {
+			File       string `json:"file"`
+			DebugID    string `json:"debug_id"`
+			ArtifactID string `json:"artifact_id"`
+		} `json:"assets"`
+	}
+	if err = json.Unmarshal([]byte(lastJSONLine(stdout)), &res); err != nil {
+		return fmt.Errorf("build output undecodable")
+	}
+	a := &j.obs.Artifact
+	a.Uploaded = res.Upload == "ok" && len(res.Assets) > 0
+	if id, perr := model.ParseID(res.BuildID); perr == nil {
+		a.Build = id
+	}
+	if len(res.Assets) > 0 {
+		a.DebugID, a.Artifact = res.Assets[0].DebugID, res.Assets[0].ArtifactID
+		j.built.asset = res.Assets[0].File
+	}
+	for _, as := range res.Assets {
+		raw, rerr := os.ReadFile(filepath.Join(out, filepath.FromSlash(as.File)))
+		if rerr != nil {
+			return fmt.Errorf("built asset unreadable: %w", rerr)
+		}
+		if bytes.Contains(raw, []byte("sourceMappingURL")) {
+			a.HasSourceMapRef = true
+		}
+	}
+	j.built.out = out
+	// The page's own config, served by the gateway; the browser source key is public by design. It also carries the build's
+	// receipt (shipped asset path -> artifact id), which is how the browser SDK names the artifact in the frames of an error it
+	// stores: without it a frame keeps only its path and the server cannot map it.
+	webCfg, err := os.ReadFile(web.Path)
+	if err != nil {
+		return err
+	}
+	var page map[string]any
+	if err = json.Unmarshal(webCfg, &page); err != nil {
+		return err
+	}
+	ids := map[string]string{}
+	for _, as := range res.Assets {
+		ids[as.File] = as.ArtifactID
+	}
+	page["artifact_ids"] = ids
+	if webCfg, err = json.Marshal(page); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(j.cfgs, "web-config.json"), webCfg, 0o600)
+}
+
+// ---- the estate ----
+
+func (j *journeyRun) startEstate() error {
+	var dep string
+	var err error
+	if j.compose != nil {
+		dep = "127.0.0.1:" + j.compose.DependencyPort
+	} else if dep, err = freeAddress(); err != nil {
+		return err
+	}
+	api, err := freeAddress()
+	if err != nil {
+		return err
+	}
+	pyEnv := []string{"PYTHONPATH=" + j.pyPath, "REFERENCE_DATABASE_URL=" + j.dsn(), "PYTHONDONTWRITEBYTECODE=1"}
+	ref := filepath.Join(j.root, "examples/reference")
+	start := func(name, addr string, env []string, argv ...string) error {
+		p, err := startJProc(name, j.root, env, argv...)
+		if err != nil {
+			return err
+		}
+		j.track(p)
+		return waitHTTPS(j.pki.client(), "https://"+addr+"/healthz", p, 60*time.Second)
+	}
+	j.rep["dependency_url"], j.rep["api_url"] = "https://"+dep, "https://"+api
+	if j.compose != nil {
+		// Container mode: the dependency is the compose service; `up` stays in the foreground, so the process' output is the container's log.
+		err = start("dependency", dep, append(os.Environ(), j.composeEnv...), j.compose.command("up", "--no-log-prefix", "dependency")...)
+	} else {
+		err = start("dependency", dep, pyEnv, j.python, filepath.Join(ref, "dependency/server.py"), "--listen", dep, "--cert", j.pki.Cert, "--key", j.pki.Key)
+	}
+	if err != nil {
+		return err
+	}
+	if j.compose != nil {
+		if j.obs.Versions["dependency_image_id"], err = j.composeImageID("dependency"); err != nil {
+			return err
+		}
+	}
+	if err = start("api", api, pyEnv, j.python, filepath.Join(ref, "api/serve.py"), "--listen", api, "--cert", j.pki.Cert, "--key", j.pki.Key, "--config", j.apps["api"].Path, "--ca", j.pki.CA, "--dependency-url", "https://"+dep); err != nil {
+		return err
+	}
+	return start("gateway", j.gw, nil, j.bun, filepath.Join(ref, "gateway/server.ts"), "--listen", j.gw, "--cert", j.pki.Cert, "--key", j.pki.Key, "--config", j.apps["gateway"].Path, "--ca", j.pki.CA,
+		"--api-url", "https://"+api, "--web-dir", j.built.out, "--web-config", filepath.Join(j.cfgs, "web-config.json"))
+}
+
+func (j *journeyRun) proc(name string) *jproc {
+	for _, p := range j.procs {
+		if p.name == name {
+			return p
+		}
+	}
+	return nil
+}
+
+// ---- driving the journeys ----
+
+type flushLine struct {
+	Flush struct {
+		Pending  int `json:"pending"`
+		Lost     int `json:"lost"`
+		Receipts int `json:"receipts"`
+	} `json:"flush"`
+}
+
+func (j *journeyRun) drive() error {
+	if err := j.phase("drive_begin"); err != nil {
+		return err
+	}
+	e := j.exp
+	note := "journey note " + e.Canaries[0]
+	// 1. direct request through the gateway (no browser): gateway -> api -> PostgreSQL + dependency.
+	body, _ := json.Marshal(map[string]any{"item": "sku-100", "quantity": 2, "note": note})
+	resp, err := j.pki.client().Post("https://"+j.gw+"/api/orders", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !bytes.Contains(raw, []byte(`"priced"`)) {
+		return fmt.Errorf("direct order answered %d", resp.StatusCode)
+	}
+	j.rep["direct_order_status"] = resp.StatusCode
+	// 2. real browser: click -> gateway -> api -> db, then the known failure for the unpriced item.
+	order, err := j.driveBrowser("order", e.UnpricedItem, note)
+	if err != nil {
+		return err
+	}
+	j.order.Drive = order
+	j.rep["order_driver_flush"] = order["flush"] // the page's own delivery report (pending, lost, receipts), like the other clients' in details.json
+	if t, ok := order["trace_id"].(string); ok {
+		if id, perr := model.ParseID(t); perr == nil {
+			j.obs.UITrace = id
+		}
+	}
+	// 3. the job: attempt 1 fails (dependency warming up), attempt 2 succeeds.
+	jobsOut, err := j.runJobs()
+	if err != nil {
+		return fmt.Errorf("jobs: %w", err)
+	}
+	j.rep["jobs_output"] = json.RawMessage(lastJSONLine(jobsOut))
+	j.logs["jobs.stdout"] = &syncBuffer{}
+	j.logs["jobs.stdout"].Write([]byte(jobsOut))
+	var jr struct {
+		Versions map[string]string `json:"versions"`
+		Profile  *struct {
+			Method string `json:"method"`
+		} `json:"profile"`
+	}
+	if json.Unmarshal([]byte(lastJSONLine(jobsOut)), &jr) == nil {
+		for k, v := range jr.Versions {
+			j.obs.Versions["python_"+k] = v
+		}
+		if jr.Profile != nil {
+			j.obs.RuntimeProfile.Attempted, j.obs.RuntimeProfile.Method = true, jr.Profile.Method
+		}
+	}
+	// 4. the replay recorder and the profiler, each in its own page/client.
+	if j.obs.Replay.Attempted, err = j.scenario("replay"); err != nil {
+		return err
+	}
+	if j.obs.Profile.Attempted, err = j.scenario("profile"); err != nil {
+		return err
+	}
+	// The two refusals of the same SDK path in the same real Chrome: the page served without the Document-Policy header (denied) and a page whose
+	// browser lacks the Profiler API (unsupported). Each delivers its capability truth record alone.
+	for _, name := range []string{"profile-denied", "profile-unsupported"} {
+		attempted, serr := j.scenario(name)
+		if serr != nil {
+			return serr
+		}
+		r := refusalFromDriver(j.rep[name+"_driver"])
+		r.Variant, r.Attempted = strings.TrimPrefix(name, "profile-"), attempted
+		j.obs.Profile.Refusals = append(j.obs.Profile.Refusals, r)
+	}
+	return nil
+}
+
+func (j *journeyRun) scenario(name string) (bool, error) {
+	out, err := j.driveBrowser(name, "sku-100", "scenario note "+j.exp.Canaries[0])
+	if err != nil {
+		return false, err
+	}
+	j.rep[name+"_driver"] = out
+	return true, nil
+}
+
+func (j *journeyRun) browserHome() (string, error) {
+	home := filepath.Join(j.work, "home")
+	db := filepath.Join(home, ".pki", "nssdb")
+	if _, err := os.Stat(db); err == nil {
+		return home, nil
+	}
+	if err := os.MkdirAll(db, 0o700); err != nil {
+		return "", err
+	}
+	if _, err := exec.LookPath("certutil"); err != nil {
+		// No NSS tools on this host: the browser trusts the run's own leaf by its public-key pin instead of through a
+		// database holding the private CA (Chrome's --ignore-certificate-errors-spki-list, nothing else is ignored).
+		pin, perr := j.pki.leafSPKIPin()
+		if perr != nil {
+			return "", perr
+		}
+		j.spkiPin = pin
+		return home, nil
+	}
+	env := []string{"HOME=" + home}
+	if _, err := runOut(j.root, env, "certutil", "-d", "sql:"+db, "-N", "--empty-password"); err != nil {
+		return "", err
+	}
+	if _, err := runOut(j.root, env, "certutil", "-d", "sql:"+db, "-A", "-t", "C,,", "-n", "journeys-ca", "-i", j.pki.CA); err != nil {
+		return "", err
+	}
+	return home, nil
+}
+
+func (j *journeyRun) driveBrowser(scenario, item, note string) (map[string]any, error) {
+	home, err := j.browserHome()
+	if err != nil {
+		return nil, err
+	}
+	env := []string{"HOME=" + home, "NODE_PATH=" + filepath.Join(j.root, "web/node_modules"), "REFERENCE_NOTE=" + note, "PATH=" + os.Getenv("PATH")}
+	for _, name := range []string{"LD_LIBRARY_PATH", "FONTCONFIG_FILE", "DEBUG"} { // loader and font paths of a private library directory; Playwright's own debug switch
+		if v := os.Getenv(name); v != "" {
+			env = append(env, name+"="+v)
+		}
+	}
+	argv := []string{"examples/reference/web/drive.mjs", "--origin", "https://" + j.gw, "--chrome", j.chrome, "--scenario", scenario, "--item", item, "--note-env", "REFERENCE_NOTE"}
+	if j.spkiPin != "" {
+		argv = append(argv, "--spki-pin", j.spkiPin)
+	}
+	cmd := exec.Command(j.nodeLinux, argv...)
+	cmd.Dir, cmd.Env = j.root, env
+	var out, errb syncBuffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	j.logs["driver-"+scenario] = &out
+	j.logs["driver-"+scenario+".stderr"] = &errb
+	if err = cmd.Run(); err != nil {
+		// The closed diagnostic goes into the error; the driver's own stderr (names and positions only, never the note) is kept for the operator.
+		tail := errb.String()
+		if len(tail) > 8192 {
+			tail = tail[len(tail)-8192:]
+		}
+		_ = os.WriteFile(filepath.Join(j.artDir, "driver-"+scenario+".stderr.txt"), []byte(tail), 0o600)
+		return nil, fmt.Errorf("driver %s: %w: %s", scenario, err, firstLine(errb.String()))
+	}
+	var res map[string]any
+	if err = json.Unmarshal([]byte(lastJSONLine(out.String())), &res); err != nil {
+		return nil, fmt.Errorf("driver %s output undecodable", scenario)
+	}
+	if c, ok := res["chrome"].(string); ok && scenario == "order" {
+		j.obs.Versions["chrome"] = c
+	}
+	return res, nil
+}
+
+func (j *journeyRun) stopEstate() error {
+	var problems []string
+	if resp, err := j.pki.client().Get(j.rep["dependency_url"].(string) + "/v1/stats"); err == nil {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		j.depStats = raw
+	} else {
+		problems = append(problems, "dependency stats unreadable")
+	}
+	for _, n := range []string{"gateway", "api", "dependency"} {
+		var stdout string
+		if j.estate {
+			out, err := j.estateStop(n)
+			if err != nil && n != "dependency" {
+				problems = append(problems, n+": "+err.Error())
+			}
+			stdout = out
+		} else {
+			p := j.proc(n)
+			if err := p.stop(30 * time.Second); err != nil && n != "dependency" {
+				problems = append(problems, n+": "+err.Error())
+			}
+			stdout = p.out.String()
+		}
+		var fl flushLine
+		if json.Unmarshal([]byte(lastJSONLine(stdout)), &fl) == nil && n != "dependency" {
+			j.rep[n+"_flush"] = fl.Flush
+			if fl.Flush.Pending != 0 || fl.Flush.Lost != 0 || fl.Flush.Receipts == 0 {
+				problems = append(problems, fmt.Sprintf("%s flush pending=%d lost=%d receipts=%d", n, fl.Flush.Pending, fl.Flush.Lost, fl.Flush.Receipts))
+			}
+		} else if n != "dependency" {
+			problems = append(problems, n+": no flush report on stdout")
+		}
+	}
+	// What the dependency saw (hashes and counters only) is read before it exits.
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// ---- collection (node stopped; storage opened in-process) ----
+
+func (j *journeyRun) loginReader(name, email string) (*installSite, string, error) {
+	s := &installSite{base: j.nodeBase(), client: j.pki.client()}
+	s.client.Jar, _ = cookiejar.New(nil)
+	status, raw, err := j.post(s, "/api/v1/login", map[string]string{"Email": email, "Password": strings.SplitN(email, "@", 2)[0] + " journeys password 2026", "Code": ""}, "", "")
+	if err = requireSmokeResponse("login_"+name, status, 200, raw, err); err != nil {
+		return nil, "", err
+	}
+	var sess auth.Session
+	_ = json.Unmarshal(raw, &sess)
+	j.csrf[s] = sess.CSRF
+	u, _ := url.Parse(s.base)
+	for _, c := range s.client.Jar.Cookies(u) {
+		if c.Name == "__Host-soundpost" {
+			return s, c.Value, nil
+		}
+	}
+	return nil, "", errors.New("no session cookie")
+}
+
+func (j *journeyRun) collect() error {
+	// The applications are done: the owner of an attached cluster ends the writes it ran next to them here.
+	if err := j.phase("drive_end"); err != nil {
+		return err
+	}
+	// Logins need the node up, the scans need it down: log in first, then stop the node.
+	var err error
+	j.reader = map[string]*installSite{}
+	j.cookie = map[string]string{}
+	for _, r := range [][2]string{{"builder", "builder@journeys.invalid"}, {"reader-a", "reader-a@journeys.invalid"}} {
+		s, c, err := j.loginReader(r[0], r[1])
+		if err != nil {
+			return err
+		}
+		j.reader[r[0]], j.cookie[r[0]] = s, c
+	}
+	// The dependency's own counters, while it is still up? It was stopped in stopEstate; its
+	// stats were read there. Gather proof that canaries flowed from the surviving evidence.
+	if err = j.quiesceNode(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	app, err := j.openStorage()
+	if err != nil {
+		return err
+	}
+	defer app.Close()
+	scan := func(kind model.Kind, f func(i int, p storage.Page)) error {
+		cred, err := app.Auth.Authenticate(ctx, j.cookie["reader-a"])
+		if err != nil {
+			return err
+		}
+		scope, err := app.Auth.Authorize(ctx, cred, j.exp.Org, []model.ID{j.exp.Project}, auth.Read)
+		if err != nil {
+			return err
+		}
+		it, err := app.Storage.Scan(ctx, scope, storage.ScanRequest{Projects: []model.ID{j.exp.Project}, Signal: kind, Start: math.MinInt64, End: math.MaxInt64})
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for {
+			page, err := it.Next(ctx)
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			for i := range page.Len() {
+				f(i, page)
+			}
+		}
+	}
+	unsafe := func(what string, v any) {
+		raw, _ := json.Marshal(v)
+		if w := containsAny(raw, sqlWords); w != "" {
+			j.obs.UnsafeStorage = append(j.obs.UnsafeStorage, what+" contains "+w)
+		}
+	}
+	var gatewayRoots []model.ID
+	counts := map[string]int{}
+	if err = scan(model.SpanKind, func(i int, p storage.Page) {
+		s := p.Values[i].Span
+		counts["span"]++
+		unsafe("span", s)
+		if p.Sources[i] == j.apps["gateway"].Source && s.Parent == nil {
+			gatewayRoots = append(gatewayRoots, s.Trace)
+		}
+	}); err != nil {
+		return err
+	}
+	if len(gatewayRoots) != 1 {
+		return fmt.Errorf("want exactly one parentless gateway server span (the direct request), found %d", len(gatewayRoots))
+	}
+	j.obs.DirectTrace = gatewayRoots[0]
+	// Replay and profile rows count what storage holds. Errors, jobs and frames are NOT read here: they are read through the
+	// product's routes after the restart (readsAfterRestart), the way an operator would.
+	if err = scan(model.Replay, func(i int, p storage.Page) { counts["replay"]++; j.obs.Replay.StoredReplayRow++ }); err != nil {
+		return err
+	}
+	var chunks []model.ProfileChunk
+	rp := &j.obs.RuntimeProfile
+	if err = scan(model.Profile, func(i int, p storage.Page) {
+		counts["profile"]++
+		chunk := *p.Values[i].Profile
+		switch p.Sources[i] {
+		case j.apps["web"].Source:
+			j.obs.Profile.StoredProfile++
+			j.obs.Profile.StoredSamples += len(chunk.Samples)
+			chunks = append(chunks, chunk)
+			if !slices.Contains(j.obs.Profile.ProfileIDs, chunk.Profile) {
+				j.obs.Profile.ProfileIDs = append(j.obs.Profile.ProfileIDs, chunk.Profile)
+			}
+			j.obs.Profile.ChunkCapabilities = append(j.obs.Profile.ChunkCapabilities, chunk.Capability)
+		case j.apps["jobs"].Source:
+			rp.StoredChunks++
+			rp.Profile = chunk.Profile
+		}
+	}); err != nil {
+		return err
+	}
+	capabilities := map[model.ID]model.Capability{}
+	if err = scan(model.CapabilityKind, func(i int, p storage.Page) {
+		switch p.Sources[i] {
+		case j.apps["web"].Source:
+			counts["capability"]++
+			j.obs.Profile.StoredCapability++
+			capabilities[p.IDs[i]] = *p.Values[i].Capability
+		case j.apps["jobs"].Source:
+			counts["runtime_capability"]++
+			rp.StoredCapabilities++
+		}
+	}); err != nil {
+		return err
+	}
+	for id, c := range capabilities {
+		j.obs.Profile.Capabilities = append(j.obs.Profile.Capabilities, storedCapability{ID: id, Status: c.Status, Reason: c.Reason, Method: c.Method, Signal: c.Signal})
+	}
+	slices.SortFunc(j.obs.Profile.Capabilities, func(a, b storedCapability) int { return bytes.Compare(a.ID[:], b.ID[:]) })
+	j.obs.Profile.CapabilityLinked = len(chunks) > 0
+	for _, chunk := range chunks {
+		c, ok := capabilities[chunk.Capability]
+		if !ok || c.Signal != model.Profile || c.Clock != chunk.Clock.Domain {
+			j.obs.Profile.CapabilityLinked = false
+		}
+	}
+	j.rep["stored_counts"] = counts
+	j.recordPageError()
+	return nil
+}
+
+// recordPageError keeps where the real browser reported the thrown error (the generated position in the shipped bundle). It is
+// read from the driver's own report and is only compared with the stored frame; it is never mapped by the harness.
+func (j *journeyRun) recordPageError() {
+	frames, _ := j.order.Drive["page_errors"].([]any)
+	for _, f := range frames {
+		fe, _ := f.(map[string]any)
+		fr, _ := fe["frames"].([]any)
+		for _, x := range fr {
+			m, _ := x.(map[string]any)
+			if p, _ := m["path"].(string); strings.HasSuffix(p, ".js") && !j.obs.Page.Found {
+				line, _ := m["line"].(float64)
+				col, _ := m["column"].(float64)
+				j.obs.Page = pageObservation{Found: true, Path: p, Line: uint32(line), Column: uint32(col)}
+			}
+		}
+	}
+	if fi, err := os.ReadDir(filepath.Join(j.built.out, "assets")); j.built.out != "" && err == nil {
+		sizes := map[string]int64{}
+		for _, f := range fi {
+			if info, err := f.Info(); err == nil {
+				sizes[f.Name()] = info.Size()
+			}
+		}
+		j.rep["web_asset_sizes"] = sizes
+	}
+	j.rep["generated_position"] = map[string]any{"path": j.obs.Page.Path, "line": j.obs.Page.Line, "column": j.obs.Page.Column}
+}
+
+// ---- reads through the real HTTP routes after a restart ----
+
+func (j *journeyRun) readsAfterRestart() error {
+	if err := j.restartNode(); err != nil {
+		return err
+	}
+	a, _, err := j.loginReader("reader-a", "reader-a@journeys.invalid")
+	if err != nil {
+		return err
+	}
+	b, _, err := j.loginReader("reader-b", "reader-b@journeys.invalid")
+	if err != nil {
+		return err
+	}
+	analyst, _, err := j.loginReader("analyst", "analyst@journeys.invalid")
+	if err != nil {
+		return err
+	}
+	builder, _, err := j.loginReader("builder", "builder@journeys.invalid")
+	if err != nil {
+		return err
+	}
+	e := j.exp
+	now := time.Now()
+	window := map[string]any{"start": "0", "end": fmt.Sprint(now.Add(time.Hour).UnixNano())}
+	read := func(actor string, s *installSite, org, project, trace model.ID) error {
+		csrf := j.csrf[s]
+		status, raw, err := j.post(s, "/api/v1/traces/view", map[string]any{"org": org, "project": project, "trace": trace, "window": window}, csrf, "")
+		if err != nil {
+			return err
+		}
+		if len(raw) > 1<<20 && actor != "reader-a" {
+			raw = raw[:1<<20]
+		}
+		j.obs.Reads = append(j.obs.Reads, traceRead{Actor: actor, OrgSent: org, Project: project, Trace: trace, Status: status, Body: json.RawMessage(raw)})
+		return nil
+	}
+	for _, t := range []model.ID{j.obs.DirectTrace, j.obs.UITrace} {
+		if err = read("reader-a", a, e.Org, e.Project, t); err != nil {
+			return err
+		}
+		// reader B (organization B) names the owner's project, with its own org and with the owner's.
+		if err = read("reader-b", b, e.OtherOrg, e.Project, t); err != nil {
+			return err
+		}
+		if err = read("reader-b", b, e.Org, e.Project, t); err != nil {
+			return err
+		}
+	}
+	if err = j.readServed(a, analyst, builder, window); err != nil {
+		return err
+	}
+	return j.finishReads()
+}
+
+// ---- verdict ----
+
+const (
+	journeyThrowSource = "src/receipt.ts"
+	// `throw new UnpricedOrderError();` is line 24 of web/src/receipt.ts and its `new` starts at
+	// 0-based column 10 (source-map v3 columns are 0-based).
+	journeyThrowLine   = 24
+	journeyThrowColumn = 10
+)
+
+func (j *journeyRun) verdict() error {
+	e := j.exp
+	// Proof that every canary really travelled (so absence from storage is a measurement).
+	var stats struct {
+		Contains map[string]int `json:"prompt_contains"`
+	}
+	_ = json.Unmarshal(j.depStats, &stats)
+	flow := func(c string, where ...string) {
+		j.obs.Flows = append(j.obs.Flows, canaryFlow{Canary: c, Reached: where})
+	}
+	var bodyWhere, promptWhere, sqlWhere []string
+	if stats.Contains[e.Canaries[0]] > 0 {
+		bodyWhere = append(bodyWhere, "dependency_prompt_counter")
+	}
+	if n, err := j.psql("select count(*) from orders where note like '%" + e.Canaries[0] + "%'"); err == nil && n != "0" && n != "" {
+		bodyWhere = append(bodyWhere, "database_row")
+	}
+	if stats.Contains[e.Canaries[1]] > 0 {
+		promptWhere = append(promptWhere, "dependency_prompt_counter")
+	}
+	if logs, err := j.postgresStatementLog(); err == nil && strings.Contains(logs, e.Canaries[2]) {
+		sqlWhere = append(sqlWhere, "postgres_statement_log")
+	}
+	flow(e.Canaries[0], bodyWhere...)
+	flow(e.Canaries[1], promptWhere...)
+	flow(e.Canaries[2], sqlWhere...)
+	j.fillReplayProfile()
+	// Leak scan: the whole node data dir (any nesting of base64), every process log and output,
+	// every read answer, and the observation itself.
+	ctx := context.Background()
+	hits, files, err := j.scanNodeData(ctx, e.Canaries)
+	if err != nil {
+		return err
+	}
+	j.rep["scanned_files"] = files
+	j.obs.Leaks = append(j.obs.Leaks, hits...)
+	for name, buf := range j.logs {
+		if w := containsAny([]byte(buf.String()), e.Canaries); w != "" {
+			j.obs.Leaks = append(j.obs.Leaks, leakHit{Canary: w, Where: "process output: " + name})
+		}
+	}
+	for _, r := range j.obs.Reads {
+		if w := containsAny(r.Body, e.Canaries); w != "" {
+			j.obs.Leaks = append(j.obs.Leaks, leakHit{Canary: w, Where: "read answer: " + r.Actor})
+		}
+	}
+	// The observation itself (minus the canary labels it must name to be assessed).
+	scrubbed := j.obs
+	scrubbed.Expected.Canaries, scrubbed.Flows = nil, nil
+	if raw, _ := json.Marshal(scrubbed); containsAny(raw, e.Canaries) != "" {
+		j.obs.Leaks = append(j.obs.Leaks, leakHit{Canary: containsAny(raw, e.Canaries), Where: "observation record"})
+	}
+	j.rows = assessJourneys(j.obs)
+	return nil
+}
+
+func (j *journeyRun) fillReplayProfile() {
+	if d, ok := j.rep["replay_driver"].(map[string]any); ok {
+		r := &j.obs.Replay
+		if rp, ok := d["replay"].(map[string]any); ok {
+			emitted, _ := rp["chunksEmitted"].(float64)
+			r.RecorderChunks = int(emitted)
+			queued, _ := rp["queuedBeforeFlush"].(float64)
+			if emitted > 0 && queued == 0 {
+				// The recorder emitted chunks but the client queued none: the SDK did not turn them into deliverable records.
+				r.RefusedOrLost = "sdk_recorder_chunks_not_enqueued"
+			}
+			if fl, ok := rp["flush"].(map[string]any); ok {
+				lost, _ := fl["lost"].(float64)
+				receipts, _ := fl["receipts"].(float64)
+				r.AdmittedChunks = int(receipts)
+				if r.RefusedOrLost == "" && lost > 0 {
+					r.RefusedOrLost = "recorder_chunks_refused_or_lost"
+				}
+			}
+		}
+	}
+	if d, ok := j.rep["profile_driver"].(map[string]any); ok {
+		p := &j.obs.Profile
+		if pr, ok := d["profile"].(map[string]any); ok {
+			p.Capability, _ = pr["status"].(string)
+			p.Reason, _ = pr["reason"].(string)
+		}
+		p.ConsoleErrors = consoleErrorsOf(d)
+		// The delivery is measured, not assumed: stored profile rows and a stored, linked capability record.
+		p.SDKEnqueues = p.StoredProfile > 0 && p.CapabilityLinked
+	}
+}
+
+func (j *journeyRun) finish() error {
+	fmt.Fprintf(os.Stderr, "\nversions (actual):\n")
+	for k, v := range j.obs.Versions {
+		fmt.Fprintf(os.Stderr, "  %-24s %s\n", k, v)
+	}
+	fmt.Fprintf(os.Stderr, "\nadmitted IDs found vs expected:\n  ui trace      %s (driver) / direct trace %s (gateway root span)\n  web build     %s (expected) / %s (stored error, read through the product) / %s (uploaded)\n  job/run       %s / %s (expected)\n",
+		j.obs.UITrace, j.obs.DirectTrace, j.exp.WebBuild, firstBuild(j.obs), j.obs.Artifact.Build, j.exp.Job, j.exp.Run)
+	for _, er := range j.obs.Errors {
+		fmt.Fprintf(os.Stderr, "  stored error read through the product: issue=%s occurrence=%s status=%d\n", er.Issue, er.Occurrence, er.Read.Status)
+	}
+	if j.obs.JobRun != nil {
+		fmt.Fprintf(os.Stderr, "  job view read through the product: status=%d bytes=%d\n", j.obs.JobRun.Status, len(j.obs.JobRun.Body))
+	}
+	fmt.Fprintf(os.Stderr, "\nrows:\n")
+	for _, r := range j.rows {
+		state := "PASS"
+		if !r.Satisfied {
+			state = "NOT SATISFIED"
+		}
+		fmt.Fprintf(os.Stderr, "  %-13s %-45s %s %s\n", state, r.Name, r.Reason, r.Detail)
+	}
+	out, err := stampedDocument(map[string]any{"observation": j.obs, "rows": j.rows})
+	if err != nil {
+		return err
+	}
+	raw, _ := json.MarshalIndent(out, "", "  ")
+	if err := os.WriteFile(filepath.Join(j.artDir, "observed.json"), raw, 0o600); err != nil {
+		return err
+	}
+	// Details: driver outputs, flush reports and timings (no credentials, no telemetry text).
+	delete(j.rep, "jobs_output_raw")
+	details, _ := json.MarshalIndent(j.rep, "", "  ")
+	if err := os.WriteFile(filepath.Join(j.artDir, "details.json"), details, 0o600); err != nil {
+		return err
+	}
+	if bad := unsatisfiedRequired(j.rows); len(bad) > 0 {
+		names := make([]string, len(bad))
+		for i, b := range bad {
+			names[i] = b.Name + "=" + b.Reason
+		}
+		return fmt.Errorf("%d required row(s) unsatisfied: %s", len(bad), strings.Join(names, ", "))
+	}
+	return nil
+}
+
+func firstBuild(o journeyObservation) model.ID {
+	for _, e := range o.Errors {
+		if d, v := occurrenceOf(e); v.ok {
+			return d.Build
+		}
+	}
+	return model.ID{}
+}
+
+var _ = sha256.Sum256

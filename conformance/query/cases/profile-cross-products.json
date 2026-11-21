@@ -1,0 +1,491 @@
+{
+  "schema": "soundpost-profile-cross-products/1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "description": "Authored profile cross-product scenario through the owned C06 route over real admission and storage. Each query is run under each exact PromQL profile with the declared enabled gates (resolved to a registered feature set), and every profile carries its OWN expectation: a function added in 3.13.5 is a language error under 3.1.0 and a value under 3.13.5, while an unchanged selector is the same value under both. The cross product is run hot, after a flush, after a compaction and after a restart. Expectations are authored from the fixture and the version-difference ledger, never observed from an upstream engine. Native integer and float histograms (a count above 2^53, a counter reset, custom buckets) and LogQL logs under the pinned Loki profile are run through the same four stages: the integer histogram's count 2^54+1 converts to the nearest even float64 (2^54), a fall of the count is one counter reset, and a custom-bucket histogram answers its authored count; the LogQL count is the number of admitted lines.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "control": "real",
+    "http": "own",
+    "modes": [
+      "single"
+    ],
+    "stages": [
+      "hot",
+      "flush",
+      "compaction",
+      "restart"
+    ]
+  },
+  "fixture": {
+    "projects": [
+      "project-a"
+    ],
+    "sources": [
+      {
+        "id": "source-a",
+        "project": "project-a",
+        "kinds": [
+          "metric"
+        ],
+        "labels": {
+          "job": [
+            "api"
+          ]
+        }
+      },
+      {
+        "id": "hist-a",
+        "project": "project-a",
+        "kinds": [
+          "metric"
+        ],
+        "labels": {
+          "job": [
+            "api"
+          ]
+        }
+      },
+      {
+        "id": "logs-a",
+        "project": "project-a",
+        "kinds": [
+          "log"
+        ],
+        "labels": {
+          "app": [
+            "web"
+          ]
+        },
+        "log_template": {
+          "id": "signin",
+          "revision": 1,
+          "line": "user {name} signed in",
+          "field": "name",
+          "values": [
+            "alice",
+            "bob",
+            "carol"
+          ]
+        }
+      }
+    ],
+    "principals": [
+      {
+        "id": "reader",
+        "grants": {
+          "project-a": [
+            "telemetry.read"
+          ]
+        }
+      }
+    ],
+    "metric_points": [
+      {
+        "source": "source-a",
+        "name": "m",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "10000000000",
+        "value_bits": "3ff0000000000000"
+      },
+      {
+        "source": "source-a",
+        "name": "m",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "20000000000",
+        "value_bits": "4000000000000000"
+      },
+      {
+        "source": "source-a",
+        "name": "m",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "30000000000",
+        "value_bits": "7ff0000000000002"
+      },
+      {
+        "source": "source-a",
+        "name": "m",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "40000000000",
+        "value_bits": "4010000000000000"
+      }
+    ],
+    "log_records": [
+      {
+        "source": "logs-a",
+        "app": "web",
+        "time_ns": "10000000000",
+        "value": "alice"
+      },
+      {
+        "source": "logs-a",
+        "app": "web",
+        "time_ns": "20000000000",
+        "value": "bob"
+      },
+      {
+        "source": "logs-a",
+        "app": "web",
+        "time_ns": "30000000000",
+        "value": "carol"
+      }
+    ]
+  },
+  "cross_products": [
+    {
+      "id": "selector-is-the-same-under-both-pins",
+      "expression": "m",
+      "time_ns": "25000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "4000000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "4000000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stale-marker-removes-the-series-under-both-pins",
+      "expression": "m",
+      "time_ns": "35000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": []
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": []
+        }
+      }
+    },
+    {
+      "id": "first-over-time-exists-only-from-3.13.5",
+      "expression": "first_over_time(m[1m])",
+      "time_ns": "45000000000",
+      "enabled": [
+        "promql-experimental-functions"
+      ],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 400,
+          "code": "language"
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "3ff0000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "first-over-time-needs-its-gate-in-3.13.5",
+      "expression": "first_over_time(m[1m])",
+      "time_ns": "45000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 400,
+          "code": "language"
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 400,
+          "code": "language"
+        }
+      }
+    },
+    {
+      "id": "native-integer-count-above-2-pow-53-rounds-to-even",
+      "expression": "histogram_count(h_int)",
+      "time_ns": "15000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "4350000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "4350000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "native-integer-sum-is-exact",
+      "expression": "histogram_sum(h_int)",
+      "time_ns": "15000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "4059000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "4059000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "native-counter-reset-is-one-reset",
+      "expression": "resets(h_int[1m])",
+      "time_ns": "25000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "3ff0000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "3ff0000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "native-float-count-2-pow-60",
+      "expression": "histogram_count(h_float)",
+      "time_ns": "15000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "43b0000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "43b0000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "native-custom-buckets-count",
+      "expression": "histogram_count(h_cb)",
+      "time_ns": "15000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {
+          "status": 200,
+          "project-a": [
+            "401c000000000000"
+          ]
+        },
+        "promql-prometheus-3.13.5": {
+          "status": 200,
+          "project-a": [
+            "401c000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "logql-count-of-admitted-lines",
+      "language": "logql",
+      "expression": "count_over_time({app=\"web\"}[1h])",
+      "time_ns": "35000000000",
+      "enabled": [],
+      "expect": {
+        "logql-loki-3.5.2": {
+          "status": 200,
+          "project-a": [
+            "4008000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "logql-line-filter-count",
+      "language": "logql",
+      "expression": "count_over_time({app=\"web\"} |= \"bob\"[1h])",
+      "time_ns": "35000000000",
+      "enabled": [],
+      "expect": {
+        "logql-loki-3.5.2": {
+          "status": 200,
+          "project-a": [
+            "3ff0000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "logql-language-error-under-the-logql-profile",
+      "language": "logql",
+      "expression": "count_over_time({app=\"web\"}[1h]",
+      "time_ns": "35000000000",
+      "enabled": [],
+      "expect": {
+        "logql-loki-3.5.2": {
+          "status": 400,
+          "code": "language"
+        }
+      }
+    }
+  ],
+  "native_points": [
+    {
+      "source": "hist-a",
+      "name": "h_int",
+      "labels": {
+        "job": "api"
+      },
+      "time_ns": "10000000000",
+      "histogram": {
+        "integer": {
+          "flavor": "counter",
+          "schema": 0,
+          "zero_threshold": "0000000000000000",
+          "sum": "4059000000000000",
+          "count": "18014398509481985",
+          "zero_count": "0",
+          "positive_spans": [
+            {
+              "offset": 0,
+              "length": 2
+            }
+          ],
+          "negative_spans": [],
+          "positive_buckets": [
+            "9007199254740993",
+            "-1"
+          ],
+          "negative_buckets": [],
+          "reset_hint": "unknown"
+        }
+      }
+    },
+    {
+      "source": "hist-a",
+      "name": "h_int",
+      "labels": {
+        "job": "api"
+      },
+      "time_ns": "20000000000",
+      "histogram": {
+        "integer": {
+          "flavor": "counter",
+          "schema": 0,
+          "zero_threshold": "0000000000000000",
+          "sum": "401c000000000000",
+          "count": "5",
+          "zero_count": "0",
+          "positive_spans": [
+            {
+              "offset": 0,
+              "length": 2
+            }
+          ],
+          "negative_spans": [],
+          "positive_buckets": [
+            "3",
+            "-1"
+          ],
+          "negative_buckets": [],
+          "reset_hint": "reset"
+        }
+      }
+    },
+    {
+      "source": "hist-a",
+      "name": "h_float",
+      "labels": {
+        "job": "api"
+      },
+      "time_ns": "10000000000",
+      "histogram": {
+        "float": {
+          "flavor": "counter",
+          "schema": 0,
+          "zero_threshold": "0000000000000000",
+          "sum": "4059000000000000",
+          "count": "43b0000000000000",
+          "zero_count": "0000000000000000",
+          "positive_spans": [
+            {
+              "offset": 0,
+              "length": 2
+            }
+          ],
+          "negative_spans": [],
+          "positive_buckets": [
+            "43a0000000000000",
+            "43a0000000000000"
+          ],
+          "negative_buckets": [],
+          "reset_hint": "unknown"
+        }
+      }
+    },
+    {
+      "source": "hist-a",
+      "name": "h_cb",
+      "labels": {
+        "job": "api"
+      },
+      "time_ns": "10000000000",
+      "histogram": {
+        "integer": {
+          "flavor": "counter",
+          "schema": -53,
+          "zero_threshold": "0000000000000000",
+          "sum": "403e000000000000",
+          "count": "7",
+          "zero_count": "0",
+          "positive_spans": [
+            {
+              "offset": 0,
+              "length": 3
+            }
+          ],
+          "negative_spans": [],
+          "positive_buckets": [
+            "2",
+            "1",
+            "-1"
+          ],
+          "negative_buckets": [],
+          "reset_hint": "unknown",
+          "custom_bounds": [
+            "3ff0000000000000",
+            "4024000000000000"
+          ]
+        }
+      }
+    }
+  ]
+}
