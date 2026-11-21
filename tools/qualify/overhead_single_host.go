@@ -27,8 +27,10 @@ const (
 	singleHostRate     = 2000
 	singleHostSteadyS  = 3600
 	singleHostCPUs     = 8
-	// the fixture says 16 GiB RAM; a 16 GiB VM reports about 15.6 GiB after the hypervisor's share, so the floor is 15,000 MiB.
-	singleHostMemFloorKiB = 15_000 * 1024
+	// D90: the gate's host shape is the server's cgroup v2 scope: exactly 8 effective CPUs, memory.max from 15,000 MiB to 16 GiB (page cache
+	// is charged), no swap. The VM's own totals are not the shape.
+	singleHostMemFloorBytes = 15_000 << 20
+	singleHostMemCeilBytes  = 16 << 30
 	// a request that was not durably ACKed counts as this long in the strict p95: the load generator's own client timeout.
 	singleHostTimeoutUS = 40_000_000
 	// a load generator that starts requests later than this (p99, ms) after their scheduled instant does not hold an open-loop schedule.
@@ -119,6 +121,11 @@ type singleHostFacts struct {
 	DataFS      string `json:"data_dir_filesystem"`
 	BlockDevice string `json:"block_device_model"`
 	DataOnTmpfs bool   `json:"data_dir_on_tmpfs"`
+	// the server's cgroup v2 scope (D90): path and the raw contents of cpuset.cpus.effective, memory.max and memory.swap.max.
+	CgroupPath    string `json:"cgroup_path"`
+	CgroupCPUs    string `json:"cgroup_cpus_effective"`
+	CgroupMemMax  string `json:"cgroup_memory_max"`
+	CgroupSwapMax string `json:"cgroup_memory_swap_max"`
 }
 
 type shEvent struct {
@@ -281,6 +288,58 @@ type singleHostRecomputed struct {
 }
 
 func shRound(v float64) float64 { return math.Round(v*1e6) / 1e6 }
+
+// shCPUCount counts the CPUs of a cpuset list such as "0-3,8,10-11"; ok is false for anything that is not a well-formed list.
+func shCPUCount(list string) (n int, ok bool) {
+	list = strings.TrimSpace(list)
+	if list == "" {
+		return 0, false
+	}
+	for _, part := range strings.Split(list, ",") {
+		lo, hi, isRange := strings.Cut(part, "-")
+		a, err := strconv.Atoi(lo)
+		if err != nil || a < 0 {
+			return 0, false
+		}
+		b := a
+		if isRange {
+			if b, err = strconv.Atoi(hi); err != nil || b < a {
+				return 0, false
+			}
+		}
+		n += b - a + 1
+	}
+	return n, true
+}
+
+// shValidateScope checks the server's cgroup scope against D90 and returns the effective CPU count and the memory.max in bytes; why is
+// empty when the scope is the design's host shape.
+func shValidateScope(f singleHostFacts) (cpus int, mem int64, why string) {
+	if !strings.HasPrefix(f.CgroupPath, "/") || f.CgroupPath == "/" {
+		return 0, 0, "no cgroup v2 scope path is recorded (a run on the bare VM is not the gate's host shape)"
+	}
+	cpus, ok := shCPUCount(f.CgroupCPUs)
+	if !ok {
+		return 0, 0, fmt.Sprintf("cpuset.cpus.effective %q is not a CPU list", f.CgroupCPUs)
+	}
+	if cpus != singleHostCPUs {
+		return 0, 0, fmt.Sprintf("the scope has %d effective CPUs (cpuset.cpus.effective %s), the design has exactly %d", cpus, f.CgroupCPUs, singleHostCPUs)
+	}
+	mem, err := strconv.ParseInt(strings.TrimSpace(f.CgroupMemMax), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Sprintf("memory.max is %q: the scope has no memory limit", f.CgroupMemMax)
+	}
+	if mem < singleHostMemFloorBytes || mem > singleHostMemCeilBytes {
+		return 0, 0, fmt.Sprintf("memory.max is %d MiB, the design wants 15,000 MiB to 16 GiB", mem>>20)
+	}
+	if strings.TrimSpace(f.CgroupSwapMax) != "0" {
+		return 0, 0, fmt.Sprintf("memory.swap.max is %q: the scope may use swap", f.CgroupSwapMax)
+	}
+	if f.Gomaxprocs != singleHostCPUs {
+		return 0, 0, fmt.Sprintf("GOMAXPROCS is %d, the design has %d", f.Gomaxprocs, singleHostCPUs)
+	}
+	return cpus, mem, ""
+}
 
 // shRecompute derives the steady-window figures from the raw acks and monitor series, with the definitions the harness documents:
 // the steady window is [warmup, warmup+steady) of request start times; the ACK latency figures are over durably ACKed requests; the strict
@@ -476,8 +535,12 @@ func runOverheadSingleHost(rc *runCtx, spec RowSpec) Row {
 	case int(g.SteadyS/60) != len(res.Latency.PerMinuteP95):
 		return refuse("the per-minute series does not cover the steady window")
 	}
-	if res.Server.OS != "linux" || res.Server.LogicalCPUs != singleHostCPUs || res.Server.MemTotalKiB < singleHostMemFloorKiB {
-		return reduced("server host has %d logical CPUs and %d MiB RAM; the fixture is %d vCPU / 16 GiB", res.Server.LogicalCPUs, res.Server.MemTotalKiB/1024, singleHostCPUs)
+	if res.Server.OS != "linux" {
+		return reduced("server host is %q, not linux", res.Server.OS)
+	}
+	scopeCPUs, scopeMem, scopeWhy := shValidateScope(res.Server)
+	if scopeWhy != "" {
+		return reduced("the server was not measured in the D90 cgroup scope: %s", scopeWhy)
 	}
 	if res.Server.DataOnTmpfs || res.Server.DataFS == "" {
 		return reduced("the product's data directory is on %q (tmpfs or unknown), not a persistent disk", res.Server.DataFS)
@@ -559,7 +622,7 @@ func runOverheadSingleHost(rc *runCtx, spec RowSpec) Row {
 	row.Command = &CommandRun{Command: "fixtures/overhead/singlehost procedure: server (pinned) and load generator on two hosts, steady 3600 s, graceful restart + read-back, kill -9 + read-back; validated from " + rc.rel(dir), ExitCode: 0, DurationMS: int64(g.WarmupS+g.SteadyS) * 1000}
 	row.Evidence = []string{
 		"harness result " + rc.writeEvidence("single-host-result.json", raw) + " (digest " + digest[:16] + ") with raw series acks.csv.gz, server-series.jsonl, events.jsonl bound by sha256",
-		fmt.Sprintf("run digest %s, server host %s kernel %s %d vCPU %d MiB pinned to cpus %s, generator host %s kernel %s", digest[:12], res.Server.HostID, res.Server.Kernel, res.Server.LogicalCPUs, res.Server.MemTotalKiB/1024, res.Server.CpusAllowed, res.Generator.HostID, res.Generator.Kernel),
+		fmt.Sprintf("run digest %s, server host %s kernel %s %d vCPU %d MiB; server scope %s: cpuset.cpus.effective %s (%d CPUs), memory.max %s, memory.swap.max %s, GOMAXPROCS %d; generator host %s kernel %s", digest[:12], res.Server.HostID, res.Server.Kernel, res.Server.LogicalCPUs, res.Server.MemTotalKiB/1024, res.Server.CgroupPath, res.Server.CgroupCPUs, scopeCPUs, res.Server.CgroupMemMax, res.Server.CgroupSwapMax, res.Server.Gomaxprocs, res.Generator.HostID, res.Generator.Kernel),
 		fmt.Sprintf("soundpost build %s source tree %s", ver.BuildID, res.Build.SourceTreeSHA256[:16]),
 		fmt.Sprintf("workload: %d orgs, %d projects, %d active series, seed %d, %.0f s warm-up + %.0f s steady at %d records/s offered (%.0f measured), flush window %.0f s", g.Orgs, g.Projects, g.Series, g.Seed, g.WarmupS, g.SteadyS, g.Rate, float64(rec.offeredRecords)/g.SteadyS, g.FlushWindowS),
 	}
@@ -620,7 +683,7 @@ func runOverheadSingleHost(rc *runCtx, spec RowSpec) Row {
 	row.Loss = fmt.Sprintf("steady window: %d requests, %d durably ACKed, %d refused, %d transport failures, %d shed by the generator; after the graceful restart %d of %d ACKed batches matched their receipt, after kill -9 %d of %d; %d ACKed records missing",
 		rec.steadyRequests, rec.steadyAcked, res.Run.Refused, res.Run.Transport, res.Run.Shed, res.Verify[0].ReceiptsMatching, res.Verify[0].ReceiptsChecked, res.Verify[1].ReceiptsMatching, res.Verify[1].ReceiptsChecked, missing)
 	row.Limits = []string{
-		fmt.Sprintf("the server was pinned to CPUs %s (GOMAXPROCS %d) of the host's %d vCPUs by the owner rule (at most half the CPUs of a VM): the design's 8 vCPU server is NOT what was measured", res.Server.CpusAllowed, res.Server.Gomaxprocs, res.Server.LogicalCPUs),
+		fmt.Sprintf("host shape is the server's cgroup v2 scope (D90), not the VM totals: scope %s with %d CPUs effective (cpuset %s, GOMAXPROCS %d) and memory.max %d MiB, memory.swap.max %s, on a VM of %d vCPUs / %d MiB; page cache is charged to the scope", res.Server.CgroupPath, scopeCPUs, res.Server.CgroupCPUs, res.Server.Gomaxprocs, scopeMem>>20, res.Server.CgroupSwapMax, res.Server.LogicalCPUs, res.Server.MemTotalKiB/1024),
 		fmt.Sprintf("both hosts are virtual machines on a virtual disk (%q); the data directory's filesystem is %s: a physical SSD was not measured and this says nothing about power-loss durability", res.Server.BlockDevice, res.Server.DataFS),
 		"one host, one run of one hour: no repetition, no confidence interval",
 		fmt.Sprintf("workload shape is the harness's own: one SDK source per project, records grouped per route slot into batches (the product requires one slot per batch) and flushed every %.0f s per source (the SDK's own export cadence is about 100 ms, which makes smaller batches); %.0f batches/s offered on average", g.FlushWindowS, float64(res.Run.Sent)/(g.WarmupS+g.SteadyS)),

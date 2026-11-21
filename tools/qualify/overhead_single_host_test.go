@@ -31,10 +31,16 @@ type shFixture struct {
 	sameHost         bool
 	rate             int
 	skipVerify       bool
+	cgPath           string // server cgroup v2 scope path
+	scopeCPUs        string // cpuset.cpus.effective of the scope
+	memMax           string // memory.max of the scope
+	swapMax          string // memory.swap.max of the scope
+	gomax            int
 }
 
 func defaultFixture() shFixture {
-	return shFixture{steadyS: 3600, warmupS: 60, latencyUS: func(i int) int64 { return 40_000 + int64(i%100)*1000 }, hwmKiB: 6 << 20, cpus: 8, memKiB: 15_996 * 1024, rate: 2000}
+	return shFixture{steadyS: 3600, warmupS: 60, latencyUS: func(i int) int64 { return 40_000 + int64(i%100)*1000 }, hwmKiB: 6 << 20, cpus: 16, memKiB: 32 << 20, rate: 2000,
+		cgPath: "/sys/fs/cgroup/soundpost-server.scope", scopeCPUs: "0-7", memMax: "17179869184", swapMax: "0", gomax: 8}
 }
 
 func nearestRank(v []int64, p float64) int64 {
@@ -149,9 +155,16 @@ func writeSingleHostResult(t *testing.T, fx shFixture) string {
 		genID = serverID
 	}
 	facts := func(id string, cpus int, mem int64, tmpfs bool, allowed string) map[string]any {
-		return map[string]any{"host_id": id, "os": "linux", "arch": "amd64", "kernel": "6.12.74", "logical_cpus": cpus, "mem_total_kib": mem, "gomaxprocs": 4, "cpus_allowed": allowed, "data_dir_filesystem": "ext2/ext3", "block_device_model": "QEMU HARDDISK", "data_dir_on_tmpfs": tmpfs}
+		return map[string]any{"host_id": id, "os": "linux", "arch": "amd64", "kernel": "6.12.74", "logical_cpus": cpus, "mem_total_kib": mem, "gomaxprocs": 8, "cpus_allowed": allowed, "data_dir_filesystem": "ext2/ext3", "block_device_model": "QEMU HARDDISK", "data_dir_on_tmpfs": tmpfs}
 	}
-	server := facts(serverID, fx.cpus, fx.memKiB, fx.tmpfs, "0-3")
+	server := facts(serverID, fx.cpus, fx.memKiB, fx.tmpfs, fx.scopeCPUs)
+	server["gomaxprocs"] = fx.gomax
+	if fx.cgPath != "" || fx.scopeCPUs != "" {
+		server["cgroup_path"] = fx.cgPath
+		server["cgroup_cpus_effective"] = fx.scopeCPUs
+		server["cgroup_memory_max"] = fx.memMax
+		server["cgroup_memory_swap_max"] = fx.swapMax
+	}
 	gen := facts(genID, 8, fx.memKiB, false, "0-7")
 	writeJSON := func(path string, v any) {
 		raw, _ := json.MarshalIndent(v, "", " ")
@@ -261,7 +274,7 @@ func TestSingleHostFullRunWithinTheGatePasses(t *testing.T) {
 		t.Errorf("row is not bound to the build and the run: %+v", row.Build)
 	}
 	limits := strings.Join(row.Limits, "\n")
-	for _, want := range []string{"pinned to CPUs 0-3", "virtual", "one host"} {
+	for _, want := range []string{"cgroup v2 scope (D90)", "virtual", "one host"} {
 		if !strings.Contains(limits, want) {
 			t.Errorf("limits do not say %q: %s", want, limits)
 		}
@@ -301,11 +314,22 @@ func TestSingleHostEachMissedGateNumberIsAMeasuredFailure(t *testing.T) {
 func TestSingleHostReducedRunIsNeverExercised(t *testing.T) {
 	cases := map[string]func(*shFixture){
 		"ten-minute steady window": func(f *shFixture) { f.steadyS = 600 },
-		"4 vCPU server host":       func(f *shFixture) { f.cpus = 4 },
+		"9 CPUs in the scope":      func(f *shFixture) { f.scopeCPUs = "0-8" },
+		"7 CPUs in the scope":      func(f *shFixture) { f.scopeCPUs = "0-2,4-7" },
+		"memory.max unset":         func(f *shFixture) { f.memMax = "" },
+		"memory.max max":           func(f *shFixture) { f.memMax = "max" },
+		"memory.max 32 GiB":        func(f *shFixture) { f.memMax = "34359738368" },
+		"memory.max below floor":   func(f *shFixture) { f.memMax = "14000000000" },
+		"swap allowed":             func(f *shFixture) { f.swapMax = "max" },
+		"swap 1 GiB":               func(f *shFixture) { f.swapMax = "1073741824" },
+		"swap unrecorded":          func(f *shFixture) { f.swapMax = "" },
+		"no cgroup path":           func(f *shFixture) { f.cgPath = "" },
+		"GOMAXPROCS 16":            func(f *shFixture) { f.gomax = 16 },
+		"VM without any scope":     func(f *shFixture) { f.cgPath, f.scopeCPUs, f.memMax, f.swapMax = "", "", "", "" },
 		"data directory on tmpfs":  func(f *shFixture) { f.tmpfs = true },
 		"generator on server host": func(f *shFixture) { f.sameHost = true },
 		"half the record rate":     func(f *shFixture) { f.rate = 1000 },
-		"small host memory":        func(f *shFixture) { f.memKiB = 8 << 20 },
+		"memory.max over 16 GiB":   func(f *shFixture) { f.memMax = "17179869185" },
 	}
 	for name, mutate := range cases {
 		fx := defaultFixture()
@@ -313,6 +337,46 @@ func TestSingleHostReducedRunIsNeverExercised(t *testing.T) {
 		row := shRun(t, writeSingleHostResult(t, fx), shGateSpec())
 		if row.State != StateNotExercised || !strings.Contains(row.Reason, "reduced run") || len(row.Budgets) != 0 {
 			t.Errorf("%s: must be not_exercised with 'reduced run', got state %s reason %q budgets %v", name, row.State, row.Reason, row.Budgets)
+		}
+	}
+}
+
+// D90: the gate's host shape is the server's cgroup scope, not the VM totals.
+func TestSingleHostQualifiesTheScopeNotTheVMTotals(t *testing.T) {
+	fx := defaultFixture()
+	if fx.cpus != 16 || fx.memKiB != 32<<20 {
+		t.Fatalf("fixture must model the 16 vCPU / 32 GiB gate VM, got %d / %d KiB", fx.cpus, fx.memKiB)
+	}
+	row := shRun(t, writeSingleHostResult(t, fx), shGateSpec())
+	if row.State != StateExercised {
+		t.Fatalf("an 8 CPU / 16 GiB scope on a 16/32 VM must qualify: %s %q", row.State, row.Reason)
+	}
+	ev := strings.Join(row.Evidence, "\n")
+	for _, want := range []string{"/sys/fs/cgroup/soundpost-server.scope", "cpuset.cpus.effective 0-7 (8 CPUs)", "memory.max 17179869184", "memory.swap.max 0"} {
+		if !strings.Contains(ev, want) {
+			t.Errorf("evidence must record %q:\n%s", want, ev)
+		}
+	}
+	if lim := strings.Join(row.Limits, "\n"); strings.Contains(lim, "NOT what was measured") {
+		t.Errorf("limits still say the server was not the design shape:\n%s", lim)
+	}
+}
+
+// An 8 vCPU / 16 GiB VM looks like the design by its totals, but the shape is the server's scope (D90): no scope, or a scope that allows
+// swap, is a reduced run.
+func TestSingleHostFullSizeVMWithoutTheScopeIsReduced(t *testing.T) {
+	cases := map[string]func(*shFixture){
+		"8 vCPU VM, no scope":       func(f *shFixture) { f.cgPath, f.scopeCPUs, f.memMax, f.swapMax = "", "", "", "" },
+		"8 vCPU VM, swap allowed":   func(f *shFixture) { f.swapMax = "max" },
+		"8 vCPU VM, memory.max max": func(f *shFixture) { f.memMax = "max" },
+	}
+	for name, mutate := range cases {
+		fx := defaultFixture()
+		fx.cpus, fx.memKiB = 8, 15_996*1024
+		mutate(&fx)
+		row := shRun(t, writeSingleHostResult(t, fx), shGateSpec())
+		if row.State != StateNotExercised || !strings.Contains(row.Reason, "reduced run") || len(row.Budgets) != 0 {
+			t.Errorf("%s: must be not_exercised with 'reduced run', got state %s reason %q", name, row.State, row.Reason)
 		}
 	}
 }
