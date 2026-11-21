@@ -179,9 +179,15 @@ campaign was last run to completion against the real pinned oracle images (lane 
 campaign fails by design. The Docker-free replays (recorded native observations, content locks,
 bindings) run in `go test` on every host.
 
-The workflow `.github/workflows/conformance.yml` runs on every pull request. Its runs up to commit
-`4bd8897` (run 44730760321) all failed in the `Campaign tests (race)` step: under `-race` on a two-core
-hosted runner the persisted-path smoke tests exceed `go test`'s default 10 minute limit (`panic: test
-timed out after 10m0s`); the step now sets `-timeout 100m`. No run has reached the `Query language
-campaign` step, and a hosted runner does not hold the locked oracle images, so that step cannot pass
-there until the images are provided to the runner (or relocked to images a runner can build) by the owner.
+The workflow `.github/workflows/conformance.yml` runs on every pull request and on `workflow_dispatch`.
+Its earlier runs failed in the `Campaign tests (race)` step: first the default 10 minute `go test`
+limit (`-timeout 100m` now), then `TestDistributedClusterScenarioHoldsAcrossNodesAndNodeLoss` with a
+504 on a two-vCPU runner. Cause (measured on a 2-CPU-pinned host with a competing load): the Raft
+transport queued every heartbeat of a group (one per 20 ms tick) behind a slow delivery, up to 128 per
+lane, so a read-index round, which rides the same lane, waited seconds and a read ran into the 30 s
+query deadline; a lane now keeps only the newest heartbeat and heartbeat response
+(`internal/replica/transport.go`, `TestLaneKeepsOnlyTheNewestHeartbeatBehindASlowReceiver`). A hosted
+runner does not hold the lab daemon's locked oracle images, so the workflow builds them
+(`conformance/query/oracles/build-images.sh`) and the harness runs one only after proving its files
+against `content_identity` in `source-lock.json` (see `conformance/query/README.md`). Observed run of
+the campaign on a hosted runner: not yet.

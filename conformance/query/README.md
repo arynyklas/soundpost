@@ -91,6 +91,39 @@ The last repin is the Debian 13 / Docker 26.1.5 build of 2026-11-18 on a lab Doc
 (`.superpowers/sdd/approved-product/l2oci-evidence/`): every recorded reference observation
 (181 configuration scenarios) came out identical on the new images.
 
+## Oracle images without the locked ids (hosted CI runner, fresh host)
+
+A daemon that does not hold the locked image ids cannot be given them: an id is the hash of the
+image configuration, which carries layer timestamps. `oracles/build-images.sh` builds the five local
+images on such a daemon from the pinned inputs with the Dockerfiles as locked (upstream release
+images by linux/amd64 digest, the Go builder images by digest under
+`profiles[].reference_compiler.builder_image`, source archives by `ADD --checksum`, the adapter from
+the tree under test) and tags them `soundpost-oracle-<profile>:current` (the configuration variants
+under `profiles[].configuration_oracle.image`). The workflow `.github/workflows/conformance.yml` runs it
+before the campaign.
+
+`RunOracle` and the configuration phase (`oracle_image.go`) use the locked id whenever the daemon
+holds it, exactly as before. Only when the daemon positively answers "No such image" for the locked id,
+and the lock carries `content_identity` (under `artifact` and `configuration_oracle`), is the tagged
+image used, and only after the harness has proven, for the image id it will run: platform, entrypoint,
+and the SHA-256 of every listed file as `docker cp` delivers it (the upstream release binary, the
+reference driver compiled from the pinned source, the time zone dataset, the configuration file). One
+differing byte, a missing file or another entrypoint refuses the image; a missing image fails with the
+way to build it. The adapter (`/adapter`) is not listed: it is the harness's own code, rebuilt from
+the tree under test. Observations made this way carry `oracle.resolved_image_id` and
+`oracle.identity_basis: "content-identity"` next to the locked `image_sha256`.
+
+After a change of the reference driver sources (`oracles/evaluation`, `oracles/logql-native`), of a
+pinned upstream image or of a configuration file, rebuild with the script on a clean daemon and
+recompute the `content_identity` file digests (`docker create`, `docker cp -L <id>:<path> - | tar -xO |
+sha256sum`) together with the image ids; both are repinned in `source-lock.json`.
+
+Measured (2026-11-21, Docker 26.1.5, a private daemon behind a CONNECT proxy): the rebuilt
+`/evaluation-reference` of both Prometheus pins is byte-identical to the native build of
+`author/native-oracle.sh` (sha256 `c4bc8a87...` for 3.1.0, `0915e4e1...` for 3.13.5) and the
+rebuilt Loki `/usr/bin/loki` and `/oracle-zoneinfo.zip` equal `reference_compiler` / the dataset
+recorded for the lock; only the image ids differ.
+
 ## Running the phases
 
 Run each phase separately; a mixed-phase file silently skips rows of the other

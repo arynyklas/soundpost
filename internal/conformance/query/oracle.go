@@ -65,7 +65,11 @@ func RunOracle(ctx context.Context, run OracleRun) (SemanticResult, error) {
 	}
 	cidfile := filepath.Join(dir, "container-id")
 	args := []string{"run", "--rm", "--cidfile=" + cidfile, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=512m", "--cpus=1", "--user=65534:65534", "--tmpfs=/tmp:rw,noexec,nosuid,size=268435456", "--mount=type=bind,src=" + dir + ",dst=/fixture,readonly", "-i"}
-	args = append(args, a.Path)
+	image, rebuilt, err := resolveOracleImage(ctx, run.Runtime, a.Path, "soundpost-oracle-"+run.Profile.ID+":current", a.ContentIdentity)
+	if err != nil {
+		return result, err
+	}
+	args = append(args, image)
 	args = append(args, a.Args...)
 	cmd := exec.CommandContext(ctx, run.Runtime, args...)
 	cmd.Env = []string{}
@@ -104,6 +108,9 @@ func RunOracle(ctx context.Context, run OracleRun) (SemanticResult, error) {
 	}
 	result.Oracle.ImageSHA256 = a.SHA256
 	result.Oracle.ConfigurationSHA256 = a.ConfigurationSHA256
+	if rebuilt {
+		result.Oracle.ResolvedImageID, result.Oracle.IdentityBasis = image, IdentityBasisContent
+	}
 	return result, nil
 }
 

@@ -35,6 +35,9 @@ type ConfigurationOracle struct {
 	InstalledAt             string `json:"installed_at"`
 	ObserverScript          string `json:"observer_script"`
 	ObserverScriptSHA256    string `json:"observer_script_sha256"`
+
+	// ContentIdentity is the proof an image rebuilt from the pinned inputs must pass when the daemon lacks ImageID.
+	ContentIdentity *ContentIdentity `json:"content_identity,omitempty"`
 }
 
 //go:embed configuration_observe.sh
@@ -346,7 +349,12 @@ func RunConfigurationPhase(ctx context.Context, lock SourceLock, casesPaths []st
 			}
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		observed, e := runConfigurationObserver(runCtx, runtime, co.ImageID, fixtures)
+		image, rebuilt, e := resolveOracleImage(runCtx, runtime, co.ImageID, co.Image, co.ContentIdentity)
+		if e != nil {
+			cancel()
+			return report, e
+		}
+		observed, e := runConfigurationObserver(runCtx, runtime, image, fixtures)
 		cancel()
 		if e != nil {
 			return report, e
@@ -359,6 +367,9 @@ func RunConfigurationPhase(ctx context.Context, lock SourceLock, casesPaths []st
 			return report, fmt.Errorf("%s: the image carries a different configuration file than the lock", source.ID)
 		}
 		identity := &OracleIdentity{Profile: source.ID, Revision: m[2], Version: m[1], ImageSHA256: strings.TrimPrefix(co.ImageID, "sha256:"), ConfigurationSHA256: co.ConfigurationFileSHA256}
+		if rebuilt {
+			identity.ResolvedImageID, identity.IdentityBasis = image, IdentityBasisContent
+		}
 		project := func(name string) (ConfigurationObservation, error) {
 			o := observed.Scenarios[name]
 			if o.Ready {

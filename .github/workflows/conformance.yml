@@ -3,7 +3,9 @@
 #
 # Verification only: no publication, no registry push, no credentials. Toolchains come from
 # build/toolchains.json and are checked against its sha256 pins before they run. Actions are
-# pinned to full commit SHAs. The campaign never pulls, builds or retags an oracle image.
+# pinned to full commit SHAs. The five local oracle images of source-lock.json are built by the
+# "Build the locked oracle images" step from inputs pinned by digest and sha256 (never pulled by tag,
+# never pushed); the harness runs one only after proving its files against the lock's content identity.
 name: conformance
 
 on:
@@ -78,10 +80,18 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -race -count=1 -timeout 100m ./tools/qualify/... ./internal/conformance/... ./cmd/soundpost-querycheck
 
+      # The hosted runner does not hold the lab daemon's oracle images (their ids are layer-timestamp
+      # specific), so they are built here with the Dockerfiles as locked: upstream release images by
+      # linux/amd64 digest, the Go builder images by digest (source-lock.json reference_compiler),
+      # source archives by ADD --checksum, the adapter from this tree. The campaign below refuses an
+      # image whose platform, entrypoint or any behaviour-determining file differs from the lock.
+      - name: Build the locked oracle images
+        run: bash conformance/query/oracles/build-images.sh
+
       # Runs soundpost-querycheck release (every seed in the matrix, all profiles, all FeatureSets)
       # and smoke (single and distributed) and exits nonzero unless every required row is verified.
-      # The oracle images are the locked local images of source-lock.json: a runner that does not hold them
-      # cannot observe the oracles, and this step then fails (it is never allowed to pass without them).
+      # A runner without the oracle images cannot observe the oracles, and this step then fails (it is
+      # never allowed to pass without them).
       - name: Query language campaign
         run: go run ./tools/qualify/cmd/query-campaign --matrix qualification/query-matrix.yaml --artifact-dir query-campaign
 

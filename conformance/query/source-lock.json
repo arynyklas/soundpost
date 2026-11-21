@@ -13,7 +13,15 @@
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
-        "args": []
+        "args": [],
+        "content_identity": {
+          "architecture": "linux/amd64",
+          "entrypoint": ["/adapter", "adapter", "promql-prometheus-3.1.0"],
+          "files": [
+            {"path": "/evaluation-reference", "sha256": "c4bc8a8799d7ad94dde373171ea42a9d55a15b65506abafdc19eb694020f09a9"},
+            {"path": "/bin/prometheus", "sha256": "5976778d2499584d554348e72949bcdad47783887a09f383a394ef41591e0067"}
+          ]
+        }
       },
       "configuration": {
         "path": "conformance/query/oracles/promql-prometheus-3.1.0.yaml",
@@ -72,6 +80,7 @@
       ],
       "reference_compiler": {
         "version": "go1.23.4",
+        "builder_image": "mirror.gcr.io/library/golang@sha256:9820aca42262f58451f006de3213055974b36f24b31508c1baa73c967fcecb99",
         "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
         "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
         "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
@@ -89,7 +98,16 @@
         "configuration_file_sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3",
         "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
         "observer_script": "internal/conformance/query/configuration_observe.sh",
-        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438",
+        "content_identity": {
+          "architecture": "linux/amd64",
+          "entrypoint": ["/adapter", "adapter", "promql-prometheus-3.1.0"],
+          "files": [
+            {"path": "/evaluation-reference", "sha256": "c4bc8a8799d7ad94dde373171ea42a9d55a15b65506abafdc19eb694020f09a9"},
+            {"path": "/bin/prometheus", "sha256": "5976778d2499584d554348e72949bcdad47783887a09f383a394ef41591e0067"},
+            {"path": "/etc/prometheus/soundpost-configuration-phase.yaml", "sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3"}
+          ]
+        }
       }
     },
     {
@@ -104,7 +122,15 @@
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
-        "args": []
+        "args": [],
+        "content_identity": {
+          "architecture": "linux/amd64",
+          "entrypoint": ["/adapter", "adapter", "promql-prometheus-3.13.5"],
+          "files": [
+            {"path": "/evaluation-reference", "sha256": "0915e4e16b71b4c0066476b8da29643b40a25b198602360cc6b0ce126d2d8cbe"},
+            {"path": "/bin/prometheus", "sha256": "b20def7421c2037f18139a3695f0905884098add886cb7f26f1c655f5de4611a"}
+          ]
+        }
       },
       "configuration": {
         "path": "conformance/query/oracles/promql-prometheus-3.13.5.yaml",
@@ -163,6 +189,7 @@
       ],
       "reference_compiler": {
         "version": "go1.26.10",
+        "builder_image": "mirror.gcr.io/library/golang@sha256:670bb5aa5349ae03b8516764718486f4f16399134bdc9acd0c46a23f043ab05c",
         "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
         "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
         "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
@@ -180,7 +207,16 @@
         "configuration_file_sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431",
         "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
         "observer_script": "internal/conformance/query/configuration_observe.sh",
-        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438",
+        "content_identity": {
+          "architecture": "linux/amd64",
+          "entrypoint": ["/adapter", "adapter", "promql-prometheus-3.13.5"],
+          "files": [
+            {"path": "/evaluation-reference", "sha256": "0915e4e16b71b4c0066476b8da29643b40a25b198602360cc6b0ce126d2d8cbe"},
+            {"path": "/bin/prometheus", "sha256": "b20def7421c2037f18139a3695f0905884098add886cb7f26f1c655f5de4611a"},
+            {"path": "/etc/prometheus/soundpost-configuration-phase.yaml", "sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431"}
+          ]
+        }
       }
     },
     {
@@ -195,7 +231,16 @@
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2",
-        "args": []
+        "args": [],
+        "content_identity": {
+          "architecture": "linux/amd64",
+          "entrypoint": ["/adapter", "adapter", "logql-loki-3.5.2"],
+          "files": [
+            {"path": "/logql-reference", "sha256": "1e07c1b7a980d70ae389fec96d7fe3ff4f2da677f4257f331f32f600d73e8e1b"},
+            {"path": "/oracle-zoneinfo.zip", "sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0"},
+            {"path": "/usr/bin/loki", "sha256": "4924f98d63eaff80ad2a50d261bb1561baa5d41a1a02d62a7a78556a5805b20d"}
+          ]
+        }
       },
       "configuration": {
         "path": "conformance/query/oracles/logql-loki-3.5.2.yaml",
@@ -257,6 +302,7 @@
       },
       "reference_compiler": {
         "version": "go1.24.5",
+        "builder_image": "mirror.gcr.io/library/golang@sha256:ef5b4be1f94b36c90385abd9b6b4f201723ae28e71acacb76d00687333c17282",
         "evidence": ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt",
         "evidence_sha256": "4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b",
         "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking",

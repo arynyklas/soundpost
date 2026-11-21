@@ -57,6 +57,10 @@ type Artifact struct {
 	Adapter             string   `json:"adapter"`
 	ConfigurationSHA256 string   `json:"configuration_sha256"`
 	Args                []string `json:"args"`
+
+	// ContentIdentity lets a daemon that does not hold the locked image id run an image built from the
+	// pinned inputs (oracle_image.go); the locked id stays authoritative wherever it exists.
+	ContentIdentity *ContentIdentity `json:"content_identity,omitempty"`
 }
 type SourceProfile struct {
 	ID                string    `json:"id"`
@@ -160,6 +164,16 @@ func ValidateSourceLock(lock SourceLock) error {
 		}
 		if _, e := hex.DecodeString(p.SourceSHA256); e != nil {
 			return fmt.Errorf("invalid source digest for %s", p.ID)
+		}
+		if p.Artifact != nil && p.Artifact.ContentIdentity != nil {
+			if e := p.Artifact.ContentIdentity.Validate(); e != nil {
+				return fmt.Errorf("source lock profile %s artifact: %w", p.ID, e)
+			}
+		}
+		if p.ConfigurationOracle != nil && p.ConfigurationOracle.ContentIdentity != nil {
+			if e := p.ConfigurationOracle.ContentIdentity.Validate(); e != nil {
+				return fmt.Errorf("source lock profile %s configuration oracle: %w", p.ID, e)
+			}
 		}
 		seen[p.ID] = true
 	}

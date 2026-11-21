@@ -55,6 +55,11 @@ type OracleIdentity struct {
 	Version             string `json:"version"`
 	ImageSHA256         string `json:"image_sha256,omitempty"`
 	ConfigurationSHA256 string `json:"configuration_sha256,omitempty"`
+
+	// ResolvedImageID and IdentityBasis are set only when the oracle ran from an image the lock does not
+	// name by id but whose content was proven against the lock's content identity.
+	ResolvedImageID string `json:"resolved_image_id,omitempty"`
+	IdentityBasis   string `json:"identity_basis,omitempty"`
 }
 type SemanticResult struct {
 	Kind        string              `json:"kind"`

@@ -26,6 +26,9 @@ const raftPath = "/internal/raft/v1/"
 type outbound struct {
 	group   model.ID
 	message *pb.Message
+	// supersedable, when nonzero, marks the placeholder of a lane's heartbeat (1) or heartbeat response (2):
+	// the message to deliver is whatever newest one the lane holds when the placeholder is reached.
+	supersedable int
 }
 
 // A delivery lane is one ordered queue and one worker per (peer, group). A
@@ -41,6 +44,20 @@ type deliveryLane struct {
 
 const laneDepth = 128
 
+// laneQueue is the ordered queue of one delivery lane plus one slot for the newest undelivered heartbeat
+// and one for the newest undelivered heartbeat response. A heartbeat is superseded by the next one (it
+// carries the leader's commit index and the context of the newest pending read-index round, a response
+// only echoes that context), so a lane that cannot deliver as fast as the group ticks keeps one of each
+// instead of a standing queue of stale ones. Without this a CPU-starved or slow receiver left up to
+// laneDepth stale heartbeats ahead of every read-index, vote and append message of the group: a
+// read-index round took seconds and a read failed with a 504 on a two-vCPU host.
+type laneQueue struct {
+	queue chan outbound
+	mu    sync.Mutex
+	slot  [2]*pb.Message
+	held  [2]bool // a placeholder for the slot is in the queue
+}
+
 type MTLS struct {
 	mu          sync.RWMutex
 	id          uint64
@@ -49,7 +66,7 @@ type MTLS struct {
 	roots       *x509.CertPool
 	dialer      *net.Dialer
 	groups      map[model.ID]*Group
-	queues      map[deliveryLane]chan outbound
+	queues      map[deliveryLane]*laneQueue
 	clients     map[string]*http.Client
 	stop        chan struct{}
 	once        sync.Once
@@ -75,7 +92,7 @@ func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x50
 		}
 		dialer.LocalAddr = &net.TCPAddr{IP: ip}
 	}
-	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]chan outbound{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
+	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]*laneQueue{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
 }
 func certificateIdentity(c *x509.Certificate) string {
 	if c == nil {
@@ -172,45 +189,81 @@ func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 	}
 	key := deliveryLane{peer: m.GetTo(), group: group}
 	t.mu.RLock()
-	g, queue := t.groups[group], t.queues[key]
+	g, lane := t.groups[group], t.queues[key]
 	t.mu.RUnlock()
 	if g == nil || m.GetFrom() != t.id {
 		return ErrInvalid
 	}
-	if queue == nil {
+	if lane == nil {
 		t.mu.Lock()
 		if t.closing {
 			t.mu.Unlock()
 			return ErrUnavailable
 		}
-		if queue = t.queues[key]; queue == nil {
-			queue = make(chan outbound, laneDepth)
-			t.queues[key] = queue
+		if lane = t.queues[key]; lane == nil {
+			lane = &laneQueue{queue: make(chan outbound, laneDepth)}
+			t.queues[key] = lane
 			t.workers.Add(1)
-			go t.deliver(queue)
+			go t.deliver(lane)
 		}
 		t.mu.Unlock()
 	}
 	select {
 	case <-t.stop:
 		return ErrUnavailable
-	case queue <- outbound{group: group, message: m}:
+	default:
+	}
+	if kind := supersedableKind(m.GetType()); kind != 0 {
+		lane.mu.Lock()
+		defer lane.mu.Unlock()
+		if lane.held[kind-1] {
+			lane.slot[kind-1] = m
+			return nil
+		}
+		select {
+		case lane.queue <- outbound{group: group, supersedable: kind}:
+			lane.held[kind-1], lane.slot[kind-1] = true, m
+			return nil
+		default:
+			return ErrUnavailable
+		}
+	}
+	select {
+	case lane.queue <- outbound{group: group, message: m}:
 		return nil
 	default:
 		return ErrUnavailable
 	}
 }
-func (t *MTLS) deliver(queue <-chan outbound) {
+
+// supersedableKind is 1 for a heartbeat, 2 for a heartbeat response and 0 for every message that must be
+// delivered in order and in full.
+func supersedableKind(t pb.MessageType) int {
+	switch t {
+	case pb.MsgHeartbeat:
+		return 1
+	case pb.MsgHeartbeatResp:
+		return 2
+	}
+	return 0
+}
+func (t *MTLS) deliver(lane *laneQueue) {
 	defer t.workers.Done()
 	for {
 		select {
 		case <-t.stop:
 			return
-		case out := <-queue:
+		case out := <-lane.queue:
+			if out.supersedable != 0 {
+				lane.mu.Lock()
+				out.message = lane.slot[out.supersedable-1]
+				lane.slot[out.supersedable-1], lane.held[out.supersedable-1] = nil, false
+				lane.mu.Unlock()
+			}
 			t.mu.RLock()
 			g := t.groups[out.group]
 			t.mu.RUnlock()
-			if g == nil {
+			if g == nil || out.message == nil {
 				continue
 			}
 			members := g.transportMembers()
