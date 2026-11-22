@@ -33,6 +33,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/nativeperf"
 	"github.com/arynyklas/soundpost/internal/policy"
@@ -765,9 +766,15 @@ func (n *evNode) errorRows(r *evReport) {
 		t.Fatalf("metric refused: %d %s", got.status, got.body)
 	}
 	// An error message is not a representable field: a message-bearing payload must
-	// be refused, and the canary must not be echoed.
-	bad := model.Batch{Version: 1, Project: n.projA, Source: n.srcA, Producer: producer, ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{{ID: model.NewID(), Kind: model.ErrorKind, ObservedAt: rec.ObservedAt, Resource: n.res, Payload: model.Payload{Error: &model.ErrorOccurrence{Occurrence: model.NewID(), Class: "TypeError", Mechanism: "manual", Build: n.res.Build, Frames: []model.Frame{}}}}}}
+	// be refused, and the canary must not be echoed. The batch is otherwise a complete, valid one
+	// (a real route slot, the occurrence's own build and frame): the control without the message decodes,
+	// so the refusal below can only be the message field's.
+	badOcc := model.ErrorOccurrence{Occurrence: model.NewID(), Class: "TypeError", Mechanism: "manual", Build: n.res.Build, Handled: false, Fatal: true, Frames: []model.Frame{n.frame}}
+	bad := n.batchFor(n.projA, n.srcA, n.orgA, producer, model.Record{ID: model.NewID(), Kind: model.ErrorKind, ObservedAt: rec.ObservedAt, Resource: n.res, Payload: model.Payload{Error: &badOcc}})
 	raw, _ = json.Marshal(bad)
+	if _, err := ingest.Decode(bytes.NewReader(raw), ""); err != nil {
+		t.Fatalf("control: the same error occurrence without a message field does not decode: %v", err)
+	}
 	var generic map[string]any
 	if err := json.Unmarshal(raw, &generic); err != nil {
 		t.Fatal(err)
@@ -787,6 +794,9 @@ func (n *evNode) errorRows(r *evReport) {
 		t.Fatalf("could not place the message canary in the wire payload (%d)", injected)
 	}
 	raw, _ = json.Marshal(generic)
+	if _, err := ingest.Decode(bytes.NewReader(raw), ""); err == nil {
+		t.Fatal("the wire decoder accepted an error payload carrying a message field")
+	}
 	if refused := n.ingest(n.credA, raw); refused.status == 200 || bytes.Contains(refused.body, []byte(n.canaryMessage)) {
 		t.Fatalf("an error message field was admitted or echoed: %d %s", refused.status, refused.body)
 	}
@@ -1224,11 +1234,45 @@ func (n *evNode) replayRows(r *evReport) {
 	if _, err := svc.ValidateJSON(fresh(), mustJSON(chainBad)); err == nil {
 		t.Fatal("the closed-format validator accepted a first chunk with a previous hash")
 	}
+	// The same first chunk with its checkpoint field repeating the previous hash satisfies the checkpoint rule: only the chain rule
+	// (a first chunk names no previous hash) can refuse it.
+	chainOnly := chainBad
+	chainOnly.Checkpoint = chainOnly.Previous
+	if _, err := svc.ValidateJSON(fresh(), mustJSON(chainOnly)); err == nil {
+		t.Fatal("the closed-format validator accepted a first chunk that names a previous hash and repeats it as its checkpoint")
+	}
 	cb := n.batchFor(n.projA, n.srcA, n.orgA, producer, model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: chainBad.Clock.Wall, Resource: n.res, Payload: model.Payload{Replay: &chainBad}})
 	if got := n.ingest(n.credA, mustJSON(cb)); got.status == 200 {
 		r.add("replay_admission_enforces_closed_format", true, false, "the real ingest route admitted a first chunk that names a previous hash, which replays.ValidateChunk rejects: the replay gate (ingest.SetReplayGate) is missing or does not enforce the closed format, so chain, checkpoint and recorder-version rules are not enforced at intake")
 	} else {
 		r.add("replay_admission_enforces_closed_format", true, true, fmt.Sprintf("the real route refused a chain-invalid chunk (status %d)", got.status))
+	}
+	// Gate-only case. Raw text and chain violations are also refused before the gate (model.ValidateRecord) or after it (the replay index
+	// re-validates every chunk it indexes, and the first chunk of a replay in a batch is always indexed), which would hide a missing gate.
+	// A batch of a valid checkpoint and a DELTA of an unsupported recorder version ("recorder_version" is only a safe code to
+	// model.ValidateRecord) that continues it: the delta is not the first chunk of its replay in the batch, so it is not indexed, and the
+	// stored-chunk check accepts it (it continues the batch's own chain), so only the closed-format gate (ingest.SetReplayGate) refuses
+	// it. The control, the same batch from the supported recorder, is admitted.
+	sendPair := func(rec *evRecorder, delta func(*model.ReplayChunk)) (evResp, model.ReplayChunk) {
+		cp := rec.next(t, true)
+		d := rec.next(t, false)
+		if d.CheckpointSequence == d.Sequence || d.Checkpoint == (model.Hash{}) {
+			t.Fatalf("the recorder's second chunk is not a delta with a checkpoint hash: %d/%d", d.CheckpointSequence, d.Sequence)
+		}
+		delta(&d)
+		b := n.batchFor(n.projA, n.srcA, n.orgA, producer, model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: cp.Clock.Wall, Resource: n.res, Payload: model.Payload{Replay: &cp}})
+		b.Records = append(b.Records, model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: d.Clock.Wall, Resource: n.res, Payload: model.Payload{Replay: &d}})
+		return n.ingest(n.credA, mustJSON(b)), d
+	}
+	if got, _ := sendPair(newEvRecorder(model.NewID(), 1), func(*model.ReplayChunk) {}); got.status != 200 {
+		t.Fatalf("control: a closed-format checkpoint and delta were refused by the route: %d %s", got.status, got.body)
+	}
+	got, gateOnly := sendPair(newEvRecorder(model.NewID(), 1), func(d *model.ReplayChunk) { d.Recorder = "2" })
+	if _, err := svc.ValidateJSON(fresh(), mustJSON(gateOnly)); err == nil {
+		t.Fatal("the closed-format validator accepted a delta from an unsupported recorder version")
+	}
+	if got.status == 200 {
+		t.Fatalf("the real route admitted a delta that only the closed-format gate refuses (the replay gate is missing or permissive): %d %s", got.status, got.body)
 	}
 
 	// The large replay used by the revoke and deletion rows.
