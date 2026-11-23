@@ -31,6 +31,15 @@ const (
 	TypeMaintenance    Type = "maintenance"
 	TypeMaintenanceEnd Type = "maintenance_end"
 	TypeLink           Type = "link"
+	// TypeTitle names the incident, TypeNote appends a free-text note to its
+	// timeline and TypeExternal* move its link to an external tracker issue
+	// (model.ApplyExternal). All five are human decisions; none changes the
+	// incident's workflow, so they are allowed on a resolved incident too.
+	TypeTitle         Type = "title"
+	TypeNote          Type = "note"
+	TypeExternalBegin Type = "external_begin"
+	TypeExternalEnd   Type = "external_end"
+	TypeExternalAdopt Type = "external_adopt"
 )
 
 // Origin says whether an action is a human decision or a system condition
@@ -103,6 +112,18 @@ const (
 	MaxTimeline      = 128
 	MaxLinks         = 32
 	MaxReasonBytes   = 512
+	// MaxTitleBytes and MaxNoteBytes bound one title and one note.
+	MaxTitleBytes = 160
+	MaxNoteBytes  = 2000
+	// TimelineReserve is the part of MaxTimeline that title, note and external
+	// link actions leave free, so they can never keep an incident from being
+	// acknowledged or resolved.
+	TimelineReserve = 8
+	// MaxNoteTotal bounds the JSON size of all the notes of one incident. The
+	// control group refuses an incident state above 256 KiB; notes are the one
+	// unbounded-text member of the timeline, and this keeps the rest (every other
+	// entry, the reserve and the links) inside that limit.
+	MaxNoteTotal = 64 << 10
 )
 
 // Target names one incident inside one organization and project.
@@ -137,6 +158,12 @@ type Action struct {
 	Impact          *Impact        `json:"impact,omitempty"`
 	Previous        *model.ID      `json:"previous,omitempty"`
 	Link            *Link          `json:"link,omitempty"`
+	// Title, Note and External belong to the title, note and external_* types
+	// only. The text is free human text: it lives in the incident state and
+	// nowhere else (never in an audit, an effect or a notification).
+	Title    string            `json:"title,omitempty"`
+	Note     string            `json:"note,omitempty"`
+	External *model.ExternalOp `json:"external,omitempty"`
 	// MaxWindow bounds Until for snooze and maintenance; zero is the 7-day default.
 	MaxWindow model.UnixNano `json:"max_window,omitempty"`
 }
@@ -202,6 +229,12 @@ type State struct {
 	Previous       *model.ID      `json:"previous,omitempty"`
 	ResolvedAt     model.UnixNano `json:"resolved_at,omitempty"`
 	Timeline       []Entry        `json:"timeline"`
+
+	// Title is the human name of the incident ("" when none was ever set) and
+	// External its links to an external tracker. Both are set only by their own
+	// actions and live only here.
+	Title    string               `json:"title,omitempty"`
+	External []model.ExternalLink `json:"external,omitempty"`
 
 	// Erased is set on the state Service.Get reads for an incident whose state a
 	// deletion erased: only the closed header (ID, Org, Project, Version) is

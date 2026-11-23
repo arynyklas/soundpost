@@ -459,6 +459,9 @@ func syntheticObject(t *testing.T, tag byte, n int) nativeObject {
 // deducted from what the next may hold, an object that does not fit is unavailable and costs what it was, and once the
 // bound is spent no artifact is asked for at all.
 func TestNativeSymbolicationChargesEverySymbolAgainstOneBound(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector slows the parse of a 40000-symbol object past the 100 ms bound of one artifact read; the same test runs without it")
+	}
 	r := newWLRig(t)
 	first, second, third := syntheticObject(t, 1, 40000), syntheticObject(t, 2, 25536), syntheticObject(t, 3, 4)
 	over := syntheticObject(t, 4, 25537)

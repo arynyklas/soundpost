@@ -34,6 +34,11 @@ const (
 	EntityIssue     EntityKind = "issue"
 	EntityCondition EntityKind = "condition"
 	EntityIncident  EntityKind = "incident"
+	// EntityRelease and EntityEndpoint are only ever the entity of an event
+	// webhook delivery (KindEvent): a registered release, and the endpoint a test
+	// ping is for. They are never a policy subject (Entity.valid refuses them).
+	EntityRelease  EntityKind = "release"
+	EntityEndpoint EntityKind = "endpoint"
 )
 
 // Entity is one notifiable entity inside the state's organization.
@@ -176,6 +181,9 @@ const (
 	KindCurrent     Kind = "current_state"
 	KindQueue       Kind = "queue"
 	KindDigest      Kind = "digest"
+	// KindEvent is a signed event webhook delivery (events.go): identifiers only,
+	// to one event endpoint, never to a notification destination.
+	KindEvent Kind = "event"
 )
 
 // Route is where an intent is delivered.
@@ -707,6 +715,8 @@ type Template struct {
 	Digest *DigestFact `json:"digest,omitempty"`
 	// Queue is the queue revision for KindQueue and KindDigest.
 	Queue uint64 `json:"queue,omitempty"`
+	// Event is the identifiers-only fact of a KindEvent delivery (events.go).
+	Event *EventFact `json:"event,omitempty"`
 }
 
 // DigestFact is the digest identity: one per recipient, local date and policy

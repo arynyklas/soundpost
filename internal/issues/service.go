@@ -135,8 +135,10 @@ type IssueAction struct {
 	CommandID       model.ID
 	ExpectedVersion model.Revision
 	IssueID         model.ID
-	// Kind is resolve|ignore|unignore|reopen|grouping_migration.
-	Kind   string
+	// Kind is resolve|ignore|unignore|reopen|assign|external_begin|external_end|external_adopt|grouping_migration.
+	Kind string
+	// Reason is required for every kind but assign (optional: the audit then says "owner assigned"
+	// or "owner cleared") and the external link kinds (none: the audit names the transition).
 	Reason string
 	// ResolutionBoundary is the explicit resolution event-time boundary;
 	// zero means the admission time. Only for resolve.
@@ -146,6 +148,13 @@ type IssueAction struct {
 	FixedDescendantFrontier []model.ID
 	// Migration carries the grouping migration for kind grouping_migration.
 	Migration *model.GroupingMigration
+	// Owner is the member the issue is assigned to; nil unassigns. Only for assign. That the owner
+	// belongs to the organization is the caller's check (the service holds no member list).
+	Owner *model.ID
+	// External is the transition of the issue's link to an external tracker issue
+	// (model.ApplyExternal); its Kind must be the one the action kind names. Only for the
+	// external_* kinds, which are internal (the console does not expose them).
+	External *model.ExternalOp
 }
 
 // RegressionPolicy is the recorded threshold/window an issue reopens by:
@@ -171,7 +180,17 @@ type Deps struct {
 	// and model.GroupingWindowKeep); a smaller one only compacts sooner and
 	// exists for tests of stores that do not verify compaction.
 	Ledger LedgerWindow
+	// Contracted says whether the organization is contracted (D93); nil means no gate.
+	Contracted func(ctx context.Context, org model.ID) (bool, error)
+	// RecordFormat raises the control-state format marker before the first record the previous release cannot read
+	// (an owner, an external link) is written (D94); an error refuses the write. nil: no marker (tests of the pure service).
+	RecordFormat func(ctx context.Context) error
 }
+
+// DetailNeedsContracted is the SafeDetail of the model.Unsupported that assign and the external
+// kinds get until the installation is contracted (D93): the owner and the links are new members of
+// the issue record that the previous release cannot read. Deps.Contracted supplies the answer.
+const DetailNeedsContracted = "needs_contracted_installation"
 
 // LedgerWindow is the compaction trigger of one issue's evidence ledgers: when
 // the two ledgers hold Trigger evidence together and one more is to be added,
@@ -323,6 +342,11 @@ func cloneIssue(i Issue) Issue {
 		v := *i.ResolutionTime
 		i.ResolutionTime = &v
 	}
+	if i.Owner != nil {
+		v := *i.Owner
+		i.Owner = &v
+	}
+	i.External = append([]model.ExternalLink(nil), i.External...)
 	return i
 }
 func cloneRecord(r Record) Record {
@@ -813,7 +837,72 @@ func (s *Service) Explain(ctx context.Context, scope auth.Scope, project, id mod
 	return cloneRecord(rec).Explanations, nil
 }
 
-var actionKinds = map[string]bool{"resolve": true, "ignore": true, "unignore": true, "reopen": true, "grouping_migration": true}
+var actionKinds = map[string]bool{"resolve": true, "ignore": true, "unignore": true, "reopen": true, "grouping_migration": true,
+	"assign": true, "external_begin": true, "external_end": true, "external_adopt": true}
+
+// externalOpKinds maps the external link action kinds to the kind of the model.ExternalOp they carry.
+var externalOpKinds = map[string]string{"external_begin": model.ExternalBegin, "external_end": model.ExternalEnd, "external_adopt": model.ExternalAdopt}
+
+// externalAuditReason is the fixed reason of an external link audit: the action names the
+// transition and nothing else (no tracker location, no text).
+var externalAuditReason = map[string]string{"external_begin": "external link begin", "external_end": "external link end", "external_adopt": "external link adopt"}
+
+// validAction checks everything about an action that needs no state. An assign takes an optional
+// reason (the audit says "owner assigned" or "owner cleared" without one) and an external link
+// action takes none: the fields belong to their kind and are refused anywhere else.
+func validAction(a IssueAction) error {
+	if a.CommandID == (model.ID{}) || a.IssueID == (model.ID{}) || !actionKinds[a.Kind] {
+		return model.Fail(model.Invalid)
+	}
+	opKind, external := externalOpKinds[a.Kind]
+	switch {
+	case external:
+		if a.Reason != "" {
+			return model.Fail(model.Invalid)
+		}
+	case a.Kind == "assign":
+		if a.Reason != "" && !safeText(a.Reason) {
+			return model.Fail(model.Invalid)
+		}
+	case !safeText(a.Reason):
+		return model.Fail(model.Invalid)
+	}
+	if a.Kind != "resolve" && (a.ResolutionBoundary != 0 || len(a.FixedDescendantFrontier) != 0) || a.Kind == "grouping_migration" == (a.Migration == nil) {
+		return model.Fail(model.Invalid)
+	}
+	if a.Owner != nil && (a.Kind != "assign" || *a.Owner == (model.ID{})) || (a.External != nil) != external {
+		return model.Fail(model.Invalid)
+	}
+	if external {
+		if a.External.Kind != opKind {
+			return model.Fail(model.Invalid)
+		}
+		// A lease is judged against the clock when the action is applied (model.ApplyExternal), not
+		// here: a retry of a committed begin returns its result however late it comes.
+		probe := *a.External
+		if probe.Kind == model.ExternalBegin {
+			probe.Until = 2
+		}
+		if e := model.ValidExternalOp(probe, 1); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// auditReason is what the audit of an action records as its reason: the caller's own, or the
+// fixed phrase of an assign or an external link action that has none.
+func auditReason(a IssueAction) string {
+	switch {
+	case a.Reason != "":
+		return a.Reason
+	case a.Kind == "assign" && a.Owner == nil:
+		return "owner cleared"
+	case a.Kind == "assign":
+		return "owner assigned"
+	}
+	return externalAuditReason[a.Kind]
+}
 
 // Act applies one human action. The actor is the scope's principal; the issue
 // must be at ExpectedVersion; a command ID retries to the same result.
@@ -826,11 +915,24 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, a IssueAction) (Iss
 	if p := scope.Permission(); p != issuesWrite && !(p == auth.OrgAdmin && !scope.IsSystem()) || len(scope.ProjectIDs()) == 0 {
 		return Issue{}, model.Fail(model.Forbidden)
 	}
-	if a.CommandID == (model.ID{}) || a.IssueID == (model.ID{}) || !actionKinds[a.Kind] || !safeText(a.Reason) {
-		return Issue{}, model.Fail(model.Invalid)
+	if e := validAction(a); e != nil {
+		return Issue{}, e
 	}
-	if a.Kind != "resolve" && (a.ResolutionBoundary != 0 || len(a.FixedDescendantFrontier) != 0) || a.Kind == "grouping_migration" == (a.Migration == nil) {
-		return Issue{}, model.Fail(model.Invalid)
+	if (a.Kind == "assign" || externalOpKinds[a.Kind] != "") && s.d.Contracted != nil {
+		ok, e := s.d.Contracted(ctx, scope.OrgID())
+		if e != nil {
+			return Issue{}, e
+		}
+		if !ok {
+			f := model.Fail(model.Unsupported)
+			f.SafeDetail = DetailNeedsContracted
+			return Issue{}, f
+		}
+		if s.d.RecordFormat != nil {
+			if e = s.d.RecordFormat(ctx); e != nil {
+				return Issue{}, e
+			}
+		}
 	}
 	for _, f := range a.FixedDescendantFrontier {
 		if f == (model.ID{}) {
@@ -876,7 +978,10 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, a IssueAction) (Iss
 				return Issue{}, e
 			}
 			targets := append([]model.ID{a.IssueID}, a.FixedDescendantFrontier...)
-			audit := model.ControlAudit{ID: a.CommandID, Principal: scope.PrincipalID(), Action: "issues." + a.Kind, Reason: a.Reason, Time: int64(s.d.Clock.Now()), Org: scope.OrgID().String(), PolicyEpoch: scope.PolicyEpoch(), Targets: targets, RequestID: model.RequestCorrelationID(ctx, a.CommandID), Outcome: model.AuditAllowed}
+			if a.Owner != nil {
+				targets = append(targets, *a.Owner) // who was assigned: an identifier, safe to audit
+			}
+			audit := model.ControlAudit{ID: a.CommandID, Principal: scope.PrincipalID(), Action: "issues." + a.Kind, Reason: auditReason(a), Time: int64(s.d.Clock.Now()), Org: scope.OrgID().String(), PolicyEpoch: scope.PolicyEpoch(), Targets: targets, RequestID: model.RequestCorrelationID(ctx, a.CommandID), Outcome: model.AuditAllowed}
 			e = s.d.Store.Commit(ctx, scope, project, Commit{CommandID: a.CommandID, ExpectedRevision: state.Revision, Records: []Record{next}, Audits: []model.ControlAudit{audit}, Command: &CommandRecord{Fingerprint: fingerprint, IssueID: a.IssueID}})
 			if code(e) == model.Conflict {
 				continue
@@ -909,7 +1014,11 @@ func fingerprintOf(a IssueAction) ([32]byte, error) {
 		Boundary model.UnixNano
 		Frontier []model.ID
 		Migrate  *model.GroupingMigration
-	}{a.ExpectedVersion, a.IssueID, a.Kind, a.Reason, a.ResolutionBoundary, a.FixedDescendantFrontier, a.Migration})
+		// Owner and External are omitted when absent, so the fingerprint of every action that does
+		// not carry them is what it was before they existed (a recorded command still retries).
+		Owner    *model.ID         `json:",omitempty"`
+		External *model.ExternalOp `json:",omitempty"`
+	}{a.ExpectedVersion, a.IssueID, a.Kind, a.Reason, a.ResolutionBoundary, a.FixedDescendantFrontier, a.Migration, a.Owner, a.External})
 	if e != nil {
 		return [32]byte{}, model.Fail(model.Invalid)
 	}
@@ -968,6 +1077,21 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 		}
 		i.Workflow = "open"
 		clear()
+	case "assign":
+		if i.Owner == nil && a.Owner == nil || i.Owner != nil && a.Owner != nil && *i.Owner == *a.Owner {
+			return rec, model.Fail(model.Conflict) // nothing to change
+		}
+		i.Owner = nil
+		if a.Owner != nil {
+			o := *a.Owner
+			i.Owner = &o
+		}
+	case "external_begin", "external_end", "external_adopt":
+		links, e := model.ApplyExternal(i.External, *a.External, scope.PrincipalID(), s.d.Clock.Now())
+		if e != nil {
+			return rec, e
+		}
+		i.External = links
 	}
 	i.Revision++
 	return rec, nil

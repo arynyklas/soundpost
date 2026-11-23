@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/health"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
@@ -120,7 +121,7 @@ func TestAppStateReadsPolicyFencesAndSchemaFromControlState(t *testing.T) {
 	if got := decide(t, app); !got.Ready {
 		t.Fatalf("drained fence still blocks: %+v", got)
 	}
-	for version, want := range map[uint8]health.Reason{0: health.ReasonSchemaOld, 2: health.ReasonSchemaNewer} {
+	for version, want := range map[uint8]health.Reason{auth.MinSchemaMarker - 1: health.ReasonSchemaOld, auth.SchemaMarker + 1: health.ReasonSchemaNewer} {
 		if err = app.Control.Update(ctx, func(st *model.ControlState) error { st.BearerHashKeyVersion = version; return nil }); err != nil {
 			t.Fatal(err)
 		}

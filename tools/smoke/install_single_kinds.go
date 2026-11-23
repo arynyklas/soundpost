@@ -66,8 +66,10 @@ func installExtraRecords(resource model.Resource, now int64) ([]installRecord, e
 // investigateInstalled runs the owned investigate reads as the project reader: the trace the
 // installed span belongs to (through POST /api/v1/investigate and POST /api/v1/traces/view), the
 // job and issue investigations. Every answer must be a 200 with a decoded, non-error state; the
-// concatenated answers are compared byte for byte after the restart.
-func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error) {
+// concatenated answers are compared byte for byte after the restart. previous says which build answers: the
+// previous release answers the issue investigation of the fixture issue (which names no record) with exactly a
+// 200 whose state is not_available, the candidate with exactly the one 404; each leg is pinned to its own answer.
+func investigateInstalled(site *installSite, fx *installFixture, previous bool) ([]byte, error) {
 	window := map[string]string{"start": "0", "end": strconv.FormatInt(time.Now().Add(time.Hour).UnixNano(), 10)}
 	if fx.queryTime != "" {
 		window["end"] = fx.queryTime
@@ -75,8 +77,8 @@ func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error)
 	// state is the exact typed answer the served product gives today: the trace view is ready; the investigate
 	// trace view is incomplete (its sections are not built); the job investigation of the ingested job is ready (job
 	// and issue investigations require a target; internal/httpapi/investigate.go); the issue investigation as the
-	// project reader is not_available (issue_evidence_needs_org_admin: the route derives the administrator scope only for an organization
-	// administrator, and the reader is not one). A change of any of them is a change the smoke must be told about.
+	// project reader reads error issues through the issue lifecycle (D92: no administrator scope is needed); the fixture issue names no record, so
+	// the reader's answer is the one NotFound (state ""). A change of any of them is a change the smoke must be told about.
 	reads := []struct {
 		name, path, state string
 		body              map[string]any
@@ -84,7 +86,7 @@ func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error)
 		{"investigate_trace", "/api/v1/investigate", "incomplete", map[string]any{"org": fx.org.String(), "kind": "trace", "projects": []string{fx.project.String()}, "target": fx.trace.String(), "window": window, "limit": 50}},
 		{"trace_view", "/api/v1/traces/view", "ready", map[string]any{"org": fx.org.String(), "project": fx.project.String(), "trace": fx.trace.String(), "window": window}},
 		{"investigate_job", "/api/v1/investigate", "ready", map[string]any{"org": fx.org.String(), "kind": "job", "projects": []string{fx.project.String()}, "target": fx.job.String(), "window": window, "limit": 50}},
-		{"investigate_issue", "/api/v1/investigate", "not_available", map[string]any{"org": fx.org.String(), "kind": "issue", "projects": []string{fx.project.String()}, "target": fx.issue.String(), "window": window, "limit": 50}},
+		{"investigate_issue", "/api/v1/investigate", "", map[string]any{"org": fx.org.String(), "kind": "issue", "projects": []string{fx.project.String()}, "target": fx.issue.String(), "window": window, "limit": 50}},
 	}
 	var all bytes.Buffer
 	for _, r := range reads {
@@ -96,6 +98,22 @@ func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error)
 				time.Sleep(500 * time.Millisecond)
 				status, raw, err = site.post(r.path, r.body, fx.reader.CSRF, "")
 			}
+		}
+		if r.state == "" {
+			// D92/D93: the answer differs by release on purpose, so it is pinned per build and is not part of the bytes
+			// compared across the rollback.
+			if previous {
+				var old struct {
+					State string `json:"state"`
+				}
+				if err != nil || status != 200 || json.Unmarshal(raw, &old) != nil || old.State != "not_available" {
+					return nil, &smokeFailure{Stage: r.name, Code: "previous_release_not_a_200_not_available", Actual: status, Expected: 200}
+				}
+			} else if err = requireSmokeResponse(r.name, status, 404, raw, err); err != nil {
+				return nil, err
+			}
+			all.WriteString(r.name)
+			continue
 		}
 		if err = requireSmokeResponse(r.name, status, 200, raw, err); err != nil {
 			return nil, err

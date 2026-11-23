@@ -86,6 +86,9 @@ func (c controlDestinations) Destination(ctx context.Context, scope auth.Scope, 
 			return model.Fail(model.Corrupt)
 		}
 		rec = notify.DestinationRecord{Type: cfg.Type, Endpoint: cfg.Endpoint, Address: cfg.Address, Enabled: cfg.Enabled, HasSecret: o.Secrets["destination:"+id.String()] != "", Version: cfg.Revision}
+		if cfg.Type == auth.EventWebhookType {
+			rec.Events, rec.PreviousUntil, rec.HasPrevious = cfg.Events, model.UnixNano(cfg.PreviousUntil), o.Secrets["destination_prev:"+id.String()] != ""
+		}
 		found = true
 		return nil
 	})
@@ -107,7 +110,11 @@ func (c controlSecrets) Read(ctx context.Context, scope auth.Scope, ref notify.S
 		if !ok {
 			return model.Fail(model.Forbidden)
 		}
-		sealed, ok = o.Secrets["destination:"+ref.ID.String()]
+		key := "destination:" + ref.ID.String()
+		if ref.Previous {
+			key = "destination_prev:" + ref.ID.String()
+		}
+		sealed, ok = o.Secrets[key]
 		if !ok || sealed == "" {
 			return model.Fail(model.Forbidden)
 		}
@@ -237,6 +244,11 @@ func (c channelSender) Send(ctx context.Context, scope auth.Scope, d notify.Deli
 	if !ok {
 		return notify.Outcome{Kind: notify.OutcomeTerminal, Code: "channel_unconfigured"}, nil
 	}
+	// An event goes to an event endpoint and a notification to a notification
+	// destination, never the other way round, whatever the stored type says.
+	if (d.Key.Kind == notify.KindEvent) != (notify.Channel(rec.Type) == notify.ChannelEventWebhook) {
+		return notify.Outcome{Kind: notify.OutcomeTerminal, Code: "channel_mismatch"}, nil
+	}
 	return sender.Send(ctx, scope, d)
 }
 
@@ -277,6 +289,9 @@ func (a *App) NotificationSender(cfg NotificationConfig) (notify.Sender, error) 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: cfg.RootCAs, MinVersion: tls.VersionTLS12}}}
 	senders := map[notify.Channel]notify.Sender{}
 	if senders[notify.ChannelWebhook], err = providers.NewWebhook(providers.WebhookConfig{Common: common, Stamper: stamper}, registry, client); err != nil {
+		return nil, err
+	}
+	if senders[notify.ChannelEventWebhook], err = providers.NewEventWebhook(providers.EventWebhookConfig{Common: common, Stamper: stamper}, registry, client); err != nil {
 		return nil, err
 	}
 	if senders[notify.ChannelTelegram], err = providers.NewTelegram(providers.TelegramConfig{Common: common, APIBase: cfg.TelegramAPI}, registry, client); err != nil {

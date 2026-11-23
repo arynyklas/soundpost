@@ -377,6 +377,9 @@ func (o *Outbox) Due(ctx context.Context, scope auth.Scope, lease FenceToken, at
 	}
 	fired := 0
 	for _, rec := range recs {
+		if IsEventSubject(rec.Subject) {
+			continue // the event feed's state is a cursor, not a PolicyState: it has no timers
+		}
 		var state PolicyState
 		if err = json.Unmarshal(rec.State, &state); err != nil {
 			return fired, model.Fail(model.Corrupt)

@@ -131,33 +131,35 @@ func TestInvestigateRouteServesIssueToAnOrganizationAdministrator(t *testing.T) 
 	}
 }
 
-// A project reader who is not an administrator is told the records need administration, before any state is read, so a real and a
-// guessed target are the same bytes and neither names the target.
+// A project reader who is not an administrator is told the release records need administration, before any state is read, so a
+// real and a guessed target are the same bytes and neither names the target. An error issue is her own project's data (D92): she
+// is served it (see TestProjectReadersSeeErrorIssues for the whole matrix) and a guessed target is the one NotFound.
 func TestInvestigateRouteTellsANonAdministratorTheTypedReasonAndNothingElse(t *testing.T) {
 	w := newRouteWorld(t)
 	p := w.w.project
 	rel, iss := w.release(p), w.issue(p, false)
-	for _, c := range []struct {
-		kind   string
-		target model.ID
-		reason string
-	}{{"release", rel, httpapi.ReasonReleaseRecordsAdmin}, {"issue", iss, httpapi.ReasonIssueNeedsAdmin}} {
-		var first []byte
-		for name, target := range map[string]model.ID{"real": c.target, "guessed": model.NewID()} {
-			status, raw := w.investigate(w.w.reader, w.w.org, c.kind, target, nil, p)
-			v := decodeView(t, raw)
-			if status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil {
-				t.Fatalf("%s (%s target) for a project reader: %d %s", c.kind, name, status, raw)
-			}
-			if strings.Contains(string(raw), target.String()) || strings.Contains(string(raw), `"target`) || strings.Contains(string(raw), `"release":`) || strings.Contains(string(raw), `"issue":`) {
-				t.Fatalf("%s (%s target): the refusal carries target data: %s", c.kind, name, raw)
-			}
-			if first == nil {
-				first = raw
-			} else if string(first) != string(raw) {
-				t.Fatalf("%s: a real and a guessed target are told apart: %s vs %s", c.kind, first, raw)
-			}
+	var first []byte
+	for name, target := range map[string]model.ID{"real": rel, "guessed": model.NewID()} {
+		status, raw := w.investigate(w.w.reader, w.w.org, "release", target, nil, p)
+		v := decodeView(t, raw)
+		if status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonReleaseRecordsAdmin || v.Release != nil || v.Issue != nil {
+			t.Fatalf("release (%s target) for a project reader: %d %s", name, status, raw)
 		}
+		if strings.Contains(string(raw), target.String()) || strings.Contains(string(raw), `"target`) || strings.Contains(string(raw), `"release":`) || strings.Contains(string(raw), `"issue":`) {
+			t.Fatalf("release (%s target): the refusal carries target data: %s", name, raw)
+		}
+		if first == nil {
+			first = raw
+		} else if string(first) != string(raw) {
+			t.Fatalf("release: a real and a guessed target are told apart: %s vs %s", first, raw)
+		}
+	}
+	status, raw := w.investigate(w.w.reader, w.w.org, "issue", iss, nil, p)
+	if v := decodeView(t, raw); status != 200 || v.State != httpapi.StateReady || v.Issue == nil || v.Issue.ID != iss || v.Release != nil {
+		t.Fatalf("issue for a project reader: %d %s", status, raw)
+	}
+	if status, raw = w.investigate(w.w.reader, w.w.org, "issue", model.NewID(), nil, p); status != 404 {
+		t.Fatalf("a guessed issue for a project reader: %d %s", status, raw)
 	}
 }
 
@@ -243,15 +245,21 @@ func TestInvestigateRouteNeverCombinesAdministrationWithElevationOrSource(t *tes
 		kind   string
 		target model.ID
 		reason string
-	}{{"release", rel, httpapi.ReasonReleaseRecordsAdmin}, {"issue", iss, httpapi.ReasonIssueNeedsAdmin}} {
+	}{{"release", rel, httpapi.ReasonReleaseRecordsAdmin}, {"issue", iss, ""}} {
 		// Control: without elevation or source the same caller is served.
 		status, raw := w.investigate(owner, w.w.org, c.kind, c.target, nil, p)
 		if v := decodeView(t, raw); status != 200 || v.State != httpapi.StateReady || (v.Release == nil && v.Issue == nil) {
 			t.Fatalf("%s control (administrator, no elevation): %d %s", c.kind, status, raw)
 		}
-		// A real elevation is a project-read scope over the route.
+		// A real elevation is a project-read scope over the route: release records stay refused (the typed reason), and an error
+		// issue is not served under it either: the issue lifecycle serves the caller's own grants, and an elevation is no grant, so
+		// the answer is the one NotFound and carries nothing. It is never administration.
 		status, raw = w.investigate(owner, w.w.org, c.kind, c.target, map[string]any{"elevation": elevation.ID.String()}, p)
-		if v := decodeView(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil || strings.Contains(string(raw), c.target.String()) {
+		if c.kind == "issue" {
+			if status != 404 || strings.Contains(string(raw), c.target.String()) || strings.Contains(string(raw), `"issue":`) {
+				t.Fatalf("issue with an elevation: %d %s, want the one NotFound", status, raw)
+			}
+		} else if v := decodeView(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil || strings.Contains(string(raw), c.target.String()) {
 			t.Fatalf("%s with an elevation became administration: %d %s", c.kind, status, raw)
 		}
 		// An unknown elevation, a source on a read request and a raw permission with a source are refused exactly as the other reads
@@ -291,8 +299,8 @@ func TestInvestigateRouteKeepsTheProjectReadScopeForTheOtherKinds(t *testing.T) 
 	}
 }
 
-// A revoked administrator is not served: the next request is the typed reason when she still reads the project and the one NotFound
-// when she holds nothing there, never a stale ready.
+// A revoked administrator is not served as one: the next request is the typed reason for the release records when she still reads
+// the project (and her own project's error issue, as a reader), and the one NotFound when she holds nothing there, never a stale ready.
 func TestInvestigateRouteStopsServingARevokedAdministrator(t *testing.T) {
 	w := newRouteWorld(t)
 	p := w.w.project
@@ -317,9 +325,15 @@ func TestInvestigateRouteStopsServingARevokedAdministrator(t *testing.T) {
 	for kind, c := range map[string]struct {
 		target model.ID
 		reason string
-	}{"release": {rel, httpapi.ReasonReleaseRecordsAdmin}, "issue": {iss, httpapi.ReasonIssueNeedsAdmin}} {
+	}{"release": {rel, httpapi.ReasonReleaseRecordsAdmin}, "issue": {iss, ""}} {
 		status, raw := w.investigate(reading, w.w.org, kind, c.target, nil, p)
-		if v := decodeView(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil {
+		v := decodeView(t, raw)
+		if kind == "issue" {
+			// She still reads the project: the error issue is hers to read as a reader (D92), not as the administrator she was.
+			if status != 200 || v.State != httpapi.StateReady || v.Issue == nil || v.Issue.ID != iss {
+				t.Fatalf("issue for a revoked administrator who still reads: %d %s", status, raw)
+			}
+		} else if status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil {
 			t.Fatalf("%s for a revoked administrator who still reads: %d %s", kind, status, raw)
 		}
 		if status, raw = w.investigate(bare, w.w.org, kind, c.target, nil, p); status != 404 || strings.Contains(string(raw), c.target.String()) {

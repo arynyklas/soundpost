@@ -256,6 +256,9 @@ func (p *Policies) Read(ctx context.Context, ctxOrg auth.Scope, project model.ID
 				if json.Unmarshal(raw, &cfg) != nil {
 					return model.Fail(model.Corrupt)
 				}
+				if cfg.Type == auth.EventWebhookType {
+					continue // event endpoints have their own surface (console_events.go)
+				}
 				_, sealed := org.Secrets[key]
 				out.Destinations = append(out.Destinations, DestinationView{ID: id, Type: cfg.Type, EndpointHost: hostOf(cfg.Endpoint), Address: cfg.Address, Enabled: cfg.Enabled, HasSecret: sealed})
 			case strings.HasPrefix(key, "retention:"):

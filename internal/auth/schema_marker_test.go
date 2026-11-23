@@ -54,11 +54,11 @@ func TestNewServiceRefusesAnUnsupportedSchemaMarkerWithATypedDecision(t *testing
 	}{
 		{"marker above the supported one", func(st *model.ControlState) { st.BearerHashKeyVersion = auth.SchemaMarker + 1 }, auth.SchemaMarker + 1, true, true},
 		{"marker far above the supported one", func(st *model.ControlState) { st.BearerHashKeyVersion = 200 }, 200, true, true},
-		{"marker below the supported one on an initialized installation", func(st *model.ControlState) { st.BearerHashKeyVersion = auth.SchemaMarker - 1 }, auth.SchemaMarker - 1, true, false},
+		{"marker below the supported one on an initialized installation", func(st *model.ControlState) { st.BearerHashKeyVersion = auth.MinSchemaMarker - 1 }, auth.MinSchemaMarker - 1, true, false},
 		{"marker below the supported one with authority and no key (the pre-marker layout)", func(st *model.ControlState) {
-			st.BearerHashKeyVersion, st.BearerHashKey = auth.SchemaMarker-1, ""
+			st.BearerHashKeyVersion, st.BearerHashKey = auth.MinSchemaMarker-1, ""
 			populated(st)
-		}, auth.SchemaMarker - 1, false, false},
+		}, auth.MinSchemaMarker - 1, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			directory := installedControl(t, tc.rewrite)
@@ -88,6 +88,30 @@ func TestNewServiceRefusesAnUnsupportedSchemaMarkerWithATypedDecision(t *testing
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// D94: the previous release supports marker 1 only and refuses 2; this build reads 1 (every existing installation) and 2 (an installation
+// that holds D92 records), and writes the marker back unchanged.
+func TestNewServiceReadsBothSupportedMarkers(t *testing.T) {
+	for _, marker := range []uint8{model.FormatMarkerBase, model.FormatMarkerRecords} {
+		directory := installedControl(t, func(st *model.ControlState) { st.BearerHashKeyVersion = marker })
+		store, err := control.Open(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = auth.NewService(auth.AuthDependencies{Control: store}); err != nil {
+			t.Fatalf("marker %d: %v", marker, err)
+		}
+		if err = store.View(context.Background(), func(st control.State) error {
+			if st.BearerHashKeyVersion != marker {
+				t.Fatalf("opening changed the marker %d to %d", marker, st.BearerHashKeyVersion)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		store.Close()
 	}
 }
 

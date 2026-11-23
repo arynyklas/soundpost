@@ -253,7 +253,7 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			} else {
 				delete(o.Grants, p.UserID.String()+":"+p.ProjectID.String())
 			}
-		case "team", "source_policy", "sso", "destination", "retention":
+		case "team", "source_policy", "sso", "destination", "retention", "event_test":
 			if p.ID == (model.ID{}) {
 				return model.Fail(model.Invalid)
 			}
@@ -265,6 +265,16 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 			if r.Kind == "destination" {
 				cfg, err := versionDestination(o, p)
+				if err != nil {
+					return err
+				}
+				p.Config = cfg
+				if p.Config, err = finishEventDestination(&o, p, cfg, audit.Time); err != nil {
+					return err
+				}
+			}
+			if r.Kind == "event_test" {
+				cfg, err := stampEventTest(p.Config, r.CommandID, audit.Time)
 				if err != nil {
 					return err
 				}

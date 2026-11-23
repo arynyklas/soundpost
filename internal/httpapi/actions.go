@@ -54,15 +54,18 @@ const (
 	ActionUnignore       ActionKind = "unignore"
 	ActionReopen         ActionKind = "reopen"
 	ActionGroupMigration ActionKind = "grouping_migration"
+	ActionTitle          ActionKind = "title"
+	ActionNote           ActionKind = "note"
 )
 
 var incidentKinds = map[ActionKind]incidents.Type{
 	ActionAssign: incidents.TypeAssign, ActionAck: incidents.TypeAck, ActionResolve: incidents.TypeResolve,
 	ActionLink: incidents.TypeLink, ActionImpact: incidents.TypeImpact, ActionSnooze: incidents.TypeSnooze,
 	ActionUnsnooze: incidents.TypeUnsnooze, ActionMaintenance: incidents.TypeMaintenance, ActionMaintenanceEnd: incidents.TypeMaintenanceEnd,
+	ActionTitle: incidents.TypeTitle, ActionNote: incidents.TypeNote,
 }
 
-var issueKinds = []ActionKind{ActionResolve, ActionIgnore, ActionUnignore, ActionReopen, ActionGroupMigration}
+var issueKinds = []ActionKind{ActionResolve, ActionIgnore, ActionUnignore, ActionReopen, ActionGroupMigration, ActionAssign}
 
 // ImpactPayload is one operator-reported impact observation. Severity is
 // minor|major|critical; State is firing|recovered|unknown; Freshness is
@@ -93,6 +96,9 @@ type ActionPayload struct {
 	FixedFrontier      []model.ID   `json:"fixed_frontier,omitempty"`
 	// Migration belongs to the issue grouping_migration action only.
 	Migration *MigrationPayload `json:"migration,omitempty"`
+	// Title belongs to the incident title action and Note to the incident note action only.
+	Title string `json:"title,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 // MigrationPayload names the issue the migration moves to and the grouping
@@ -160,6 +166,9 @@ type IssueActionView struct {
 	ResolutionTime   *model.Int64 `json:"resolution_time_ns,omitempty"`
 	FixedDescendants []model.ID   `json:"fixed_descendants,omitempty"`
 	MigrationLinks   []model.ID   `json:"migration_links,omitempty"`
+	// Owner is the member the issue is assigned to (omitted when none); External its links to an external tracker.
+	Owner    *model.ID          `json:"owner,omitempty"`
+	External []ExternalLinkView `json:"external,omitempty"`
 }
 
 // IssueConflict is a lost issue revision race (or a transition the issue's
@@ -232,6 +241,10 @@ type TimelineEntry struct {
 	Until   *model.Int64    `json:"until,omitempty"`
 	Impact  *ImpactView     `json:"impact,omitempty"`
 	Link    *incidents.Link `json:"link,omitempty"`
+	// Title and Note are the text of a title or note entry; External is the transition of a link to an external tracker.
+	Title    string          `json:"title,omitempty"`
+	Note     string          `json:"note,omitempty"`
+	External *ExternalOpView `json:"external,omitempty"`
 }
 
 // NotificationView is what C08 says about notification eligibility plus what the
@@ -274,6 +287,10 @@ type IncidentView struct {
 	ObservedImpacts uint32           `json:"observed_impacts"`
 	LastActivity    model.Int64      `json:"last_activity"`
 	Timeline        []TimelineEntry  `json:"timeline,omitempty"`
+	// Title is the human name of the incident ("" when none was ever set); External its links to an
+	// external tracker (never the marker).
+	Title    string             `json:"title"`
+	External []ExternalLinkView `json:"external,omitempty"`
 }
 
 // LifecycleOperation is the scoped state of one long-running restriction,
@@ -454,7 +471,7 @@ func (a *Actions) issueAct(ctx context.Context, scope auth.Scope, req ActionRequ
 	if a.issues == nil {
 		return ActionResponse{State: ActionNotAvailable, Reason: ReasonIssueActionsNotBuilt, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID}, nil
 	}
-	action, err := a.issueAction(scope, req)
+	action, err := a.issueAction(ctx, scope, req)
 	if err != nil {
 		return ActionResponse{}, err
 	}
@@ -471,7 +488,7 @@ func (a *Actions) issueAct(ctx context.Context, scope auth.Scope, req ActionRequ
 		return ActionResponse{}, err
 	}
 	revision := model.Uint64(issue.Revision)
-	view := IssueActionView{ID: issue.ID, Workflow: issue.Workflow, Revision: revision, GroupingVersion: issue.GroupingVersion, FixedDescendants: issue.FixedDescendants, MigrationLinks: issue.MigrationLinks}
+	view := IssueActionView{ID: issue.ID, Workflow: issue.Workflow, Revision: revision, GroupingVersion: issue.GroupingVersion, FixedDescendants: issue.FixedDescendants, MigrationLinks: issue.MigrationLinks, Owner: issue.Owner, External: externalViews(issue.External)}
 	if issue.ResolutionTime != nil {
 		t := model.Int64(*issue.ResolutionTime)
 		view.ResolutionTime = &t
@@ -482,14 +499,25 @@ func (a *Actions) issueAct(ctx context.Context, scope auth.Scope, req ActionRequ
 // issueAction maps the closed payload to the C07 action. Fields a kind does not
 // take are refused; the actor and organization are the scope's, the migration's
 // source and revision are the request's and its time is the server's.
-func (a *Actions) issueAction(scope auth.Scope, req ActionRequest) (issues.IssueAction, error) {
+func (a *Actions) issueAction(ctx context.Context, scope auth.Scope, req ActionRequest) (issues.IssueAction, error) {
 	p := req.Payload
 	kind := req.Kind
-	if p.Owner != nil || p.Until != nil || p.Impact != nil || p.Link != nil ||
+	if p.Owner != nil && kind != ActionAssign || p.Until != nil || p.Impact != nil || p.Link != nil || p.Title != "" || p.Note != "" ||
 		(p.ResolutionBoundary != nil || len(p.FixedFrontier) != 0) && kind != ActionResolve || p.Migration != nil != (kind == ActionGroupMigration) {
 		return issues.IssueAction{}, invalid("action_payload_invalid")
 	}
 	out := issues.IssueAction{CommandID: req.CommandID, ExpectedVersion: model.Revision(req.ExpectedVersion), IssueID: req.TargetID, Kind: string(kind), Reason: p.Reason, FixedDescendantFrontier: slices.Clone(p.FixedFrontier)}
+	if kind == ActionAssign && p.Owner != nil {
+		// The owner must belong to the caller's own organization: a member or an administrator of it.
+		if *p.Owner == (model.ID{}) {
+			return issues.IssueAction{}, invalid("issue_owner_invalid")
+		}
+		if err := a.requireOrgPrincipal(ctx, scope.OrgID(), *p.Owner, "issue_owner_unknown"); err != nil {
+			return issues.IssueAction{}, err
+		}
+		owner := *p.Owner
+		out.Owner = &owner
+	}
 	if p.ResolutionBoundary != nil {
 		out.ResolutionBoundary = model.UnixNano(*p.ResolutionBoundary)
 	}
@@ -532,17 +560,18 @@ func (a *Actions) incidentAction(ctx context.Context, scope auth.Scope, req Acti
 	kind := req.Kind
 	if p.Owner != nil && kind != ActionAssign || p.Until != nil != (kind == ActionSnooze || kind == ActionMaintenance) ||
 		p.Impact != nil != (kind == ActionImpact) || p.Link != nil != (kind == ActionLink) ||
+		p.Title != "" && kind != ActionTitle || p.Note != "" && kind != ActionNote ||
 		p.ResolutionBoundary != nil || len(p.FixedFrontier) != 0 || p.Migration != nil {
 		return incidents.Action{}, invalid("action_payload_invalid")
 	}
-	out := incidents.Action{CommandID: req.CommandID, ExpectedVersion: model.Revision(req.ExpectedVersion), Type: incidentKinds[kind], Reason: p.Reason, Target: incidents.Target{Project: req.ProjectID, Incident: req.TargetID}}
+	out := incidents.Action{CommandID: req.CommandID, ExpectedVersion: model.Revision(req.ExpectedVersion), Type: incidentKinds[kind], Reason: p.Reason, Title: p.Title, Note: p.Note, Target: incidents.Target{Project: req.ProjectID, Incident: req.TargetID}}
 	switch kind {
 	case ActionAssign:
 		if p.Owner != nil {
 			if *p.Owner == (model.ID{}) {
 				return incidents.Action{}, invalid("incident_owner_invalid")
 			}
-			if err := a.requireOrgPrincipal(ctx, scope.OrgID(), *p.Owner); err != nil {
+			if err := a.requireOrgPrincipal(ctx, scope.OrgID(), *p.Owner, "incident_owner_unknown"); err != nil {
 				return incidents.Action{}, err
 			}
 			owner := *p.Owner
@@ -564,12 +593,12 @@ func (a *Actions) incidentAction(ctx context.Context, scope auth.Scope, req Acti
 }
 
 // requireOrgPrincipal refuses an owner who is neither a member nor an admin of
-// the scope's own organization.
-func (a *Actions) requireOrgPrincipal(ctx context.Context, org, user model.ID) error {
+// the scope's own organization; detail is the closed token the refusal carries.
+func (a *Actions) requireOrgPrincipal(ctx context.Context, org, user model.ID, detail string) error {
 	return a.directory.View(ctx, func(st control.State) error {
 		o, ok := st.Orgs[org.String()]
 		if !ok || !(o.Members[user.String()] || o.Admins[user.String()]) {
-			return invalid("incident_owner_unknown")
+			return invalid(detail)
 		}
 		return nil
 	})
@@ -612,7 +641,7 @@ func urgencyRank(v IncidentView) int {
 func (a *Actions) view(st incidents.State, timeline bool, facts notificationFacts) IncidentView {
 	now := a.clock.Now()
 	v := IncidentView{
-		ID: st.ID, Org: st.Org, Project: st.Project, Version: model.Uint64(st.Version), Status: string(st.Status), Owner: st.Owner,
+		ID: st.ID, Org: st.Org, Project: st.Project, Version: model.Uint64(st.Version), Status: string(st.Status), Owner: st.Owner, Title: st.Title, External: externalViews(st.External),
 		Condition: ConditionView{ID: st.Condition.ID, State: string(st.Condition.State), Freshness: string(st.Condition.Freshness), ObservedAt: model.Int64(st.Condition.At)},
 		Episode:   st.Episode, Severity: severityName(st.Severity), ImpactRevision: model.Uint64(st.ImpactRevision),
 		SourceFiring: st.Condition.State == incidents.ConditionFiring, Links: st.Links, Previous: st.Previous,
@@ -664,7 +693,8 @@ func (a *Actions) view(st incidents.State, timeline bool, facts notificationFact
 		if !timeline {
 			continue
 		}
-		te := TimelineEntry{Version: model.Uint64(i + 1), At: model.Int64(e.At), Type: string(e.Action.Type), Origin: string(e.Action.Origin), Actor: e.Action.Actor, Reason: e.Action.Reason, Owner: e.Action.Owner, Link: e.Action.Link}
+		te := TimelineEntry{Version: model.Uint64(i + 1), At: model.Int64(e.At), Type: string(e.Action.Type), Origin: string(e.Action.Origin), Actor: e.Action.Actor, Reason: e.Action.Reason, Owner: e.Action.Owner, Link: e.Action.Link,
+			Title: e.Action.Title, Note: e.Action.Note, External: externalOpView(e.Action.External)}
 		if e.Action.Until != 0 {
 			u := model.Int64(e.Action.Until)
 			te.Until = &u

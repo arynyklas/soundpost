@@ -44,11 +44,16 @@ func (s *Service) serverTokenDigest(token string) string {
 	return s.keyedBearerDigest(ServerAPIBearer, token)
 }
 
-// SchemaMarker is the control-state format marker this build reads and writes: the persisted
+// SchemaMarker is the highest control-state format marker this build reads and writes: the persisted
 // BearerHashKeyVersion. A stored marker above it was written by a newer build, a stored marker
-// below it by a build that predates the format (a pristine root, marker 0 with nothing stored,
-// is not that: the first start initializes it).
-const SchemaMarker uint8 = 1
+// below MinSchemaMarker by a build that predates the format (a pristine root, marker 0 with nothing stored,
+// is not that: the first start initializes it). Marker 1 (model.FormatMarkerBase) is the previous release's format;
+// marker 2 (model.FormatMarkerRecords, D94) is written before the first D92 record, and the previous release,
+// which supports only 1, refuses to start on it.
+const SchemaMarker uint8 = model.FormatMarkerRecords
+
+// MinSchemaMarker is the lowest marker this build reads.
+const MinSchemaMarker uint8 = model.FormatMarkerBase
 
 // SchemaError is the typed decision that the stored control state is in a format this build does
 // not support. It is neither corruption nor an I/O failure and is deliberately not a model.Fault:
@@ -72,14 +77,14 @@ func holdsAuthority(st model.ControlState) bool {
 }
 
 // checkSchema decides the format marker of a decoded control state. Any marker above SchemaMarker
-// is newer. A lower one is old when the state is in use (a sealed key, or users, sessions, tokens
+// is newer. One below MinSchemaMarker is old when the state is in use (a sealed key, or users, sessions, tokens
 // or sources stored): a pristine root is left to initializeBearerHashKey. A marker this build
 // supports is not judged here; what is inconsistent with it is corruption.
 func checkSchema(st model.ControlState) error {
 	switch v := st.BearerHashKeyVersion; {
 	case v > SchemaMarker:
 		return &SchemaError{Observed: v}
-	case v < SchemaMarker && (st.BearerHashKey != "" || holdsAuthority(st)):
+	case v < MinSchemaMarker && (st.BearerHashKey != "" || holdsAuthority(st)):
 		return &SchemaError{Observed: v}
 	}
 	return nil

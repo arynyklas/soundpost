@@ -111,11 +111,16 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, g := range groups {
-		for range 100 {
+		led := false
+		for range 600 {
 			if g.Status().Leader == 1 {
+				led = true
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
+		}
+		if !led {
+			t.Fatalf("group %v: node 1 did not lead within 60s (a loaded host elects slowly); the steps below need every group led here", g.Status().Group)
 		}
 	}
 	cluster.App(2).LimitLiveLayoutForTest(true)

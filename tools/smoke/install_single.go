@@ -132,7 +132,7 @@ func RunInstallSingle(args []string) (result error) {
 		return err
 	}
 	stage = "install_investigate"
-	investigateBefore, err := investigateInstalled(site, fx)
+	investigateBefore, err := investigateInstalled(site, fx, false)
 	if err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func RunInstallSingle(args []string) (result error) {
 	}
 	report["query_identical_after_restart"] = true
 	stage = "install_same_investigation"
-	investigateAfter, err := investigateInstalled(site, fx)
+	investigateAfter, err := investigateInstalled(site, fx, false)
 	if err != nil {
 		return err
 	}
@@ -311,6 +311,8 @@ func requireHeldNotReady(run installRun, site *installSite, report map[string]an
 type binaryHost struct {
 	path, dir, holdDir string
 	logs               *syncBuffer
+	// args are extra `serve` flags appended after the standard ones (none by default).
+	args []string
 }
 
 type syncBuffer struct {
@@ -434,7 +436,7 @@ func (h *binaryHost) start() (installRun, error) {
 		return nil, err
 	}
 	hold := filepath.Join(h.holdDir, fmt.Sprintf("hold-%d", time.Now().UnixNano()))
-	cmd := exec.Command(h.path, "serve", "--mode=single", "--data-dir", h.dir, "--listen", addr, "--startup-hold-file", hold)
+	cmd := exec.Command(h.path, append([]string{"serve", "--mode=single", "--data-dir", h.dir, "--listen", addr, "--startup-hold-file", hold}, h.args...)...)
 	cmd.Stdout, cmd.Stderr = h.logs, h.logs
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	if err = cmd.Start(); err != nil {

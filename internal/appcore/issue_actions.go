@@ -38,8 +38,13 @@ func (a *App) BindIssueActions() error {
 		return err
 	}
 	a.Actions.BindIssues(svc)
+	// The same lifecycle serves error issues to project readers (telemetry.read) and issues.write holders: the investigate issue
+	// kind and the issue and occurrence evidence views read through it under the caller's own scope.
+	if a.Investigator != nil {
+		a.Investigator.WithIssues(svc)
+	}
 	if a.Evidence != nil {
-		a.Evidence = a.Evidence.With(httpapi.WithErrorOccurrences(httpapi.NewStorageErrorSource(a.Storage)), httpapi.WithRegressionExplanations(svc))
+		a.Evidence = a.Evidence.With(httpapi.WithErrorOccurrences(httpapi.NewStorageErrorSource(a.Storage)), httpapi.WithRegressionExplanations(svc), httpapi.WithIssueLifecycle(svc))
 	}
 	return nil
 }
@@ -54,7 +59,18 @@ func (a *App) NewIssueActions(clock issues.Clock) (*issues.Service, error) {
 		return nil, err
 	}
 	return issues.New(issues.Deps{Store: store, Authorizer: a.Auth, Graphs: humanReleaseGraphs{a}, Fence: humanIssueFence{a}, Policy: a.Control,
-		Migrator: issueMigrator{a, clock}, Clock: clock, Regression: issues.RegressionPolicy{MinOccurrences: 1}})
+		Migrator: issueMigrator{a, clock}, Clock: clock, Regression: issues.RegressionPolicy{MinOccurrences: 1}, Contracted: a.orgContracted, RecordFormat: a.recordFormat})
+}
+
+// orgContracted reports whether the organization is contracted (model.IndexesContractedKey): the D93
+// writes of an issue owner and external links wait for it, because the previous release cannot read them.
+func (a *App) orgContracted(ctx context.Context, org model.ID) (bool, error) {
+	contracted := false
+	err := a.Control.View(ctx, func(st model.ControlState) error {
+		contracted = st.Orgs[org.String()].IndexesContracted()
+		return nil
+	})
+	return contracted, err
 }
 
 // humanIssueFence denies a project whose deletion saga is fencing: the lifecycle

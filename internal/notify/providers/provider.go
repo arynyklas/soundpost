@@ -169,6 +169,11 @@ func resolve(ctx context.Context, c Common, secrets SecretReader, scope auth.Sco
 	if scope.OrgID() != d.Key.Org {
 		return fail(terminal(codeScopeMismatch))
 	}
+	// An event goes only to an event endpoint and a notification never does: the kind
+	// of the delivery and the channel must agree, whatever the stored destination says.
+	if (d.Key.Kind == notify.KindEvent) != (ch == notify.ChannelEventWebhook) {
+		return fail(terminal(codeChannelMismatch))
+	}
 	dest, err := c.Destinations.Resolve(ctx, scope, d, ch)
 	if err != nil {
 		return fail(destinationOutcome(err))
@@ -537,6 +542,8 @@ func link(origin string, org model.ID, t notify.Template) string {
 		view, param = "incidents", "incident"
 	case notify.EntityIssue:
 		view, param = "issues", "target"
+	case notify.EntityRelease:
+		view, param = "releases", "target"
 	}
 	ref := t.Project.String() + ":" + t.Entity.ID.String()
 	s := origin + "/#view=" + view + "&org=" + org.String() + "&projects=" + t.Project.String()

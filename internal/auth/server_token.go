@@ -5,6 +5,7 @@ package auth
 import (
 	"context"
 	"github.com/arynyklas/soundpost/internal/model"
+	"strings"
 )
 
 type IssuedServerToken struct {
@@ -21,13 +22,13 @@ func (s *Service) IssueServerToken(ctx context.Context, actor Credential, org, p
 	out := IssuedServerToken{model.NewID(), randomToken(), model.Int64(expires)}
 	actions := make([]string, len(permissions))
 	for i, p := range permissions {
-		if !validPermission(string(p)) {
+		if !validPermission(string(p)) && p != ReleaseWrite {
 			return IssuedServerToken{}, model.Fail(model.Invalid)
 		}
 		actions[i] = string(p)
 	}
 	record := model.ControlServerToken{ID: out.ID, Principal: principal, Org: org, Projects: append([]model.ID(nil), projects...), Permissions: actions, Expires: expires}
-	audit := model.ControlAudit{ID: model.NewID(), Principal: actor.user, Action: "issue_server_token", Reason: reason, Time: s.now().UnixNano(), Org: org.String(), Targets: []model.ID{out.ID, principal}, RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
+	audit := model.ControlAudit{ID: model.NewID(), Principal: actor.user, Action: "issue_server_token", Reason: reason + " [permissions: " + strings.Join(actions, ",") + "]", Time: s.now().UnixNano(), Org: org.String(), Targets: []model.ID{out.ID, principal}, RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
 	err := s.store.Update(ctx, func(st *model.ControlState) error {
 		if err := s.validateCredentialState(*st, actor); err != nil {
 			return err

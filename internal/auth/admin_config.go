@@ -25,6 +25,14 @@ type DestinationConfig struct {
 	// with every committed write. The transition sets it; a client-sent value is
 	// overwritten.
 	Revision model.Revision `json:"revision,omitempty"`
+	// Name, Events, PreviousUntil and SecretRotated belong to an event_webhook endpoint
+	// (event_destination.go): the display name, the subscribed events, and the
+	// rotation times (unix nanoseconds) the transition stamps; a client-sent rotation
+	// time is overwritten.
+	Name          string   `json:"name,omitempty"`
+	Events        []string `json:"events,omitempty"`
+	PreviousUntil int64    `json:"previous_until_ns,omitempty"`
+	SecretRotated int64    `json:"secret_rotated_ns,omitempty"`
 }
 type RetentionConfig struct {
 	ProjectID model.ID `json:"project_id"`
@@ -108,7 +116,7 @@ func validateAdminConfig(kind string, p AdminPayload, o *model.ControlOrg) error
 		if e := strictConfig(p.Config, &cfg); e != nil {
 			return e
 		}
-		if cfg.Type != "" && cfg.Type != "smtp" && cfg.Type != "telegram" && cfg.Type != "webhook" {
+		if cfg.Type != "" && cfg.Type != "smtp" && cfg.Type != "telegram" && cfg.Type != "webhook" && cfg.Type != EventWebhookType {
 			return model.Fail(model.Invalid)
 		}
 		if cfg.Endpoint != "" {
@@ -116,6 +124,13 @@ func validateAdminConfig(kind string, p AdminPayload, o *model.ControlOrg) error
 			if e != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 				return model.Fail(model.Invalid)
 			}
+		}
+		if e := validateEventDestination(o, p.ID, cfg); e != nil {
+			return e
+		}
+	case "event_test":
+		if e := validateEventTest(o, p); e != nil {
+			return e
 		}
 	case "retention":
 		var cfg RetentionConfig

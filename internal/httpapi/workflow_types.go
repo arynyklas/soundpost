@@ -154,6 +154,7 @@ type InvestigationView struct {
 type IncidentSummary struct {
 	ProjectID    model.ID     `json:"project_id"`
 	ID           model.ID     `json:"incident_id"`
+	Title        string       `json:"title"`
 	Status       string       `json:"status"`
 	Severity     string       `json:"severity"`
 	Version      model.Uint64 `json:"version"`
@@ -171,6 +172,61 @@ type IssueSummary struct {
 	Occurrences     model.Uint64 `json:"occurrences"`
 	LateHistory     model.Uint64 `json:"late_history"`
 	Compacted       bool         `json:"compacted"`
+	// Owner is the member the issue is assigned to (omitted when none); External its links to an external tracker (never the marker).
+	Owner    *model.ID          `json:"owner,omitempty"`
+	External []ExternalLinkView `json:"external,omitempty"`
+}
+
+// ExternalLinkView is the link of an incident or an error issue to an issue of an external tracker: the provider, the state in
+// words (creating|linked|unknown|refused), the tracker project path, the issue number and URL once linked, a closed code when the
+// link is unknown or refused, and when the state was reached. The marker and the lease are never shown.
+type ExternalLinkView struct {
+	Provider string        `json:"provider"`
+	State    string        `json:"state"`
+	Project  string        `json:"project,omitempty"`
+	IID      *model.Uint64 `json:"iid,omitempty"`
+	URL      string        `json:"url,omitempty"`
+	Code     string        `json:"code,omitempty"`
+	At       model.Int64   `json:"at"`
+}
+
+// ExternalOpView is one external link transition on an incident timeline (never the marker).
+type ExternalOpView struct {
+	Provider string        `json:"provider"`
+	Kind     string        `json:"kind"` // begin|end|adopt
+	Result   string        `json:"result,omitempty"`
+	Project  string        `json:"project,omitempty"`
+	IID      *model.Uint64 `json:"iid,omitempty"`
+	URL      string        `json:"url,omitempty"`
+	Code     string        `json:"code,omitempty"`
+}
+
+// externalViews projects the stored links; none is nil so the member is omitted.
+func externalViews(links []model.ExternalLink) []ExternalLinkView {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]ExternalLinkView, len(links))
+	for i, l := range links {
+		out[i] = ExternalLinkView{Provider: l.Provider, State: l.State, Project: l.Project, URL: l.URL, Code: l.Code, At: model.Int64(l.At)}
+		if l.IID != 0 {
+			iid := l.IID
+			out[i].IID = &iid
+		}
+	}
+	return out
+}
+
+func externalOpView(op *model.ExternalOp) *ExternalOpView {
+	if op == nil {
+		return nil
+	}
+	v := &ExternalOpView{Provider: op.Provider, Kind: op.Kind, Result: op.Result, Project: op.Project, URL: op.URL, Code: op.Code}
+	if op.IID != 0 {
+		iid := op.IID
+		v.IID = &iid
+	}
+	return v
 }
 
 // ReleaseSummary is the typed summary of one release record: ids, the revision and the build time. The label is on the release view.

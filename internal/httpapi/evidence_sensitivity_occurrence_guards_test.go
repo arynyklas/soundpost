@@ -61,11 +61,12 @@ func TestEvidenceSensOccurrenceViewNamesTheReasonNoIssueReaderIsWired(t *testing
 	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueEvidenceAbsent {
 		t.Fatalf("no issue reader wired: %+v %v", v, err)
 	}
-	// A caller who is not an organization administrator is told so, and the issue reader is not asked.
+	// A project reader is served by the issue lifecycle, which is not bound here: she is told the view is not built, and the
+	// administrator's registry reader is not asked.
 	calls := &countingIssues{inner: leakyIssues{w.issue("open")}}
 	ev = httpapi.NewEvidence(nil, w.e.app.Releases, calls, httpapi.WithErrorOccurrences(&fakeErrors{}))
 	v, err = ev.Occurrence(w.e.ctx, w.readScope, &w.readScope, httpapi.ErrorOccurrenceBody{Org: w.org, Project: w.project, Issue: calls.inner.issue.ID, Occurrence: model.NewID()})
-	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueNeedsAdmin || calls.n != 0 {
-		t.Fatalf("a non-administrator: %+v %v, reader asked %d times", v, err, calls.n)
+	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueEvidenceAbsent || calls.n != 0 {
+		t.Fatalf("a project reader with no lifecycle bound: %+v %v, registry reader asked %d times", v, err, calls.n)
 	}
 }

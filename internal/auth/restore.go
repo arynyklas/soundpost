@@ -224,7 +224,13 @@ func QuarantineRestoredState(st *model.ControlState, in RestoreInput) (RestoreSu
 	}
 	st.OIDC[restoreStashKey] = raw
 	st.BootstrapHash = in.BootstrapHash
-	st.BearerHashKey, st.BearerHashKeyVersion = in.SealedBearerKey, 1
+	// The format marker of the backup is kept when it says the installation holds D92 records (D94): the restored state
+	// carries them and the previous release must not run on it.
+	marker := model.FormatMarkerBase
+	if st.BearerHashKeyVersion > marker {
+		marker = st.BearerHashKeyVersion
+	}
+	st.BearerHashKey, st.BearerHashKeyVersion = in.SealedBearerKey, marker
 	st.Audits = append(st.Audits, model.ControlAudit{ID: model.NewID(), Principal: st.Installation, Action: "restore.quarantine", Reason: "disaster restore: every pre-restore credential, session, token, source and sender is inactive", Time: in.At.UnixNano(), Targets: []model.ID{in.Backup, in.Generation}, Outcome: model.AuditAllowed})
 	return sum, nil
 }

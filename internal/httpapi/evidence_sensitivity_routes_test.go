@@ -197,7 +197,8 @@ func TestEvidenceSensRevalidateAllChecksTheAdminScopeAndTheReadScope(t *testing.
 }
 
 // The evidence scope needs an organization and at least one project (Invalid, never an empty scope), and the telemetry-read scope
-// that unlocks stored error records is never given to a caller who is not an administrator, nor to one without telemetry.read.
+// that unlocks stored error records is only the caller's own: an administrator's grant, a project reader's scope; never one for a
+// caller without telemetry.read.
 func TestEvidenceSensScopeHelpersRefuseEmptyRequestsAndNeverWidenTheReadScope(t *testing.T) {
 	e := newEvEnv(t, nil, nil, false)
 	p := model.NewID()
@@ -209,6 +210,8 @@ func TestEvidenceSensScopeHelpersRefuseEmptyRequestsAndNeverWidenTheReadScope(t 
 	e.cmd(org, "org_admin", auth.AdminPayload{UserID: bare.ID, Enabled: true})
 	reader := e.user(org, "sens-scope-reader@example.test")
 	e.grant(org, reader, p, true, auth.Read)
+	writer := e.user(org, "sens-scope-writer@example.test")
+	e.grant(org, writer, p, true, auth.IssuesWrite)
 
 	if _, err := httpapi.EvidenceScopeForTest(e.ctx, e.app.Auth, admin.Cred, org, nil); faultCode(err) != model.Invalid {
 		t.Fatalf("an evidence scope for no project: %v", err)
@@ -236,8 +239,18 @@ func TestEvidenceSensScopeHelpersRefuseEmptyRequestsAndNeverWidenTheReadScope(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read, err = httpapi.DetailScopeForTest(e.ctx, e.app.Auth, reader.Cred, readerScope, org, p); err != nil || read != nil {
-		t.Fatalf("a non-administrator got the detail read scope: %v %v", read, err)
+	// A project reader's own telemetry.read scope IS the detail read scope (D92: she reads her project's error issues and their
+	// stored records); it is her scope as it is, never a wider one.
+	if read, err = httpapi.DetailScopeForTest(e.ctx, e.app.Auth, reader.Cred, readerScope, org, p); err != nil || read == nil || read.Permission() != auth.Read || !read.AllowsProject(p) || len(read.ProjectIDs()) != 1 {
+		t.Fatalf("a project reader's detail scope: %v %v", read, err)
+	}
+	// A person who holds only issues.write reads the issue but no stored record: no detail scope.
+	writerScope, err := e.scope(writer, org, p, auth.IssuesWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err = httpapi.DetailScopeForTest(e.ctx, e.app.Auth, writer.Cred, writerScope, org, p); err != nil || read != nil {
+		t.Fatalf("an issues.write holder got the detail read scope: %v %v", read, err)
 	}
 }
 

@@ -7,7 +7,8 @@ package appcore
 // Ingested errors become issues, unprocessed error evidence about to expire from
 // the 90-day journal is declared as a gap before it can be lost, every open issue
 // episode gets an incident, the issue lifecycle's effect intents are acknowledged
-// once their incident exists, ingested job attempts become job books, and the source maps that retained profiles name are held.
+// once their incident exists, ingested job attempts become job books, the source maps that retained profiles name are held, and an
+// installation that holds D92 records without the format marker gets it (D94).
 func (a *App) Producers() []Producer {
-	return []Producer{a.IssueProducer(), a.JournalExpiryProducer(), a.IncidentProducer(), a.IssueEffectProducer(), a.JobProducer(), a.ProfileMapProducer()}
+	return []Producer{a.IssueProducer(), a.JournalExpiryProducer(), a.IncidentProducer(), a.IssueEffectProducer(), a.JobProducer(), a.ProfileMapProducer(), a.RecordFormatProducer()}
 }

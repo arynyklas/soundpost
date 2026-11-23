@@ -169,7 +169,8 @@ func TestUIDeepLinksNeverBypassAuthAndPathGuessesAreNotSilentlyRewritten(t *test
 		}
 	}
 	// A path that is not a console link or a file is 404, never the shell: an API typo must not look like a working page.
-	for _, path := range []string{"/api/v1/nowhere", "/assets", "/assets/sub", "/assets/..%2findex.html", "/incidents/nope", "/incidents/" + strings.Repeat("A", 32), "/queue/" + strings.Repeat("a", 32), "/settings/", "/incidents/", "/incidents/" + strings.Repeat("a", 32) + "/x", "/incident", "/index.html", "/nowhere"} {
+	for _, path := range []string{"/api/v1/nowhere", "/assets", "/assets/sub", "/assets/..%2findex.html", "/incidents/nope", "/incidents/" + strings.Repeat("A", 32), "/queue/" + strings.Repeat("a", 32), "/settings/", "/incidents/", "/incidents/" + strings.Repeat("a", 32) + "/x", "/incident", "/index.html", "/nowhere",
+		"/gitlab/" + strings.Repeat("a", 32), "/events/" + strings.Repeat("a", 32), "/home/" + strings.Repeat("a", 32), "/dashboard"} {
 		response, body := uiGet(t, server, path)
 		if response.StatusCode != 404 || strings.Contains(body, `id="root"`) {
 			t.Fatalf("%s: status %d, want 404 and no shell", path, response.StatusCode)
@@ -184,7 +185,8 @@ func TestUIConsolePathLinksServeTheSamePublicShell(t *testing.T) {
 	server := uiServer(t)
 	rootResponse, root := uiGet(t, server, "/")
 	id, other := strings.Repeat("a", 32), strings.Repeat("b", 32)
-	paths := []string{"/queue", "/explore", "/settings", "/incidents", "/issues", "/releases", "/traces", "/services", "/jobs", "/replays", "/profiles"}
+	paths := []string{"/queue", "/explore", "/settings", "/incidents", "/issues", "/releases", "/traces", "/services", "/jobs", "/replays", "/profiles",
+		"/home", "/rules", "/routing", "/logs", "/metrics", "/dashboards", "/onboarding", "/gitlab", "/events", "/cutover", "/account"}
 	for _, section := range []string{"incidents", "issues", "releases", "traces", "services", "jobs", "replays", "profiles"} {
 		paths = append(paths, "/"+section+"/"+id, "/"+section+"/"+other+":"+id, "/"+section+"/"+other+"%3A"+id)
 	}

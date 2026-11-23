@@ -73,7 +73,7 @@ func (scope Scope) ValidateControlStateRO(st model.ReadOnlyControl) error {
 	if !ok || epoch != scope.epoch {
 		return model.Fail(model.NotFound)
 	}
-	if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.action) {
+	if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.tokenAction()) {
 		return model.Fail(model.NotFound)
 	}
 	if scope.elevation != (model.ID{}) && !scope.service.now().Before(scope.elevationExpires) {

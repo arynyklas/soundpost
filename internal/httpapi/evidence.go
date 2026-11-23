@@ -126,6 +126,14 @@ type Evidence struct {
 	issues      IssueEvidenceReader
 	occurrences ErrorOccurrenceReader
 	regressions RegressionReader
+	lifecycle   IssueLifecycleReader
+}
+
+// WithIssueLifecycle binds the issue lifecycle read that serves the issue and occurrence views to project readers (telemetry.read)
+// and issues.write holders. Without it they are told the view is not built; an organization administrator is still served from the
+// committed registry (the IssueEvidenceReader).
+func WithIssueLifecycle(r IssueLifecycleReader) EvidenceOption {
+	return func(e *Evidence) { e.lifecycle = r }
 }
 
 // EvidenceOption binds one optional seam of NewEvidence.
@@ -567,6 +575,9 @@ type GroupingView struct {
 	MigrationLinks       []model.ID   `json:"migration_links"`
 	CompactedOccurrences model.Uint64 `json:"compacted_occurrences"`
 	CompactedLate        model.Uint64 `json:"compacted_late_history"`
+	// Owner is the member the issue is assigned to (omitted when none); External its links to an external tracker (never the marker).
+	Owner    *model.ID          `json:"owner,omitempty"`
+	External []ExternalLinkView `json:"external,omitempty"`
 }
 
 // IssueView answers an issue evidence request.
@@ -601,14 +612,40 @@ func evidenceView(e model.GroupingEvidence, late bool) OccurrenceEvidenceView {
 		BuildID: e.BuildID, ReleaseID: e.ReleaseID, Ancestry: ancestry, Freshness: e.Freshness, Late: late}
 }
 
+// groupingIssue reads the issue under the caller's own scope. An organization administrator reads the committed registry
+// (IssueEvidenceReader). A project reader (telemetry.read) or an issues.write holder reads it through the issue lifecycle
+// (IssueLifecycleReader), which checks the scope and the deletion fence before it reads anything. Any other scope is told the
+// evidence needs administration. reason is not empty when the view is not available, and then nothing was read; a seam that
+// is not wired is the explicit not-built reason, never an empty issue.
+func (e *Evidence) groupingIssue(ctx context.Context, scope auth.Scope, project, id model.ID) (issue model.GroupingIssue, reason string, err error) {
+	switch scope.Permission() {
+	case auth.OrgAdmin:
+		if e.issues == nil {
+			return issue, ReasonIssueEvidenceAbsent, nil
+		}
+		issue, err = e.issues.GroupingIssue(ctx, scope, project, id)
+	case auth.Read, auth.IssuesWrite:
+		if e.lifecycle == nil {
+			return issue, ReasonIssueEvidenceAbsent, nil
+		}
+		issue, err = e.lifecycle.Get(ctx, scope, project, id)
+	default:
+		if e.issues == nil {
+			return issue, ReasonIssueEvidenceAbsent, nil
+		}
+		return issue, ReasonIssueNeedsAdmin, nil
+	}
+	return issue, "", err
+}
+
 // Issue reads one persisted issue's evidence under scope with no telemetry read
 // (the stored occurrence detail is then reported as needing that grant).
 func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) (IssueView, error) {
 	return e.IssueWithDetail(ctx, scope, nil, body)
 }
 
-// IssueWithDetail reads one persisted issue's evidence under the
-// organization-admin scope. read, when not nil, is the same caller's
+// IssueWithDetail reads one persisted issue's evidence under the caller's own
+// scope (see groupingIssue). read, when not nil, is the same caller's
 // telemetry-read scope for the project: only then is the stored occurrence
 // detail section ready. It never computes a regression: the stored ancestry
 // and the grouping version/hash are shown as they are, and an issue the reader
@@ -620,22 +657,19 @@ func (e *Evidence) IssueWithDetail(ctx context.Context, scope auth.Scope, read *
 	if !scope.AllowsProject(body.Project) {
 		return IssueView{}, model.Fail(model.NotFound)
 	}
-	if e.issues == nil {
-		return unavailableIssueView(body, ReasonIssueEvidenceAbsent), nil
-	}
-	if scope.Permission() != auth.OrgAdmin {
-		return unavailableIssueView(body, ReasonIssueNeedsAdmin), nil
-	}
-	issue, err := e.issues.GroupingIssue(ctx, scope, body.Project, body.Issue)
+	issue, reason, err := e.groupingIssue(ctx, scope, body.Project, body.Issue)
 	if err != nil {
 		return IssueView{}, err
+	}
+	if reason != "" {
+		return unavailableIssueView(body, reason), nil
 	}
 	if issue.ID != body.Issue || issue.Org != scope.OrgID() || issue.Project != body.Project {
 		return IssueView{}, model.Fail(model.NotFound)
 	}
 	view := IssueView{Org: body.Org, Project: body.Project, Issue: issue.ID, Occurrences: []OccurrenceEvidenceView{}, LateHistory: []OccurrenceEvidenceView{}}
 	grouping := GroupingView{Version: issue.GroupingVersion, Fingerprint: issue.Fingerprint, Workflow: issue.Workflow, Revision: model.Uint64(issue.Revision), ResolutionFrontier: idsOrEmpty(issue.ResolutionFrontier),
-		ObservedReleases: idsOrEmpty(issue.ObservedReleases), FixedDescendants: idsOrEmpty(issue.FixedDescendants), MigrationLinks: idsOrEmpty(issue.MigrationLinks)}
+		ObservedReleases: idsOrEmpty(issue.ObservedReleases), FixedDescendants: idsOrEmpty(issue.FixedDescendants), MigrationLinks: idsOrEmpty(issue.MigrationLinks), Owner: issue.Owner, External: externalViews(issue.External)}
 	if issue.ResolutionTime != nil {
 		t := model.Int64(*issue.ResolutionTime)
 		grouping.ResolutionTime = &t
@@ -857,29 +891,26 @@ func cloneError(o model.ErrorOccurrence) model.ErrorOccurrence {
 }
 
 // Occurrence reads the stored error record behind one occurrence of an issue.
-// admin is the caller's organization-admin scope (the issue evidence is an
-// admin read); read is the same caller's telemetry-read scope, or nil when she
-// holds none, and the record is read under it alone. The occurrence must be
-// listed by the issue's own evidence: another record is never reachable through
-// this route by guessing an ID.
-func (e *Evidence) Occurrence(ctx context.Context, admin auth.Scope, read *auth.Scope, body ErrorOccurrenceBody) (ErrorOccurrenceView, error) {
+// scope is the caller's own (an organization administrator's, a project reader's
+// or an issues.write holder's: see groupingIssue); read is the same caller's
+// telemetry-read scope, or nil when she holds none, and the record is read under
+// it alone. The occurrence must be listed by the issue's own evidence: another
+// record is never reachable through this route by guessing an ID.
+func (e *Evidence) Occurrence(ctx context.Context, scope auth.Scope, read *auth.Scope, body ErrorOccurrenceBody) (ErrorOccurrenceView, error) {
 	if body.Org == (model.ID{}) || body.Project == (model.ID{}) || body.Issue == (model.ID{}) || body.Occurrence == (model.ID{}) {
 		return ErrorOccurrenceView{}, invalid("evidence_request_invalid")
 	}
-	if !admin.AllowsProject(body.Project) {
+	if !scope.AllowsProject(body.Project) {
 		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
 	}
-	if e.issues == nil {
-		return unavailableOccurrenceView(body, StateNotAvailable, ReasonIssueEvidenceAbsent), nil
-	}
-	if admin.Permission() != auth.OrgAdmin {
-		return unavailableOccurrenceView(body, StateNotAvailable, ReasonIssueNeedsAdmin), nil
-	}
-	issue, err := e.issues.GroupingIssue(ctx, admin, body.Project, body.Issue)
+	issue, reason, err := e.groupingIssue(ctx, scope, body.Project, body.Issue)
 	if err != nil {
 		return ErrorOccurrenceView{}, err
 	}
-	if issue.ID != body.Issue || issue.Org != admin.OrgID() || issue.Project != body.Project {
+	if reason != "" {
+		return unavailableOccurrenceView(body, StateNotAvailable, reason), nil
+	}
+	if issue.ID != body.Issue || issue.Org != scope.OrgID() || issue.Project != body.Project {
 		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
 	}
 	var evidence *model.GroupingEvidence
@@ -1015,11 +1046,26 @@ func evidenceScope(ctx context.Context, authority *auth.Service, credential auth
 	return readScope(ctx, authority, credential, org, projects)
 }
 
-// detailScope is the same caller's telemetry-read scope for the project, or nil
-// when she is not an administrator or holds no telemetry.read grant there. The
-// stored error records are telemetry: administration alone never reads them.
-func detailScope(ctx context.Context, authority *auth.Service, credential auth.Credential, admin auth.Scope, org, project model.ID) (*auth.Scope, error) {
-	if admin.Permission() != auth.OrgAdmin {
+// issueEvidenceScope is the caller's scope for the issue and occurrence evidence reads: the administrator's own scope when she is
+// one (evidenceScope), otherwise the project reader's telemetry.read scope, and for a person who holds only issues.write on the
+// project, that scope. A caller who holds none of them gets the one not-found.
+func issueEvidenceScope(ctx context.Context, authority *auth.Service, credential auth.Credential, org model.ID, projects []model.ID) (auth.Scope, error) {
+	scope, err := evidenceScope(ctx, authority, credential, org, projects)
+	if err == nil || !faultIs(err, model.NotFound) {
+		return scope, err
+	}
+	return authority.Authorize(ctx, credential, org, projects, auth.IssuesWrite)
+}
+
+// detailScope is the same caller's telemetry-read scope for the project, or nil when she holds none there. A project reader's own
+// scope is that scope; an administrator needs the grant besides (administration alone never reads the stored error records, which
+// are telemetry); any other scope (an issues.write holder, an incident writer) reads no occurrence detail.
+func detailScope(ctx context.Context, authority *auth.Service, credential auth.Credential, scope auth.Scope, org, project model.ID) (*auth.Scope, error) {
+	switch scope.Permission() {
+	case auth.Read:
+		return &scope, nil
+	case auth.OrgAdmin:
+	default:
 		return nil, nil
 	}
 	read, err := authority.Authorize(ctx, credential, org, []model.ID{project}, auth.Read)
@@ -1102,7 +1148,7 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := evidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
+		scope, err := issueEvidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
 		if err != nil {
 			queryReply(w, nil, err)
 			return
@@ -1129,7 +1175,7 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := evidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
+		scope, err := issueEvidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
 		if err != nil {
 			queryReply(w, nil, err)
 			return
@@ -1161,12 +1207,25 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 				queryReply(w, nil, invalid("release_ids_required"))
 				return
 			}
-			scope, err := authority.Authorize(r.Context(), credential, body.Org, []model.ID{body.Project}, auth.OrgAdmin)
+			scope, err := releaseWriterScope(r.Context(), authority, credential, body.Org, body.Project)
 			if err != nil {
 				queryReply(w, nil, err)
 				return
 			}
-			registered, err := registry.Register(r.Context(), scope, body.Release, model.Revision(body.ExpectedRevision), body.CommandID)
+			var registered model.Release
+			if credential.IsServerToken() {
+				// A release pipeline cannot read the control revision: its registration is an idempotent append (the server supplies the revision).
+				appender, ok := registry.(interface {
+					RegisterAppend(ctx context.Context, scope auth.Scope, release model.Release, commandID model.ID) (model.Release, error)
+				})
+				if !ok {
+					queryReply(w, nil, model.Fail(model.Unsupported))
+					return
+				}
+				registered, err = appender.RegisterAppend(r.Context(), scope, body.Release, body.CommandID)
+			} else {
+				registered, err = registry.Register(r.Context(), scope, body.Release, model.Revision(body.ExpectedRevision), body.CommandID)
+			}
 			if err == nil {
 				err = authority.Revalidate(r.Context(), scope)
 			}

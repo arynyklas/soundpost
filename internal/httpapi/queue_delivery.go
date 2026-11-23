@@ -140,6 +140,9 @@ func (a *Actions) notificationFacts(ctx context.Context, scope auth.Scope, proje
 		return notificationFacts{}, err
 	}
 	for _, p := range policies {
+		if notify.IsEventSubject(p.Subject) {
+			continue // the event webhook feed cursor is not a notification policy state
+		}
 		if len(p.State) == 0 || string(p.State) == "null" {
 			continue // a retirement erased the opaque state: nothing to read
 		}

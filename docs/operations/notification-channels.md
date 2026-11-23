@@ -209,3 +209,9 @@ mailbox owner's: read the raw message from the mailbox and match the queue ID (t
 `X-Soundpost-Delivery-ID` and the `Message-ID` derived from the delivery ID. One real run (2026-11-20, a Postfix relay with STARTTLS and
 SASL AUTH and a local mailbox on a separate lab host, node on another) was accepted and the message read raw from the mailbox
 (`with ESMTPSA`: TLS and authenticated); the relay was a lab relay, not a public one. No public relay or third-party receiver has been called by any test run.
+
+## Event webhooks
+
+A fourth channel type, `event_webhook`, carries events (incident, issue and release changes) instead of notifications: signed like the webhook above, with the same
+egress rules and outcomes table, but identifiers only and two signatures during a 24 hour secret rotation. It never receives a notification and no notification
+destination receives an event. See `event-webhooks.md`.

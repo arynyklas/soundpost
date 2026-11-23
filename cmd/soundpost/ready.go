@@ -195,5 +195,5 @@ func schemaRefusalLine(reason health.Reason, observed uint8) string {
 	if reason == health.ReasonSchemaNewer {
 		direction = "newer than"
 	}
-	return fmt.Sprintf("soundpost: %s: the control-state format marker of this data directory (%d) is %s the one this binary supports (%d); nothing is served and /readyz stays unready with this reason. Run the release that wrote the data, or restore a backup taken before the format changed (docs/operations/upgrade.md)", reason, observed, direction, auth.SchemaMarker)
+	return fmt.Sprintf("soundpost: %s: the control-state format marker of this data directory (%d) is %s the formats this binary supports (%d to %d); nothing is served and /readyz stays unready with this reason. Run the release that wrote the data, or restore a backup taken before the format changed (docs/operations/upgrade.md)", reason, observed, direction, auth.MinSchemaMarker, auth.SchemaMarker)
 }

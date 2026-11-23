@@ -43,6 +43,12 @@ func newKindsWorld(t *testing.T) *kindsWorld {
 		t.Fatal(err)
 	}
 	k.inv.WithHealth(e.app.Control)
+	// The node binds the issue lifecycle behind the issue kind (App.BindIssueActions): project readers are served through it.
+	issueSvc, err := e.app.NewIssueActions(wallClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.inv.WithIssues(issueSvc)
 	return k
 }
 
@@ -133,7 +139,12 @@ func (k *kindsWorld) issue(project model.ID, compacted bool) model.ID {
 			st.IssueBooks = map[string]json.RawMessage{}
 		}
 		if _, ok := st.IssueBooks[k.w.org.String()+":"+project.String()]; !ok {
-			st.IssueBooks[k.w.org.String()+":"+project.String()] = json.RawMessage(`{}`)
+			// A book of the project's own: the issue lifecycle (the reader path) refuses one that is not.
+			book, err := json.Marshal(control.IssueBook{Org: k.w.org, Project: project})
+			if err != nil {
+				return err
+			}
+			st.IssueBooks[k.w.org.String()+":"+project.String()] = book
 		}
 		return nil
 	}); err != nil {
@@ -212,25 +223,43 @@ func TestInvestigateServesQueueIncidentIssueReleaseAndJob(t *testing.T) {
 	}
 }
 
-func TestInvestigateReleaseAndIssueHonourTheOrgAdminGate(t *testing.T) {
+func TestInvestigateReleaseAndIssueHonourTheirGates(t *testing.T) {
 	k := newKindsWorld(t)
 	p := k.w.project
 	rel, iss := k.release(p), k.issue(p, false)
 	k.refresh()
-	for kind, c := range map[httpapi.InvestigationKind]struct {
-		target model.ID
-		reason string
-	}{httpapi.KindRelease: {rel, httpapi.ReasonReleaseRecordsAdmin}, httpapi.KindIssue: {iss, httpapi.ReasonIssueNeedsAdmin}} {
-		target := c.target
-		v, err := k.read(k.inv, k.reader, kind, &target, 10, p)
-		if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != c.reason || v.Release != nil || v.Issue != nil {
-			t.Fatalf("%s for a project reader: %+v %v", kind, v, err)
-		}
-		// A reader gets the same typed answer for a guessed target: the registry is never probed.
-		guess := model.NewID()
-		if g, err := k.read(k.inv, k.reader, kind, &guess, 10, p); err != nil || g.Reason != c.reason || g.State != httpapi.StateNotAvailable {
-			t.Fatalf("%s guessed target for a reader: %+v %v", kind, g, err)
-		}
+	// Release records stay organization administration: a project reader is told so, a real and a guessed target alike.
+	target := rel
+	v, err := k.read(k.inv, k.reader, httpapi.KindRelease, &target, 10, p)
+	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonReleaseRecordsAdmin || v.Release != nil {
+		t.Fatalf("release for a project reader: %+v %v", v, err)
+	}
+	guess := model.NewID()
+	if g, err := k.read(k.inv, k.reader, httpapi.KindRelease, &guess, 10, p); err != nil || g.Reason != httpapi.ReasonReleaseRecordsAdmin || g.State != httpapi.StateNotAvailable {
+		t.Fatalf("release guessed target for a reader: %+v %v", g, err)
+	}
+	// An error issue is served to a project reader from the issue lifecycle (D92): the summary of her own project's issue, and the
+	// one NotFound for a target that is not in it.
+	target = iss
+	v, err = k.read(k.inv, k.reader, httpapi.KindIssue, &target, 10, p)
+	if err != nil || v.State != httpapi.StateReady || v.Issue == nil || v.Issue.ID != iss || v.Issue.ProjectID != p || v.Issue.Revision != 4 || v.Issue.Occurrences != 2 || v.Issue.LateHistory != 1 {
+		t.Fatalf("issue for a project reader: %+v %v", v, err)
+	}
+	if g, err := k.read(k.inv, k.reader, httpapi.KindIssue, &guess, 10, p); faultCode(err) != model.NotFound || g.Issue != nil {
+		t.Fatalf("issue guessed target for a reader: %+v %v", g, err)
+	}
+	// Without the lifecycle bound (an installation that never ran BindIssueActions) the reader is told the view is not built, and
+	// the administrator is still served from the registry.
+	bare, err := httpapi.NewInvestigator(k.app.Auth, &fakeDiscovery{}, &fakeLinks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare.WithHealth(k.app.Control)
+	if g, err := k.read(bare, k.reader, httpapi.KindIssue, &target, 10, p); err != nil || g.State != httpapi.StateNotAvailable || g.Reason != httpapi.ReasonIssueEvidenceAbsent || g.Issue != nil {
+		t.Fatalf("issue for a reader without the lifecycle: %+v %v", g, err)
+	}
+	if g, err := k.read(bare, k.adminOne, httpapi.KindIssue, &target, 10, p); err != nil || g.State != httpapi.StateReady || g.Issue == nil {
+		t.Fatalf("issue for an administrator without the lifecycle: %+v %v", g, err)
 	}
 }
 

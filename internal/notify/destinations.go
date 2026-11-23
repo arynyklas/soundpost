@@ -24,6 +24,9 @@ const (
 	ChannelSMTP     Channel = "smtp"
 	ChannelTelegram Channel = "telegram"
 	ChannelWebhook  Channel = "webhook"
+	// ChannelEventWebhook is the signed event webhook (events.go): it only ever
+	// receives KindEvent deliveries and never a notification.
+	ChannelEventWebhook Channel = "event_webhook"
 )
 
 // Destination errors. They carry no destination text.
@@ -42,6 +45,8 @@ var (
 type SecretRef struct {
 	Org model.ID
 	ID  model.ID
+	// Previous names the previous secret of an event endpoint in rotation.
+	Previous bool
 }
 
 // SecretReader is the narrow consumer-owned seam over the control group's
@@ -63,6 +68,11 @@ type DestinationRecord struct {
 	Address   string
 	Enabled   bool
 	HasSecret bool
+	// Events, PreviousUntil and HasPrevious are the event_webhook endpoint's
+	// subscription and secret rotation state (zero for every other channel).
+	Events        []string
+	PreviousUntil model.UnixNano
+	HasPrevious   bool
 	// Version is the destination's own committed version (0: none yet).
 	Version model.Revision
 }
@@ -84,6 +94,12 @@ type Destination struct {
 	Target  string
 	// Secret is set when the destination has a sealed secret.
 	Secret *SecretRef
+	// PreviousSecret and PreviousUntil are set for an event endpoint inside a
+	// secret rotation: the sender also signs with the previous secret while
+	// PreviousUntil is in the future. EventEvents are the subscribed event names.
+	PreviousSecret *SecretRef
+	PreviousUntil  model.UnixNano
+	EventEvents    []string
 }
 
 // DestinationView is the redacted DTO of a destination: identity, channel and
@@ -183,6 +199,12 @@ func (r *Destinations) Resolve(ctx context.Context, scope auth.Scope, d Delivery
 	if rec.HasSecret {
 		dest.Secret = &SecretRef{Org: org, ID: id}
 	}
+	if ch == ChannelEventWebhook {
+		dest.EventEvents, dest.PreviousUntil = rec.Events, rec.PreviousUntil
+		if rec.HasPrevious {
+			dest.PreviousSecret = &SecretRef{Org: org, ID: id, Previous: true}
+		}
+	}
 	return dest, nil
 }
 
@@ -192,7 +214,7 @@ func (r *Destinations) Resolve(ctx context.Context, scope auth.Scope, d Delivery
 // exactly what can be delivered to.
 func destinationTarget(ch Channel, endpoint, address string) (string, error) {
 	switch ch {
-	case ChannelWebhook:
+	case ChannelWebhook, ChannelEventWebhook:
 		u, e := url.Parse(endpoint)
 		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return "", ErrDestinationInvalid
@@ -225,7 +247,10 @@ func (r *Destinations) Read(ctx context.Context, scope auth.Scope, ref SecretRef
 	if err != nil {
 		return nil, model.Fail(model.Unavailable)
 	}
-	if !found || !rec.HasSecret {
+	if !found || !rec.HasSecret && !ref.Previous || ref.Previous && !rec.HasPrevious {
+		return nil, model.Fail(model.Forbidden)
+	}
+	if ref.Previous && rec.Type != string(ChannelEventWebhook) {
 		return nil, model.Fail(model.Forbidden)
 	}
 	secret, err := r.secrets.Read(ctx, scope, ref)

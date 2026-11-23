@@ -15,7 +15,7 @@ func TestServedProducersIncludeEveryProducer(t *testing.T) {
 	for _, p := range a.Producers() {
 		got[fmt.Sprintf("%T", p)] = true
 	}
-	for _, want := range []Producer{a.IssueProducer(), a.JournalExpiryProducer(), a.IncidentProducer(), a.IssueEffectProducer(), a.JobProducer(), a.ProfileMapProducer()} {
+	for _, want := range []Producer{a.IssueProducer(), a.JournalExpiryProducer(), a.IncidentProducer(), a.IssueEffectProducer(), a.JobProducer(), a.ProfileMapProducer(), a.RecordFormatProducer()} {
 		if name := fmt.Sprintf("%T", want); !got[name] {
 			t.Fatalf("%s is not among the producers a served node runs: %v", name, got)
 		}

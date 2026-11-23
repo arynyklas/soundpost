@@ -41,6 +41,8 @@ type Scope struct {
 	elevationExpires time.Time
 	sourceCredential *SourceCredential
 	historical       bool
+	// release marks a scope derived by AuthorizeRelease: its token authority is release.write.
+	release bool
 	// expiresAt is the instant the scope's raw-read authority lapses on its
 	// own (a restricted-raw source policy or source lifetime ending). Zero means
 	// the scope carries no clock-based expiry.
@@ -81,6 +83,9 @@ func (s Scope) ControlAuthorize(ctx context.Context, kind string) error {
 	}
 	switch s.action {
 	case OrgAdmin, InstanceAdmin:
+		if s.release && kind != releaseWriteKind {
+			return model.Fail(model.Forbidden)
+		}
 	case IncidentsWrite:
 		// The one non-administrator write the control store accepts: the human
 		// incident action, and nothing else (decision D19).
@@ -262,7 +267,7 @@ func (s *Service) revalidate(ctx context.Context, scope Scope, within func(model
 			if err := s.validateCredentialStateRO(st, scope.credential); err != nil {
 				return err
 			}
-			if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.action) {
+			if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.tokenAction()) {
 				return model.Fail(model.NotFound)
 			}
 			epoch, ok := st.OrgEpoch(scope.org.String())

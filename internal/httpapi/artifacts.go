@@ -139,7 +139,7 @@ func RegisterArtifactRoutes(mux *http.ServeMux, authorizer *auth.Service, servic
 				artifactReply(w, nil, err)
 				return
 			}
-			scope, err := authorizer.Authorize(r.Context(), credential, manifest.Org, []model.ID{manifest.Project}, auth.ArtifactWrite)
+			scope, err := artifactWriterScope(r.Context(), authorizer, credential, manifest.Org, manifest.Project, manifest.SourceContent)
 			if err != nil {
 				artifactReply(w, nil, err)
 				return

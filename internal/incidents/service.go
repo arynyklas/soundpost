@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
@@ -18,6 +19,9 @@ import (
 // satisfies it. Incident reads check the scope before they look the incident up.
 type Control interface {
 	View(ctx context.Context, fn func(control.State) error) error
+	// Update commits one control transition; the service uses it only to raise the format marker (D94) before the
+	// first record the previous release cannot read is written.
+	Update(ctx context.Context, fn func(*control.State) error) error
 	Transact(ctx context.Context, scope auth.Scope, cmd control.Command) (control.Result, error)
 	Incident(ctx context.Context, scope auth.Scope, project, incident model.ID) (control.IncidentRecord, bool, error)
 }
@@ -123,6 +127,16 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, action Action, at m
 	case action.Origin == "":
 		action.Origin = OriginHuman
 	}
+	if recorded(action.Type) {
+		if err := s.requireContracted(ctx, scope.OrgID()); err != nil {
+			return State{}, err
+		}
+	}
+	if action.Type == TypeTitle {
+		// The reducer validates the exact title it stores; the boundary trims, so a retry of the same
+		// command with the same text compares equal whatever padding the client sent.
+		action.Title = strings.TrimSpace(action.Title)
+	}
 	if err := validate(action, at); err != nil {
 		return State{}, err
 	}
@@ -197,6 +211,13 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, a Action, at mod
 	if err != nil {
 		return model.Fail(model.Invalid)
 	}
+	if recorded(a.Type) {
+		// D94: the format marker goes up BEFORE the first record the previous release cannot read; a marker that cannot be written
+		// refuses the write (the previous release then refuses to start on the data instead of dropping the records).
+		if err = s.recordFormat(ctx); err != nil {
+			return err
+		}
+	}
 	for range maxRevisionRetries {
 		var revision model.Revision
 		if err = s.control.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
@@ -220,4 +241,39 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, a Action, at mod
 	f := model.Fail(model.Unavailable)
 	f.Retryable = true
 	return f
+}
+
+// DetailNeedsContracted is the SafeDetail of the model.Unsupported a title, note or external link
+// action gets on an organization whose installation is not contracted (D93): those records are
+// not readable by the previous release, so they are written only once rolling back is given up.
+const DetailNeedsContracted = "needs_contracted_installation"
+
+func (s *Service) requireContracted(ctx context.Context, org model.ID) error {
+	contracted := false
+	if err := s.control.View(ctx, func(st control.State) error {
+		contracted = st.Orgs[org.String()].IndexesContracted()
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !contracted {
+		return fault(model.Unsupported, DetailNeedsContracted)
+	}
+	return nil
+}
+
+// recordFormat raises the control-state format marker to model.FormatMarkerRecords. It is idempotent and atomic with
+// respect to a concurrent caller (the transition re-checks), and it is a no-op once the marker is up.
+func (s *Service) recordFormat(ctx context.Context) error {
+	marked := false
+	if err := s.control.View(ctx, func(st control.State) error {
+		marked = st.BearerHashKeyVersion >= model.FormatMarkerRecords
+		return nil
+	}); err != nil || marked {
+		return err
+	}
+	return s.control.Update(ctx, func(st *control.State) error {
+		model.MarkRecordFormat(st)
+		return nil
+	})
 }

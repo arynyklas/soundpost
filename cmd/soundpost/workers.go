@@ -149,10 +149,12 @@ func startWorkers(ctx context.Context, core *appcore.App, s workerSettings) erro
 		return fmt.Errorf("notification delivery: %w", err)
 	}
 	cfg := appcore.WorkerConfig{
-		Interval:  s.interval,
-		Routing:   core.OrgRouting(),
-		Sender:    sender,
-		Producers: core.Producers(),
+		Interval: s.interval,
+		Routing:  core.OrgRouting(),
+		Sender:   sender,
+		// The event producer runs last, so it sees what the other producers committed in
+		// the same pass (docs/operations/event-webhooks.md).
+		Producers: append(core.Producers(), core.EventProducer()),
 		Observe:   observeWorkers(),
 	}
 	// The rules a node evaluates are the catalogue administrators save over

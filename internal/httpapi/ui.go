@@ -86,8 +86,11 @@ func serveNotices(w http.ResponseWriter, assets fs.FS) {
 // consoleSections are the console views a path-shaped link may name (web/src/app/context.ts SECTIONS). The value says whether
 // the view opens one entity, in which case one more path segment, the entity's ID, is allowed.
 var consoleSections = map[string]bool{
-	"queue": false, "incidents": true, "issues": true, "releases": true, "traces": true, "explore": false,
-	"services": true, "jobs": true, "replays": true, "profiles": true, "settings": false,
+	"incidents": true, "issues": true, "releases": true, "traces": true, "replays": true, "profiles": true, "jobs": true, "services": true,
+	"home": false, "rules": false, "routing": false, "logs": false, "metrics": false, "dashboards": false, "onboarding": false,
+	"settings": false, "gitlab": false, "events": false, "cutover": false, "account": false,
+	// older spellings that existing links carry
+	"queue": false, "explore": false,
 }
 
 var consoleEntity = regexp.MustCompile(`^[0-9a-f]{32}(?::[0-9a-f]{32})?$`)

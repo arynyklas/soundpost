@@ -1385,8 +1385,14 @@ type capAppState struct{ app *appcore.App }
 func (s capAppState) Version() string   { return "drill" }
 func (s capAppState) RestoreHold() bool { return s.app.Storage.RestoreReady() != nil }
 func (s capAppState) Schema(ctx context.Context) (health.Schema, error) {
-	out := health.Schema{Supported: 1}
-	err := s.app.Control.View(ctx, func(st model.ControlState) error { out.Observed = uint32(st.BearerHashKeyVersion); return nil })
+	out := health.Schema{Supported: uint32(auth.SchemaMarker)}
+	err := s.app.Control.View(ctx, func(st model.ControlState) error {
+		out.Observed = uint32(st.BearerHashKeyVersion)
+		if v := st.BearerHashKeyVersion; v >= auth.MinSchemaMarker && v <= auth.SchemaMarker {
+			out.Supported = uint32(v) // the formats this build reads (D94)
+		}
+		return nil
+	})
 	return out, err
 }
 func (s capAppState) Groups(ctx context.Context) ([]health.Group, error) {

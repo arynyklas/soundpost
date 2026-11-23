@@ -157,9 +157,9 @@ func TestEvidenceOccurrenceShowsStoredChainMechanismHandledFatalAndCode(t *testi
 	if v = decodeOccurrence(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonOccurrenceNeedsTelemetry || v.Detail != nil || errs.calls.Load() != before {
 		t.Fatalf("administrator without telemetry.read: %d %s", status, raw)
 	}
-	// A telemetry reader who is no administrator is told the evidence needs one; nothing is read.
+	// A telemetry reader is served by the issue lifecycle, which this environment does not bind: she is told the view is not built; nothing is read.
 	status, raw = e.post(reader, "/api/v1/evidence/occurrence", body(listed.OccurrenceID), nil)
-	if v = decodeOccurrence(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueNeedsAdmin || v.Detail != nil || errs.calls.Load() != before {
+	if v = decodeOccurrence(t, raw); status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueEvidenceAbsent || v.Detail != nil || errs.calls.Load() != before {
 		t.Fatalf("telemetry reader: %d %s", status, raw)
 	}
 	// Scope first: a stranger, a guessed issue and an occurrence the issue does not list are one not-found and nothing is read.

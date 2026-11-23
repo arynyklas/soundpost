@@ -200,7 +200,7 @@ func TestServeRefusesAForeignSchemaMarkerWithATypedReadinessReason(t *testing.T)
 		want   health.Reason
 	}{
 		{"marker above the binary's", auth.SchemaMarker + 1, health.ReasonSchemaNewer},
-		{"marker below the binary's", auth.SchemaMarker - 1, health.ReasonSchemaOld},
+		{"marker below the binary's", auth.MinSchemaMarker - 1, health.ReasonSchemaOld},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := installationWithMarker(t, tc.marker)
@@ -236,7 +236,7 @@ func TestServeRefusesAForeignSchemaMarkerWithATypedReadinessReason(t *testing.T)
 		})
 	}
 	t.Run("a marker that cannot be read is corruption", func(t *testing.T) {
-		dir := installationWithMarker(t, auth.SchemaMarker)
+		dir := installationWithMarker(t, auth.MinSchemaMarker)
 		garbleMarker(t, dir)
 		p := startServe(t, dir)
 		select {

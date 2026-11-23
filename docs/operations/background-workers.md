@@ -218,3 +218,9 @@ elevation bookkeeping, so both are bounded:
   minutes, so after the audit row is dropped nothing references it. Raising or
   shortening the 365-day default is an owner decision on audit retention and a
   one-line change to `retention.Defaults().AuditDays`.
+
+## Event producer
+
+`serve` appends the event producer (`appcore.EventProducer`) after the other producers: per project, under the leader lease, it announces committed incident,
+issue and release changes and console test requests as event webhook deliveries through the notification outbox (first pass baselines silently). It adds no flag.
+See `event-webhooks.md`.

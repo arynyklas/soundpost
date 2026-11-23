@@ -49,17 +49,20 @@ func (s *appState) Version() string { return s.version }
 
 func (s *appState) RestoreHold() bool { return s.app.Storage.RestoreReady() != nil }
 
-// Schema reports the stored control-state format marker against auth.SchemaMarker, the format
-// this binary reads. A node that was started on a foreign marker never reaches this method:
+// Schema reports the stored control-state format marker against the formats this binary reads
+// (auth.MinSchemaMarker to auth.SchemaMarker). A node that was started on a foreign marker never reaches this method:
 // auth.NewService refuses it at open (auth.SchemaError) and `serve` then answers the same
 // decision, schema_newer or schema_old, from its startup gate. This method decides the marker of
-// a node that is running, whose state changed under it.
+// a node that is running, whose state changed under it. A marker in the supported range is the supported one.
 func (s *appState) Schema(ctx context.Context) (health.Schema, error) {
 	out := health.Schema{Supported: uint32(auth.SchemaMarker)}
 	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
 	defer cancel()
 	err := s.app.Control.View(ctx, func(st model.ControlState) error {
 		out.Observed = uint32(st.BearerHashKeyVersion)
+		if v := st.BearerHashKeyVersion; v >= auth.MinSchemaMarker && v <= auth.SchemaMarker {
+			out.Supported = uint32(v)
+		}
 		return nil
 	})
 	return out, err

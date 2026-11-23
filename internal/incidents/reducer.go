@@ -4,6 +4,7 @@ package incidents
 
 import (
 	"sort"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -12,7 +13,8 @@ import (
 
 func humanOnly(t Type) bool {
 	switch t {
-	case TypeAck, TypeResolve, TypeAssign, TypeSnooze, TypeUnsnooze, TypeMaintenance, TypeMaintenanceEnd:
+	case TypeAck, TypeResolve, TypeAssign, TypeSnooze, TypeUnsnooze, TypeMaintenance, TypeMaintenanceEnd,
+		TypeTitle, TypeNote, TypeExternalBegin, TypeExternalEnd, TypeExternalAdopt:
 		return true
 	}
 	return false
@@ -40,6 +42,73 @@ func validReason(s string) bool {
 		}
 	}
 	return true
+}
+
+// recorded is the closed set of human actions that name, annotate or link an incident without
+// changing its workflow: allowed whatever the status, held back by the timeline reserve, never
+// carrying a reason.
+func recorded(t Type) bool {
+	_, external := externalKindOf(t)
+	return t == TypeTitle || t == TypeNote || external
+}
+
+// externalKindOf is the model.ExternalOp kind an external link action type carries.
+func externalKindOf(t Type) (kind string, ok bool) {
+	switch t {
+	case TypeExternalBegin:
+		return model.ExternalBegin, true
+	case TypeExternalEnd:
+		return model.ExternalEnd, true
+	case TypeExternalAdopt:
+		return model.ExternalAdopt, true
+	}
+	return "", false
+}
+
+// validTitle: 1..MaxTitleBytes, valid UTF-8, no control character and no leading or trailing
+// white space (Service.Act trims before it validates, so the stored title is what was validated).
+func validTitle(s string) bool {
+	if s == "" || len(s) > MaxTitleBytes || !utf8.ValidString(s) || s != strings.TrimSpace(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// validNote: 1..MaxNoteBytes, valid UTF-8, not blank, and no control character other than a newline.
+func validNote(s string) bool {
+	if s == "" || len(s) > MaxNoteBytes || !utf8.ValidString(s) || strings.TrimSpace(s) == "" {
+		return false
+	}
+	for _, r := range s {
+		if r != '\n' && unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// jsonLen is the number of bytes s takes inside a JSON string as encoding/json writes it (with
+// HTML escaping, which is how the incident state reaches the control group). It is only asked
+// for text validNote accepted (valid UTF-8, no control character but \n); for the other control
+// characters it answers the long \u00XX form, which is never short.
+func jsonLen(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
+			n += 2
+		case r < 0x20 || r == '<' || r == '>' || r == '&' || r == 0x2028 || r == 0x2029:
+			n += 6
+		default:
+			n += utf8.RuneLen(r)
+		}
+	}
+	return n
 }
 
 func validImpact(i Impact) bool {
@@ -108,6 +177,36 @@ func validate(a Action, at model.UnixNano) error {
 			return fault(model.Invalid, "incident_window_invalid")
 		}
 	}
+	return validateRecorded(a, at)
+}
+
+// validateRecorded checks the title, note and external link actions: their own field, no reason,
+// and the text or operation shape. It reads no state.
+func validateRecorded(a Action, at model.UnixNano) error {
+	kind, external := externalKindOf(a.Type)
+	if a.Title != "" && a.Type != TypeTitle || a.Note != "" && a.Type != TypeNote || a.External != nil != external {
+		return fault(model.Invalid, "incident_action_fields")
+	}
+	if recorded(a.Type) && a.Reason != "" {
+		return fault(model.Invalid, "incident_reason_invalid")
+	}
+	switch {
+	case a.Type == TypeTitle && !validTitle(a.Title):
+		return fault(model.Invalid, "incident_title_invalid")
+	case a.Type == TypeNote && !validNote(a.Note):
+		return fault(model.Invalid, "incident_note_invalid")
+	case external:
+		if a.External.Kind != kind {
+			return fault(model.Invalid, "external_invalid")
+		}
+		// A lease is judged against the clock when the action is applied (model.ApplyExternal), not here:
+		// a retry of a committed begin returns its original result however late it comes.
+		probe := *a.External
+		if probe.Kind == model.ExternalBegin {
+			probe.Until = at + 1
+		}
+		return model.ValidExternalOp(probe, at)
+	}
 	return nil
 }
 
@@ -131,6 +230,7 @@ func (s State) clone() State {
 		w := *s.Maintenance
 		c.Maintenance = &w
 	}
+	c.External = append([]model.ExternalLink(nil), s.External...)
 	return c
 }
 
@@ -221,6 +321,8 @@ func Apply(state State, cmd Action, at model.UnixNano) (State, []Effect, error) 
 		effects, err = applyImpact(&next, state, cmd, at)
 	case TypeLink:
 		err = applyLink(&next, cmd)
+	case TypeTitle, TypeNote, TypeExternalBegin, TypeExternalEnd, TypeExternalAdopt:
+		err = applyRecorded(&next, state, cmd, at)
 	default:
 		effects, err = applyHuman(&next, cmd, at)
 	}
@@ -305,6 +407,48 @@ func applyLink(next *State, a Action) error {
 	}
 	next.Links = append(next.Links, *a.Link)
 	return nil
+}
+
+// applyRecorded applies a title, a note or an external link transition. None of them touches the
+// workflow, so they work on a resolved incident too; all of them stop TimelineReserve entries
+// short of the limit so that acknowledging and resolving always fit, and notes are bounded by
+// their total size as well (MaxNoteTotal). before is the state the action expects.
+func applyRecorded(next *State, before State, a Action, at model.UnixNano) error {
+	if len(before.Timeline) >= MaxTimeline-TimelineReserve {
+		if a.Type == TypeNote {
+			return fault(model.Quota, "incident_notes_full")
+		}
+		return fault(model.Quota, "incident_timeline_full")
+	}
+	switch a.Type {
+	case TypeTitle:
+		if before.Title == a.Title {
+			return fault(model.Conflict, "incident_title_unchanged")
+		}
+		next.Title = a.Title
+	case TypeNote:
+		if noteJSONBytes(before.Timeline)+jsonLen(a.Note) > MaxNoteTotal {
+			return fault(model.Quota, "incident_notes_full")
+		}
+	default:
+		links, err := model.ApplyExternal(before.External, *a.External, a.Actor, at)
+		if err != nil {
+			return err
+		}
+		next.External = links
+	}
+	return nil
+}
+
+// noteJSONBytes is the JSON size of the text of every note of a timeline.
+func noteJSONBytes(timeline []Entry) int {
+	n := 0
+	for _, e := range timeline {
+		if e.Action.Type == TypeNote {
+			n += jsonLen(e.Action.Note)
+		}
+	}
+	return n
 }
 
 func applyHuman(next *State, a Action, at model.UnixNano) ([]Effect, error) {

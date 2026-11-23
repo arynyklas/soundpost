@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/health"
@@ -232,7 +233,10 @@ func run() error {
 	}
 	state := newAppState(core, version)
 	ready := func(c context.Context) (health.Readiness, error) { return health.Ready(c, state) }
-	routes := []func(*http.ServeMux){core.Register, func(mux *http.ServeMux) { httpapi.RegisterHealthRoutes(mux, ready) }}
+	console := func(mux *http.ServeMux) {
+		core.RegisterConsole(mux, appcore.ConsoleConfig{PublicOrigin: workers.notify.PublicOrigin, EgressAllow: workers.notify.Egress.AllowPrefixes, RootCAs: workers.notify.RootCAs})
+	}
+	routes := []func(*http.ServeMux){core.Register, console, func(mux *http.ServeMux) { httpapi.RegisterHealthRoutes(mux, ready) }}
 	if register := scrapeStatusRoutes(core, scrapers); register != nil {
 		routes = append(routes, register)
 	}

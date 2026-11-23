@@ -70,4 +70,22 @@ func RegisterTokenRoutes(mux *http.ServeMux, s *auth.Service) {
 		}
 		reply(w, struct{}{}, err)
 	})
+	mux.HandleFunc("POST /api/v1/admin/tokens/list", func(w http.ResponseWriter, r *http.Request) {
+		c, err := protected(s, w, r)
+		if err != nil {
+			reply(w, nil, err)
+			return
+		}
+		var q struct {
+			OrgID model.ID `json:"org_id"`
+		}
+		if err = decode(w, r, &q); err != nil {
+			reply(w, nil, err)
+			return
+		}
+		tokens, err := s.ListServerTokens(r.Context(), c, q.OrgID)
+		reply(w, struct {
+			Tokens []auth.ServerTokenInfo `json:"tokens"`
+		}{tokens}, err)
+	})
 }

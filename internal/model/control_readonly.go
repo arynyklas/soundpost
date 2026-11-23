@@ -325,6 +325,11 @@ func (g GroupingIssue) clone() GroupingIssue {
 	g.ObservedReleases = append([]ID(nil), g.ObservedReleases...)
 	g.FixedDescendants = append([]ID(nil), g.FixedDescendants...)
 	g.MigrationLinks = append([]ID(nil), g.MigrationLinks...)
+	if g.Owner != nil {
+		o := *g.Owner
+		g.Owner = &o
+	}
+	g.External = append([]ExternalLink(nil), g.External...)
 	return g
 }
 

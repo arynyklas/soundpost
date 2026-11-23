@@ -154,27 +154,32 @@ func (s *webhookSender) Send(ctx context.Context, scope auth.Scope, d notify.Del
 	req.Header.Set(HeaderDeliveryID, id)
 	req.Header.Set(HeaderTimestamp, strconv.FormatInt(ts.Unix(), 10))
 	req.Header.Set(HeaderSignature, Sign(secret, ts.Unix(), id, body))
-	res := roundTrip(s.client, req)
-	if o, failed := transportOutcome(res, ctx.Err()); failed {
-		return o, nil
+	return exchangeOutcome(roundTrip(s.client, req), ctx.Err(), s.cfg.now(), id), nil
+}
+
+// exchangeOutcome is the outcomes table of every signed webhook: a transport failure
+// is classified by whether a connection was made, a 2xx is a receipt (never proof that
+// anyone acted on it), 429/503 and other server failures retry (honoring Retry-After),
+// a redirect is refused and any other status is terminal.
+func exchangeOutcome(res httpResult, ctxErr error, now time.Time, id string) notify.Outcome {
+	if o, failed := transportOutcome(res, ctxErr); failed {
+		return o
 	}
 	switch st := res.status; {
 	case st >= 200 && st < 300:
-		// A 2xx is a receipt that the receiver took the notification, never
-		// proof that anyone or anything acted on it.
 		receipt := strings.TrimSpace(res.header.Get(HeaderReceiptID))
 		if !receiptID(receipt) {
 			receipt = "webhook-" + strconv.Itoa(st) + ":" + id
 		}
-		return notify.Outcome{Kind: notify.OutcomeAccepted, ProviderID: receipt}, nil
+		return notify.Outcome{Kind: notify.OutcomeAccepted, ProviderID: receipt}
 	case st == http.StatusTooManyRequests || st == http.StatusServiceUnavailable:
-		return retry(codeRateLimited, retryAfter(res.header, s.cfg.now())), nil
+		return retry(codeRateLimited, retryAfter(res.header, now))
 	case st == http.StatusRequestTimeout || st >= 500:
-		return retry("http_"+strconv.Itoa(st), retryAfter(res.header, s.cfg.now())), nil
+		return retry("http_"+strconv.Itoa(st), retryAfter(res.header, now))
 	case st >= 300 && st < 400:
-		return terminal(codeRedirectRefused), nil
+		return terminal(codeRedirectRefused)
 	default:
-		return terminal("http_" + strconv.Itoa(st)), nil
+		return terminal("http_" + strconv.Itoa(st))
 	}
 }
 
@@ -215,6 +220,38 @@ type Receiver struct {
 	ttl    time.Duration
 	mu     sync.Mutex
 	seen   map[string]time.Time
+	ops    verifyOps
+}
+
+// verifyOps are the seams of the receiver's signature check. The zero value is the
+// production check; only tests set them, to prove the suite notices a broken check
+// (events_mutation_test.go). Nothing outside _test.go files assigns them.
+type verifyOps struct {
+	sign          func(secret []byte, unix int64, deliveryID string, body []byte) string
+	equal         func(a, b []byte) bool
+	window        time.Duration
+	maxSignatures int
+}
+
+func (o verifyOps) signer() func([]byte, int64, string, []byte) string {
+	if o.sign != nil {
+		return o.sign
+	}
+	return Sign
+}
+
+func (o verifyOps) comparer() func(a, b []byte) bool {
+	if o.equal != nil {
+		return o.equal
+	}
+	return hmac.Equal
+}
+
+func (o verifyOps) replayWindow() time.Duration {
+	if o.window > 0 {
+		return o.window
+	}
+	return ReplayWindow
 }
 
 // NewReceiver returns a receiver for secret. Delivery IDs are remembered for
@@ -244,13 +281,17 @@ func (r *Receiver) Receive(h http.Header, body []byte) (Receipt, error) {
 	if skew < 0 {
 		skew = -skew
 	}
-	if skew > ReplayWindow {
+	if skew > r.ops.replayWindow() {
 		return Receipt{}, ErrReplayWindow
 	}
-	want := Sign(r.secret, unix, id, body)
+	want := r.ops.signer()(r.secret, unix, id, body)
+	equal := r.ops.comparer()
 	ok := false
-	for _, got := range strings.Split(h.Get(HeaderSignature), ",") {
-		if hmac.Equal([]byte(strings.TrimSpace(got)), []byte(want)) {
+	for i, got := range strings.Split(h.Get(HeaderSignature), ",") {
+		if r.ops.maxSignatures > 0 && i >= r.ops.maxSignatures {
+			break
+		}
+		if equal([]byte(strings.TrimSpace(got)), []byte(want)) {
 			ok = true
 		}
 	}

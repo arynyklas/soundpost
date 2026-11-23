@@ -196,6 +196,12 @@ type GroupingIssue struct {
 	ObservedReleases   []ID                `json:"observed_releases"`
 	FixedDescendants   []ID                `json:"fixed_descendants"`
 	MigrationLinks     []ID                `json:"migration_links"`
+	// Owner is the member a person assigned the issue to (omitted when none) and
+	// External the issue's links to an external tracker (see ExternalLink). Both
+	// are human facts of the issue record, not telemetry: only an ID and closed
+	// identifiers live here.
+	Owner    *ID            `json:"owner,omitempty"`
+	External []ExternalLink `json:"external,omitempty"`
 }
 type GroupingMigration struct {
 	ID              ID       `json:"id"`

@@ -244,8 +244,8 @@ func (c *countingIssues) GroupingIssue(ctx context.Context, scope auth.Scope, pr
 	return c.inner.GroupingIssue(ctx, scope, project, id)
 }
 
-// An installation with no issue evidence reader says that (not that the caller lacks administration), and a caller who is not an
-// organization administrator is told that administration is needed without the reader being asked.
+// An installation with no issue evidence reader says that (not that the caller lacks administration). A project reader is served by
+// the issue lifecycle (D92): with none bound she is told the view is not built, and the administrator's registry reader is not asked.
 func TestEvidenceSensIssueViewNamesTheReasonItIsNotAvailable(t *testing.T) {
 	w := newIssueSensWorld(t)
 	asked := w.issue("open")
@@ -255,7 +255,7 @@ func TestEvidenceSensIssueViewNamesTheReasonItIsNotAvailable(t *testing.T) {
 	}
 	calls := &countingIssues{inner: leakyIssues{asked}}
 	v, err = httpapi.NewEvidence(nil, w.e.app.Releases, calls).Issue(w.e.ctx, w.readScope, w.body(asked.ID))
-	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueNeedsAdmin || v.Grouping != nil || calls.n != 0 {
-		t.Fatalf("a non-administrator: %+v %v, reader asked %d times", v, err, calls.n)
+	if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonIssueEvidenceAbsent || v.Grouping != nil || calls.n != 0 {
+		t.Fatalf("a project reader with no lifecycle bound: %+v %v, registry reader asked %d times", v, err, calls.n)
 	}
 }

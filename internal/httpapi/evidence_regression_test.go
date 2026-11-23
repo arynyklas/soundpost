@@ -151,12 +151,13 @@ func TestEvidenceIssueShowsOnlyStoredRegressionExplanations(t *testing.T) {
 		t.Fatalf("another issue's evaluation leaked: %+v", v.Regression)
 	}
 
-	// A project reader is told the evidence needs an administrator and the explanations are not read; a stranger gets the one not-found.
+	// A project reader is served by the issue lifecycle, which this environment does not bind: she is told the view is not built and
+	// the explanations are not read; a stranger gets the one not-found.
 	before := fr.calls.Load()
 	status, raw := e.post(reader, "/api/v1/evidence/issue", body, nil)
 	var denied httpapi.IssueView
 	_ = json.Unmarshal(raw, &denied)
-	if status != 200 || denied.Reason != httpapi.ReasonIssueNeedsAdmin || denied.Regression != nil || fr.calls.Load() != before {
+	if status != 200 || denied.Reason != httpapi.ReasonIssueEvidenceAbsent || denied.Regression != nil || fr.calls.Load() != before {
 		t.Fatalf("reader: %d %s (explain calls %d -> %d)", status, raw, before, fr.calls.Load())
 	}
 	if status, _ = e.post(stranger, "/api/v1/evidence/issue", body, nil); status != 404 || fr.calls.Load() != before {

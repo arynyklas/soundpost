@@ -627,11 +627,11 @@ func TestEvidenceIssueShowsGroupingLateHistoryAndUnknownAncestry(t *testing.T) {
 		t.Fatalf("unbuilt parts must be explicit not_available: %s", raw)
 	}
 
-	// A project reader is told issue evidence needs org admin; the reader is not
-	// asked at all.
+	// A project reader is served by the issue lifecycle (D92), which this environment does not bind: she is told the view is not
+	// built, and the administrator's registry reader is not asked at all.
 	before := issues.calls.Load()
 	status, raw = e.post(telemetry, "/api/v1/evidence/issue", body, nil)
-	if status != 200 || !strings.Contains(string(raw), httpapi.ReasonIssueNeedsAdmin) || strings.Contains(string(raw), fp.String()) || issues.calls.Load() != before {
+	if status != 200 || !strings.Contains(string(raw), httpapi.ReasonIssueEvidenceAbsent) || strings.Contains(string(raw), fp.String()) || issues.calls.Load() != before {
 		t.Fatalf("telemetry reader: %d %s", status, raw)
 	}
 	// Scope first: the stranger and a wrong project/issue are one answer and the

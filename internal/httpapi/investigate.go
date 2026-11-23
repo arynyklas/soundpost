@@ -11,6 +11,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/conditions"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/link"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -46,6 +47,22 @@ type Investigator struct {
 	incidents IncidentReader
 	jobs      JobDetailReader
 	state     ControlView
+	// issueReader is the issue lifecycle read behind the issue kind for readers (WithIssues).
+	issueReader IssueLifecycleReader
+}
+
+// IssueLifecycleReader is the issue lifecycle's own read (*issues.Service.Get): it admits a project reader (telemetry.read), an
+// issues.write holder and an organization administrator acting as a person, checks the scope and the deletion fence before it reads
+// anything, and answers a missing issue and one outside the scope alike.
+type IssueLifecycleReader interface {
+	Get(ctx context.Context, scope auth.Scope, project, id model.ID) (issues.Issue, error)
+}
+
+// WithIssues installs the issue lifecycle read that serves the issue kind to project readers. Without it a reader is told the
+// view is not built (an administrator is still served from the committed registry). It returns the investigator.
+func (i *Investigator) WithIssues(r IssueLifecycleReader) *Investigator {
+	i.issueReader = r
+	return i
 }
 
 // NewInvestigator requires all three seams.
@@ -417,22 +434,31 @@ type InvestigateBody struct {
 }
 
 // investigateScope derives the one scope a typed request runs under. Every kind runs under queryScope (the caller's project-read
-// scope) except release and issue, whose registries need organization administration: a plain request for those (no elevation, no
-// source, read permission) first asks for the caller's own administrator scope, exactly as POST /api/v1/evidence/release and
-// /issue do (evidenceScope), and only when she holds none falls back to queryScope, so a non-administrator is told the registries
-// need an administrator (Investigator.adminState answers that before any state is read) and nothing about the target. An
-// elevation, a source or a raw permission never combines with administration: such a request keeps queryScope's scope, and
-// the refusals queryScope owns for them.
+// scope) except release and issue. A plain request (no elevation, no source, read permission) for either first asks for the caller's
+// own administrator scope, exactly as POST /api/v1/evidence/release and /issue do (evidenceScope). Without one, the release
+// registry needs administration (Investigator.adminState answers that before any state is read) and nothing about the target;
+// an issue is served to a project reader (queryScope's telemetry.read scope) and to an issues.write holder through the issue
+// lifecycle. An elevation, a source or a raw permission never combines with administration: such a request keeps queryScope's
+// scope, and the refusals queryScope owns for them.
 func investigateScope(ctx context.Context, authority *auth.Service, credential auth.Credential, body InvestigateBody) (auth.Scope, error) {
+	plain := false
 	if (body.Kind == KindRelease || body.Kind == KindIssue) && body.Org != (model.ID{}) && len(body.Projects) > 0 && body.Elevation == nil && body.Source == nil {
 		if permission, err := parsePermission(body.Permission); err == nil && permission == auth.Read {
+			plain = true
 			scope, err := authority.Authorize(ctx, credential, body.Org, body.Projects, auth.OrgAdmin)
 			if err == nil || !faultIs(err, model.NotFound) {
 				return scope, err
 			}
 		}
 	}
-	return queryScope(ctx, authority, credential, body.ScopeFields, body.Projects, body.Source)
+	scope, err := queryScope(ctx, authority, credential, body.ScopeFields, body.Projects, body.Source)
+	if err != nil && plain && body.Kind == KindIssue && faultIs(err, model.NotFound) {
+		// No project read grant: the person who may act on the project's issues may read them.
+		if granted, e := authority.Authorize(ctx, credential, body.Org, body.Projects, auth.IssuesWrite); e == nil {
+			return granted, nil
+		}
+	}
+	return scope, err
 }
 
 // RegisterInvestigateRoutes mounts POST /api/v1/investigate. The scope is
@@ -483,7 +509,7 @@ type ControlView interface {
 }
 
 func incidentSummary(project model.ID, st incidents.State) IncidentSummary {
-	s := IncidentSummary{ProjectID: project, ID: st.ID, Status: string(st.Status), Severity: severityName(st.Severity), Version: model.Uint64(st.Version)}
+	s := IncidentSummary{ProjectID: project, ID: st.ID, Title: st.Title, Status: string(st.Status), Severity: severityName(st.Severity), Version: model.Uint64(st.Version)}
 	if n := len(st.Timeline); n > 0 {
 		s.LastActivity = model.Int64(st.Timeline[n-1].At)
 	}
@@ -646,27 +672,61 @@ func (i *Investigator) release(ctx context.Context, scope auth.Scope, req Invest
 	})
 }
 
+// issue answers one persisted grouping issue. An organization administrator reads the committed registry (adminState); a project
+// reader (telemetry.read) or an issues.write holder reads it through the issue lifecycle, which checks the scope and the deletion
+// fence before it reads; any other scope is told the registry needs administration.
 func (i *Investigator) issue(ctx context.Context, scope auth.Scope, req InvestigationRequest, view InvestigationView) (InvestigationView, error) {
+	if p := scope.Permission(); p == auth.Read || p == auth.IssuesWrite {
+		return i.issueAsReader(ctx, scope, req, view)
+	}
 	return i.adminState(ctx, scope, req, view, ReasonIssueEvidenceAbsent, ReasonIssueNeedsAdmin, func(st model.ControlState, p model.ID) (InvestigationView, bool) {
 		gi, ok := st.GroupingIssues[model.ReleaseScopeKey(scope.OrgID(), p, *req.Target)]
 		if !ok || gi.ID != *req.Target || gi.Org != scope.OrgID() || gi.Project != p {
 			return InvestigationView{}, false
 		}
-		s := IssueSummary{ProjectID: p, ID: gi.ID, Workflow: gi.Workflow, GroupingVersion: gi.GroupingVersion, Revision: model.Uint64(gi.Revision), Occurrences: model.Uint64(len(gi.Occurrences)), LateHistory: model.Uint64(len(gi.LateHistory))}
-		if c := gi.Compacted; c != nil {
-			s.Occurrences += c.Count
-			s.Compacted = true
-		}
-		if c := gi.LateCompacted; c != nil {
-			s.LateHistory += c.Count
-			s.Compacted = true
-		}
-		view.Issue = &s
-		out := ready(view, "issue")
-		if s.Compacted {
-			out.State, out.Reason = StateIncomplete, ReasonEvidenceCompacted
-			out.Sections = []ViewSection{{Name: "issue", State: StateIncomplete, Reason: ReasonEvidenceCompacted}}
-		}
-		return out, true
+		return issueInvestigation(view, p, gi), true
 	})
+}
+
+// issueAsReader reads the targeted issue from the first requested project that holds it, under the caller's own scope. A missing
+// issue, one of another project or organization and one outside the scope are the one NotFound.
+func (i *Investigator) issueAsReader(ctx context.Context, scope auth.Scope, req InvestigationRequest, view InvestigationView) (InvestigationView, error) {
+	if i.issueReader == nil {
+		return unavailable(view, ReasonIssueEvidenceAbsent), nil
+	}
+	for _, p := range req.Projects {
+		gi, err := i.issueReader.Get(ctx, scope, p, *req.Target)
+		if err != nil {
+			if faultIs(err, model.NotFound) {
+				continue
+			}
+			return InvestigationView{}, err
+		}
+		if gi.ID != *req.Target || gi.Org != scope.OrgID() || gi.Project != p {
+			continue
+		}
+		return issueInvestigation(view, p, gi), nil
+	}
+	return InvestigationView{}, model.Fail(model.NotFound)
+}
+
+// issueInvestigation is the one-section view of an issue: its summary, incomplete when part of its evidence is only counted.
+func issueInvestigation(view InvestigationView, p model.ID, gi model.GroupingIssue) InvestigationView {
+	s := IssueSummary{ProjectID: p, ID: gi.ID, Workflow: gi.Workflow, GroupingVersion: gi.GroupingVersion, Revision: model.Uint64(gi.Revision), Occurrences: model.Uint64(len(gi.Occurrences)), LateHistory: model.Uint64(len(gi.LateHistory)),
+		Owner: gi.Owner, External: externalViews(gi.External)}
+	if c := gi.Compacted; c != nil {
+		s.Occurrences += c.Count
+		s.Compacted = true
+	}
+	if c := gi.LateCompacted; c != nil {
+		s.LateHistory += c.Count
+		s.Compacted = true
+	}
+	view.Issue = &s
+	out := ready(view, "issue")
+	if s.Compacted {
+		out.State, out.Reason = StateIncomplete, ReasonEvidenceCompacted
+		out.Sections = []ViewSection{{Name: "issue", State: StateIncomplete, Reason: ReasonEvidenceCompacted}}
+	}
+	return out
 }

@@ -33,7 +33,7 @@ import (
 //  2. rolls back the documented way (docs/operations/upgrade.md): the pre-upgrade copy is restored
 //     and the old binary started; again every answer must equal the first one;
 //  3. crosses schema versions: on a copy the persisted control-state format marker is set to
-//     the future (2) and to the past (0); the new binary must refuse each with the typed reason
+//     the future (3; 2 is the D94 records marker the candidate itself writes) and to the past (0); the new binary must refuse each with the typed reason
 //     schema_newer / schema_old, stay unready and not acknowledge intake; with the directory restored
 //     from its copy (the marker unchanged) it must be ready again and answer as before;
 //  4. records, without asserting a promise the product does not make, what the OLD binary does on a
@@ -121,7 +121,7 @@ func RunUpgradeRollback(args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	investigateBefore, err := investigateInstalled(site, fx)
+	investigateBefore, err := investigateInstalled(site, fx, true)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func RunUpgradeRollback(args []string) (result error) {
 			return nil, err
 		}
 		stage = "upgrade_" + label + "_answers"
-		if err = requireSameAnswers(site, fx, receipts, queryBefore, investigateBefore); err != nil {
+		if err = requireSameAnswers(site, fx, receipts, queryBefore, investigateBefore, h == oldHost); err != nil {
 			r.kill()
 			return nil, err
 		}
@@ -200,7 +200,7 @@ func RunUpgradeRollback(args []string) (result error) {
 	}
 	if last.Ready {
 		site.base = r.url()
-		if err = requireSameAnswers(site, fx, receipts, queryBefore, investigateBefore); err != nil {
+		if err = requireSameAnswers(site, fx, receipts, queryBefore, investigateBefore, true); err != nil {
 			r.kill()
 			return err
 		}
@@ -240,7 +240,7 @@ func RunUpgradeRollback(args []string) (result error) {
 		name   string
 		marker uint8
 		reason string
-	}{{"future", 2, "schema_newer"}, {"past", 0, "schema_old"}} {
+	}{{"future", 3, "schema_newer"}, {"past", 0, "schema_old"}} {
 		stage = "schema_" + c.name
 		original, err := setSchemaMarker(oldHost.dir, c.marker)
 		if err != nil {
@@ -312,7 +312,8 @@ func RunUpgradeRollback(args []string) (result error) {
 }
 
 // requireSameAnswers replays every acknowledged batch, compares its receipt, the query result and the investigation.
-func requireSameAnswers(site *installSite, fx *installFixture, receipts []installReceipt, query, investigate []byte) error {
+// previous says that the previous release answers (see investigateInstalled).
+func requireSameAnswers(site *installSite, fx *installFixture, receipts []installReceipt, query, investigate []byte, previous bool) error {
 	for i, rc := range receipts {
 		status, raw, err := site.ingest(rc.batch, fx.credential)
 		if err = requireSmokeResponse("replay_"+rc.name, status, 200, raw, err); err != nil {
@@ -335,7 +336,7 @@ func requireSameAnswers(site *installSite, fx *installFixture, receipts []instal
 	if !bytes.Equal(q, query) {
 		return &smokeFailure{Stage: "same_answers", Code: "query_changed"}
 	}
-	inv, err := investigateInstalled(site, fx)
+	inv, err := investigateInstalled(site, fx, previous)
 	if err != nil {
 		return err
 	}

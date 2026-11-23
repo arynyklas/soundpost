@@ -160,6 +160,9 @@ func (s destinationStore) list(ctx context.Context, org model.ID) ([]notify.Dest
 			if err != nil {
 				return err
 			}
+			if rec.Type == auth.EventWebhookType {
+				continue // event endpoints have their own surface (console_events.go)
+			}
 			out = append(out, rec.View(id))
 		}
 		return nil

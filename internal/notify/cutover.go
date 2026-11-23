@@ -657,6 +657,9 @@ func (o *Outbox) SyncModes(ctx context.Context, scope auth.Scope, lease FenceTok
 	want := ModeFor(phase)
 	changed := 0
 	for _, rec := range recs {
+		if IsEventSubject(rec.Subject) {
+			continue // the event feed has no delivery mode: it is not a notification subject
+		}
 		moved, err := o.syncState(ctx, scope, lease, project, rec, want, cutover, revision, at)
 		if err != nil {
 			return changed, err
