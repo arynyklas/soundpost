@@ -16,7 +16,7 @@ const SERIES=24,EXPRESSION='{__name__=~"shard_s.+"}';
 // Every query after the removal therefore uses an expression no step ran before it (it matches the same 24 series).
 const COLD_EXPRESSION='{__name__=~"shard_s[0-9]+"}';
 const name=(i:number):string=>`shard_s${String(i).padStart(2,'0')}`;
-const hashFor=(org:string,projects:string[]):string=>`#${new URLSearchParams({org,projects:projects.join(','),start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+const hashFor=(org:string,projects:string[],view='metrics'):string=>`#${new URLSearchParams({org,projects:projects.join(','),start:String(at(0)),end:String(at(70)),tz:'UTC',view})}`;
 let org:string,p1:string,p2:string,reader:Reader,metric:Record<string,Source>,logSource:Source,admin:Page,api:APIRequestContext,ctx:BrowserContext,readerApi:Page;
 
 test.beforeAll(async({browser})=>{
@@ -60,7 +60,7 @@ const cachedOf=(json:unknown,project:string):unknown=>{
  return undefined;
 };
 
-test('a replica that has not applied the cursor a reader requires is stale, or partial with opt-in, and never an empty graph',async()=>{
+test('a replica that has not applied the cursor a reader requires is refused as stale, or with opt-in is a Stale project that still holds its data, and never an empty graph',async()=>{
  test.setTimeout(120_000);
  const complete=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:EXPRESSION,instant:at(60)}));
  expect(complete.status).toBe(200);
@@ -77,15 +77,17 @@ test('a replica that has not applied the cursor a reader requires is stale, or p
  expect(field(strict.json,'projects'),'a refused read carries no per-project result').toBeUndefined();
  const lenient=await postJson(readerApi,'/api/v1/query',{...queryBody({org,projects:[p1],expression:EXPRESSION,instant:at(60),allowPartial:true}),min_cursors:ahead});
  expect(lenient.status).toBe(200);
- expect(completeness(lenient.json,p1)).toBe('partial');
+ // A shard behind the minimum is read at its own cut and the project is Stale with the data it held (05.09#6, docs/user/investigation-acceptance.md); a shard that did not answer at all is Partial (the removal tests below).
+ expect(completeness(lenient.json,p1)).toBe('stale');
+ expect(seriesOf(lenient.json,p1).size).toBe(SERIES);
  for(const [n,v] of seriesOf(lenient.json,p1))expect(seriesOf(complete.json,p1).get(n),`${n} is exactly what the complete answer held`).toBe(v);
 });
 
 const panel=(page:Page,project:string)=>page.getByTestId('results').locator(`[data-project="${project}"]`);
-async function openExplore(projects:string[]):Promise<Page>{
+async function openExplore(projects:string[],view='metrics'):Promise<Page>{
  const page=await ctx.newPage();
- await page.goto(`/${hashFor(org,projects)}`);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await page.goto(`/${hashFor(org,projects,view)}`);
+ await expect(page.getByRole('heading',{level:1,name:view==='logs'?'Logs':'Metrics',exact:true})).toBeVisible();
  return page;
 }
 async function run(page:Page,expression:string):Promise<void>{
@@ -127,7 +129,7 @@ test('the same query repeated inside the cache minute is labelled as computed ea
 
 const rowsOf=(page:Page)=>page.locator('[data-row]');
 async function startLive(page:Page):Promise<void>{
- await page.getByRole('radio',{name:'LogQL',exact:true}).check();
+ await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
  await page.getByLabel('Query expression').fill('{app="web"}');
  await page.getByRole('button',{name:'Open the live log view for this query',exact:true}).click();
  await page.getByRole('button',{name:'Start live view',exact:true}).click();
@@ -135,7 +137,7 @@ async function startLive(page:Page):Promise<void>{
 }
 /** Every sequence from 1 to the newest shown is either a row or inside a gap: a hole nobody announced would fail this. */
 async function accounted(page:Page):Promise<{rows:number[];gaps:[number,number][]}>{
- const items=await page.locator('.live-items > li').evaluateAll((els)=>els.map((e)=>({gap:e.hasAttribute('data-gap'),seq:e.getAttribute('data-sequence'),from:e.getAttribute('data-from'),to:e.getAttribute('data-to')})));
+ const items=await page.locator('.exp-live-items > li').evaluateAll((els)=>els.map((e)=>({gap:e.hasAttribute('data-gap'),seq:e.getAttribute('data-sequence'),from:e.getAttribute('data-from'),to:e.getAttribute('data-to')})));
  const rows=items.filter((x)=>!x.gap).map((x)=>Number(x.seq)),gaps=items.filter((x)=>x.gap).map((x):[number,number]=>[Number(x.from),Number(x.to)]);
  const covered=new Set<number>(rows);
  for(const [a,b] of gaps)for(let n=a;n<=b;n++)covered.add(n);
@@ -156,8 +158,8 @@ test('a lost connection is shown as lost, nothing reconnects by itself, and an e
  try{
   const page=await ctx.newPage();
   const gets=liveGets(page);
-  await page.goto(`${path.origin}/${hashFor(org,[p1])}`);
-  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  await page.goto(`${path.origin}/${hashFor(org,[p1],'logs')}`);
+  await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
   await startLive(page);
   for(let i=0;i<2;i++)await ingestLog(api,logSource,{at:at(i+20),name:`user${i}`});
   await expect(rowsOf(page)).toHaveCount(2);
@@ -184,8 +186,8 @@ test('a consumer that stops reading is dropped by the server, the view says the 
  const path=await tcpPath();
  try{
   const page=await ctx.newPage();
-  await page.goto(`${path.origin}/${hashFor(org,[p1])}`);
-  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  await page.goto(`${path.origin}/${hashFor(org,[p1],'logs')}`);
+  await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
   await startLive(page);
   await ingestLog(api,logSource,{at:at(50),name:'user0'});
   await expect(rowsOf(page)).toHaveCount(1);
@@ -221,7 +223,7 @@ test('a consumer that stops reading is dropped by the server, the view says the 
 
 test('shards removed under an open live view: the stream ends with a stated error, rows already received are kept, and a new view does not pretend',async()=>{
  test.setTimeout(240_000);
- const page=await openExplore([p1]);
+ const page=await openExplore([p1],'logs');
  await startLive(page);
  for(let i=0;i<3;i++)await ingestLog(api,logSource,{at:at(i+1),name:`user${i}`});
  await expect(rowsOf(page)).toHaveCount(3);

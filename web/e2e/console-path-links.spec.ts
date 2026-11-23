@@ -54,7 +54,7 @@ test('a path-shaped notification link opens the right view; unknown paths stay 4
 
  // 1. project:id pair: opens the incident, the address is the hash route, and the document was loaded once, from the path.
  await reader.goto(`/incidents/${project}:${incident}?org=${org}`);
- await expect(reader.getByRole('heading',{name:`Incident ${incident}`})).toBeVisible();
+ await expect(reader.locator('main h1')).toBeVisible(); // the incident page's own h1 (its title, or the fallback built from its ID)
  await expect(reader.getByTestId('revision')).toBeVisible();
  await expect(reader).toHaveURL(hashRoute);
  await expect(reader.getByTestId('visible-org')).toHaveText(org);
@@ -65,17 +65,17 @@ test('a path-shaped notification link opens the right view; unknown paths stay 4
 
  // 2. bare id with the project in the query: the same view.
  await reader.goto(`/incidents/${incident}?org=${org}&projects=${project}`);
- await expect(reader.getByRole('heading',{name:`Incident ${incident}`})).toBeVisible();
+ await expect(reader.locator('main h1')).toBeVisible();
  await expect(reader.getByTestId('revision')).toBeVisible();
  await expect(reader).toHaveURL(hashRoute);
 
  // 3. a section without an entity: the queue lists the real incident; settings opens the settings view.
  await reader.goto(`/queue?org=${org}&projects=${project}`);
- await expect(reader.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeVisible();
+ await expect(reader.getByRole('heading',{level:1,name:'Incidents',exact:true})).toBeVisible();
  await expect(reader.locator(`tr[data-incident="${incident}"]`)).toBeVisible();
  await expect(reader).toHaveURL(new RegExp(`/#view=queue&org=${org}&projects=${project}$`));
  await reader.goto(`/settings?org=${org}&projects=${project}`);
- await expect(reader.getByRole('heading',{level:2,name:'Project settings',exact:true})).toBeVisible();
+ await expect(reader.getByRole('heading',{level:1,name:'Settings',exact:true})).toBeVisible();
 
  // 4. A link that names no scope opens no data: the console asks for a scope and reads nothing.
  await reader.goto('/incidents');
@@ -85,7 +85,7 @@ test('a path-shaped notification link opens the right view; unknown paths stay 4
  // 5. A project the link does not carry in its scope is not opened (the pair names a project outside `projects`).
  const stranger=id();
  await reader.goto(`/incidents/${stranger}:${incident}?org=${org}&projects=${project}`);
- await expect(reader.getByRole('heading',{level:2,name:'Investigation: Incidents'})).toBeVisible();
+ await expect(reader.getByRole('heading',{level:1,name:'Incidents',exact:true})).toBeVisible();
  await expect(reader.getByTestId('revision')).toHaveCount(0);
 
  // 6. Signed out, the link first asks for credentials; after sign-in the same link opens the incident.
@@ -97,7 +97,7 @@ test('a path-shaped notification link opens the right view; unknown paths stay 4
  await signedOut.getByLabel('Email').fill(ops.email);
  await signedOut.getByLabel('Password',{exact:true}).fill(ops.password);
  await signedOut.getByRole('button',{name:'Sign in'}).click();
- await expect(signedOut.getByRole('heading',{name:`Incident ${incident}`})).toBeVisible();
+ await expect(signedOut.locator('main h1')).toBeVisible();
  await expect(signedOut.getByTestId('revision')).toBeVisible();
  await expect(signedOut).toHaveURL(hashRoute);
  await fresh.close();

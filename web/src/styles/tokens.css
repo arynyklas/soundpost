@@ -1,0 +1,31 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Design tokens. Dark is the default theme; [data-theme=light] overrides it. Colours are hex or rgb() only (the e2e contrast audit parses rgb()),
+   and there is no inline style anywhere (the CSP is style-src 'self'). The pairs below were checked for WCAG AA (4.5:1) text contrast. */
+:root,[data-theme=dark]{
+ color-scheme:dark;
+ --bg:#0c0d11;--panel:#13151b;--raised:#191c23;--hover:#1e222b;--active:#272c38;
+ --border:#2a2f3a;--border-2:#3b4252;
+ --text:#e8eaef;--text-2:#b3b9c5;--text-3:#8e95a3;
+ --accent:#8f7dff;--accent-2:#ab9eff;--accent-bg:#232040;--on-accent:#0c0d11;
+ --crit:#ff6b85;--crit-solid:#c9304f;--crit-bg:#2d141b;--high:#ffa452;--high-bg:#2c1b0c;--warn:#f2c94c;--warn-bg:#272010;
+ --ok:#4ade9b;--ok-bg:#10271a;--info:#6cb4ff;--info-bg:#101f35;--unk:#9aa1ae;--unk-bg:#1b1e25;
+ --c1:#8f7dff;--c2:#ffa452;--c3:#4ade9b;--c4:#ff6ba8;--c5:#6cb4ff;--c6:#f2c94c;
+ --code-bg:#0f1115;--mark:#3a1520;--scrim:rgb(5 6 9 / .62);--shadow:0 16px 40px rgb(0 0 0);
+}
+[data-theme=light]{
+ color-scheme:light;
+ --bg:#f5f4f8;--panel:#ffffff;--raised:#faf9fc;--hover:#f1eff5;--active:#e9e5f2;
+ --border:#d9d4e2;--border-2:#b9b1c7;
+ --text:#1d1825;--text-2:#4f4760;--text-3:#655d75;
+ --accent:#5b3fd4;--accent-2:#4c33bd;--accent-bg:#eeeaff;--on-accent:#ffffff;
+ --crit:#c4203f;--crit-solid:#c4203f;--crit-bg:#fdecef;--high:#a95200;--high-bg:#fff1e3;--warn:#806200;--warn-bg:#fff7d9;
+ --ok:#0f7244;--ok-bg:#e5f6ee;--info:#155fb8;--info-bg:#e7f1fd;--unk:#5f5870;--unk-bg:#f1eff4;
+ --c1:#5b3fd4;--c2:#d9690f;--c3:#16935c;--c4:#cf2f75;--c5:#1d74cf;--c6:#b08400;
+ --code-bg:#faf9fc;--mark:#fde4ea;--scrim:rgb(40 30 60 / .45);--shadow:0 16px 40px rgb(180 170 200);
+}
+/* Legacy names still used by screens that have not been moved to the new vocabulary yet. */
+:root{
+ --primary:var(--accent);--on-primary:var(--on-accent);--background:var(--bg);--foreground:var(--text);--card:var(--panel);--muted:var(--text-2);
+ --error:var(--crit);--notice:var(--warn-bg);--focus:var(--accent);
+ --maxw:1160px;
+}

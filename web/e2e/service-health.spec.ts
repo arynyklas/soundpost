@@ -48,17 +48,20 @@ test('a service is derived from source policies and its health from stored incid
  const ops_=await ctx.newPage();
  await login(ops_,ops.email,ops.password);
 
- // The list: exactly the service the source policy admits, with the environment the policy lists; no health is stated here.
+ // The list: exactly the service the source policy admits, with the environment the policy lists. Its health is the stored evidence read per service; with no incident or condition it is healthy.
  await ops_.goto(hash(org,project,{view:'services'}));
  const row=ops_.getByTestId('service-row');
  await expect(row).toHaveCount(1);
  await expect(row).toHaveAttribute('data-service',source.service);
  await expect(row).toContainText(source.environment);
+ await expect(row).toHaveAttribute('data-health','healthy');
 
  // The page of the service: no incident names it yet, so it is healthy by the stored evidence, and says why.
- await row.getByRole('button',{name:`Open service ${source.service}`}).click();
- await expect(ops_.getByRole('heading',{name:`Service ${source.service}`})).toBeVisible();
+ await row.getByRole('link',{name:`Open service ${source.service}`}).click();
+ await expect(ops_.locator(`h1[data-service="${source.service}"]`)).toBeVisible();
  await expect(ops_.getByTestId('service-health')).toHaveAttribute('data-status','healthy');
+ // The service metrics are real figures where the installation serves them, else the honest not-available state (never zero).
+ await expect(ops_.getByTestId('red-unavailable').or(ops_.getByTestId('red'))).toBeVisible();
  await expect(ops_.locator('[data-section="identity"]')).toContainText('Ready');
  await expect(ops_.locator('[data-section="health"]')).toContainText('Ready');
  await expect(ops_.locator('[data-section="telemetry"]')).toContainText('Not available');

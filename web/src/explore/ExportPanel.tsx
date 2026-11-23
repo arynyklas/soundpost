@@ -3,6 +3,7 @@ import * as React from 'react';
 import { createExport, downloadExport, exportStatus, isAbort } from '../api/client';
 import { ApiFault, EXPORT_SIGNALS, type ExportOperation, type ExportSignal } from '../api/types';
 import type { ViewContext } from '../app/context';
+import { Card } from '../ui/primitives';
 import { TimeText } from './MetricResult';
 
 /** The most status checks (one per second) before this page stops checking; the export itself is not affected. */
@@ -103,28 +104,27 @@ export function ExportPanel(props: { context: ViewContext }): React.JSX.Element 
  };
  const busy = state.kind === 'creating' || state.kind === 'running' || state.kind === 'downloading';
  return (
-  <section className="panel" aria-labelledby="export-heading" data-section="export" data-export-state={state.kind}>
-   <h3 id="export-heading">Export raw records</h3>
-   <p>An asynchronous export of one project&rsquo;s raw records of one signal in the selected window (<TimeText ns={context.start} /> to <TimeText ns={context.end} />, end excluded). Your access is checked when the export is created, when it completes and again for every downloaded chunk.</p>
-   <form aria-label="Export" onSubmit={(e) => { e.preventDefault(); start(); }}>
-    <div className="field-row">
+  <div data-section="export" data-export-state={state.kind}>
+   <Card title="Export raw records" titleId="export-heading" bodyClass="col g12">
+    <p className="small t2">An asynchronous export of one project&rsquo;s raw records of one signal in the selected window (<TimeText ns={context.start} /> to <TimeText ns={context.end} />, end excluded). Your access is checked when the export is created, when it completes and again for every downloaded chunk.</p>
+    <form aria-label="Export" className="exp-fields" onSubmit={(e) => { e.preventDefault(); start(); }}>
      <label>Project <select value={project} onChange={(e) => setProject(e.target.value)}>{context.projects.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
      <label>Signal <select value={signal} onChange={(e) => setSignal(e.target.value as ExportSignal)}>{EXPORT_SIGNALS.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
+     <button type="submit" className="btn" disabled={busy}>Start export</button>
+    </form>
+    <div role="status" aria-live="polite" data-testid="export-status" className="small t2">
+     {state.kind === 'idle' && 'No export has been started.'}
+     {state.kind === 'creating' && 'Creating the export…'}
+     {state.kind === 'running' && <>Running: export <code>{state.op.id}</code>, {state.op.progress} bytes read so far. Checking once a second (check {state.checks} of {MAX_CHECKS}).</>}
+     {state.kind === 'complete' && <>Complete: export <code>{state.op.id}</code> is ready in {state.op.chunks} {state.op.chunks === '1' ? 'chunk' : 'chunks'} ({state.op.progress} bytes).</>}
+     {state.kind === 'downloading' && 'Downloading: every chunk is authorized again as it is read…'}
+     {state.kind === 'downloaded' && <>Downloaded {state.bytes} bytes as <code>{state.id}.ndjson</code>.</>}
     </div>
-    <button type="submit" disabled={busy}>Start export</button>
-   </form>
-   <div role="status" aria-live="polite" data-testid="export-status">
-    {state.kind === 'idle' && 'No export has been started.'}
-    {state.kind === 'creating' && 'Creating the export…'}
-    {state.kind === 'running' && <>Running: export <code>{state.op.id}</code>, {state.op.progress} bytes read so far. Checking once a second (check {state.checks} of {MAX_CHECKS}).</>}
-    {state.kind === 'complete' && <>Complete: export <code>{state.op.id}</code> is ready in {state.op.chunks} {state.op.chunks === '1' ? 'chunk' : 'chunks'} ({state.op.progress} bytes).</>}
-    {state.kind === 'downloading' && 'Downloading: every chunk is authorized again as it is read…'}
-    {state.kind === 'downloaded' && <>Downloaded {state.bytes} bytes as <code>{state.id}.ndjson</code>.</>}
-   </div>
-   {state.kind === 'complete' && <button type="button" className="primary" onClick={download}>Download the export</button>}
-   {state.kind === 'failed' && <p role="alert" className="error" data-testid="export-failed" data-reason={state.reason}>The export failed ({state.reason}). {REASON_WORDS[state.reason] ?? 'Nothing can be downloaded.'}</p>}
-   {state.kind === 'not_found' && <p role="alert" className="error" data-testid="export-not-found">Not found. This export was not found or is not available to this account. Nothing was downloaded.</p>}
-   {state.kind === 'error' && <p role="alert" className="error" data-testid="export-error" data-code={state.code}>{state.code === 'checks_exhausted' ? `This page stopped checking after ${MAX_CHECKS} seconds. Nothing was downloaded.` : `The request failed (${state.code}). Nothing was downloaded.`}</p>}
-  </section>
+    {state.kind === 'complete' && <div><button type="button" className="btn btn-primary" onClick={download}>Download the export</button></div>}
+    {state.kind === 'failed' && <p role="alert" className="error" data-testid="export-failed" data-reason={state.reason}>The export failed ({state.reason}). {REASON_WORDS[state.reason] ?? 'Nothing can be downloaded.'}</p>}
+    {state.kind === 'not_found' && <p role="alert" className="error" data-testid="export-not-found">Not found. This export was not found or is not available to this account. Nothing was downloaded.</p>}
+    {state.kind === 'error' && <p role="alert" className="error" data-testid="export-error" data-code={state.code}>{state.code === 'checks_exhausted' ? `This page stopped checking after ${MAX_CHECKS} seconds. Nothing was downloaded.` : `The request failed (${state.code}). Nothing was downloaded.`}</p>}
+   </Card>
+  </div>
  );
 }

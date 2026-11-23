@@ -16,21 +16,36 @@ export interface ViewContext {
  timezone: string;
  /** Bumped on every navigation or refresh; a response for an older generation is dropped. */
  generation: number;
+ /** Minutes of a relative window ("last hour"): Refresh slides such a window to now. Absent for an absolute window. */
+ span?: number;
 }
-export type SectionId = 'queue' | 'incidents' | 'issues' | 'releases' | 'traces' | 'explore' | 'services' | 'jobs' | 'replays' | 'profiles' | 'settings';
-export const SECTIONS: readonly { id: SectionId; label: string; kind: InvestigationKind | null }[] = [
- { id: 'queue', label: 'Queue', kind: 'queue' },
- { id: 'incidents', label: 'Incidents', kind: 'incident' },
- { id: 'issues', label: 'Issues', kind: 'issue' },
- { id: 'releases', label: 'Releases', kind: 'release' },
- { id: 'traces', label: 'Traces', kind: 'trace' },
- { id: 'explore', label: 'Explore', kind: null },
- { id: 'services', label: 'Services', kind: 'service' },
- { id: 'jobs', label: 'Jobs', kind: 'job' },
- { id: 'replays', label: 'Replays', kind: 'replay' },
- { id: 'profiles', label: 'Profiles', kind: 'profile' },
- { id: 'settings', label: 'Project settings', kind: null },
+export type SectionId = 'home' | 'incidents' | 'rules' | 'routing' | 'issues' | 'releases' | 'services' | 'jobs' | 'traces' | 'logs' | 'metrics' | 'replays' | 'profiles' | 'dashboards' | 'onboarding' | 'settings' | 'gitlab' | 'events' | 'cutover' | 'account';
+export interface SectionDef { id: SectionId; label: string; kind: InvestigationKind | null; /** The sidebar item that stays highlighted while this screen is open. */ owner: SectionId }
+export const SECTIONS: readonly SectionDef[] = [
+ { id: 'home', label: 'Home', kind: null, owner: 'home' },
+ { id: 'incidents', label: 'Incidents', kind: 'incident', owner: 'incidents' },
+ { id: 'rules', label: 'Alert rules', kind: null, owner: 'rules' },
+ { id: 'routing', label: 'Notification routes', kind: null, owner: 'routing' },
+ { id: 'issues', label: 'Issues', kind: 'issue', owner: 'issues' },
+ { id: 'releases', label: 'Releases', kind: 'release', owner: 'releases' },
+ { id: 'services', label: 'Services', kind: 'service', owner: 'services' },
+ { id: 'jobs', label: 'Jobs', kind: 'job', owner: 'jobs' },
+ { id: 'traces', label: 'Traces', kind: 'trace', owner: 'traces' },
+ { id: 'logs', label: 'Logs', kind: null, owner: 'logs' },
+ { id: 'metrics', label: 'Metrics', kind: null, owner: 'metrics' },
+ { id: 'replays', label: 'Replays', kind: 'replay', owner: 'replays' },
+ { id: 'profiles', label: 'Profiles', kind: 'profile', owner: 'profiles' },
+ { id: 'dashboards', label: 'Dashboards', kind: null, owner: 'dashboards' },
+ { id: 'onboarding', label: 'Add data source', kind: null, owner: 'onboarding' },
+ { id: 'settings', label: 'Settings', kind: null, owner: 'settings' },
+ { id: 'gitlab', label: 'GitLab', kind: null, owner: 'settings' },
+ { id: 'events', label: 'Event webhooks', kind: null, owner: 'settings' },
+ { id: 'cutover', label: 'Migration and cutover', kind: null, owner: 'settings' },
+ { id: 'account', label: 'Account access', kind: null, owner: 'settings' },
 ];
+/** Section names of earlier console addresses that still open: the queue is the incident list and Explore is the log explorer. */
+export const SECTION_ALIASES: Readonly<Record<string, SectionId>> = { queue: 'incidents', explore: 'logs' };
+export function sectionOf(name: string | null): SectionId | undefined { return SECTIONS.find((s) => s.id === name)?.id ?? (name !== null ? SECTION_ALIASES[name] : undefined); }
 export const MAX_PROJECTS = 16;
 export const PAGE_LIMIT = 100;
 const ID = /^[0-9a-f]{32}$/;
@@ -63,24 +78,32 @@ export function scopeKey(c: ViewContext): string {
 
 /** The URL carries only stable IDs, nanosecond strings, the timezone name and the
  * section: never telemetry text, queries or credentials. */
-export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null, target: IncidentRef | null = null): string {
+export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null, target: IncidentRef | null = null, page = ''): string {
  const params = new URLSearchParams({ org: c.org, projects: c.projects.join(','), start: c.start, end: c.end, tz: c.timezone, view: section });
  if (c.environment) params.set('env', c.environment);
+ if (c.span) params.set('span', String(c.span));
  if (service) params.set('service', service);
  if (incident) params.set('incident', `${incident.project}:${incident.id}`);
  if (target) params.set('target', `${target.project}:${target.id}`);
+ if (page) params.set('page', page);
  return `#${params}`;
 }
+/** The address of a screen that needs no scope (or when none is chosen yet). */
+export function bareHash(section: SectionId): string { return `#view=${section}`; }
+/** A sub-page name inside a section (a settings page, for example): lowercase words only. */
+const PAGE = /^[a-z][a-z0-9-]{0,31}$/;
 /** One incident inside the selected projects: the project is part of its identity. */
 export interface IncidentRef { project: Id; id: Id }
-export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null; /** The issue or release of the issues and releases sections. */ target: IncidentRef | null }
+export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null; /** The issue or release of the issues and releases sections. */ target: IncidentRef | null; /** A sub-page of the section ('' for its main page). */ page: string }
 /** DEFAULT_LINK_MINUTES is the window a notification deep link opens with: the link names an organization, projects and one entity (IDs only), never a time, so the view opens on the last day ending now, in UTC. */
 export const DEFAULT_LINK_MINUTES = 24 * 60;
 export function decodeHash(hash: string, generation: number, nowMs: number = Date.now()): Navigation {
  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
- const section = SECTIONS.find((s) => s.id === params.get('view'))?.id ?? 'queue';
+ const section = sectionOf(params.get('view')) ?? 'home';
  const service = params.get('service') ?? '';
- const none: Navigation = { context: null, section, service: '', incident: null, target: null };
+ const rawPage = params.get('page') ?? '';
+ const page = PAGE.test(rawPage) ? rawPage : '';
+ const none: Navigation = { context: null, section, service: '', incident: null, target: null, page };
  const org = params.get('org') ?? '';
  let start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
  if (!params.has('start') && !params.has('end') && !params.has('tz')) {
@@ -95,7 +118,9 @@ export function decodeHash(hash: string, generation: number, nowMs: number = Dat
   const [rproject = '', rid = ''] = (params.get(name) ?? '').split(':');
   return isId(rproject) && isId(rid) && projects.includes(rproject) ? { project: rproject, id: rid } : null;
  };
- return { context: { org, projects, environment, start, end, timezone: tz, generation }, section, service, incident: refOf('incident'), target: refOf('target') };
+ const spanRaw = Number(params.get('span') ?? '');
+ const span = Number.isInteger(spanRaw) && spanRaw > 0 && spanRaw <= 60 * 24 * 366 ? spanRaw : undefined;
+ return { context: { org, projects, environment, start, end, timezone: tz, generation, ...(span ? { span } : {}) }, section, service, incident: refOf('incident'), target: refOf('target'), page };
 }
 
 export function requestFor(c: ViewContext, kind: InvestigationKind, target?: Id): InvestigationRequest {

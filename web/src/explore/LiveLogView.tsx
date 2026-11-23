@@ -6,6 +6,7 @@ import { scopeKey, type ViewContext } from '../app/context';
 import { DEFAULT_LIVE_LIMITS, applyLiveEvent, beginAttachment, endAttachment, initialLive, type LiveEnd, type LiveGapItem, type LiveItem, type LiveRow, type LiveView } from './liveModel';
 import { labelsText } from './model';
 import { TimeText } from './MetricResult';
+import { Callout, Pill } from '../ui/primitives';
 
 const GAP_REASONS: Record<string, string> = {
  replay_evicted: 'the replay buffer dropped events this browser had not read yet',
@@ -40,7 +41,7 @@ function Cursors(props: { cursors: Cursor[] }): React.JSX.Element {
 function GapItem(props: { item: LiveGapItem }): React.JSX.Element {
  const g = props.item;
  return (
-  <li className="live-gap" data-gap data-announced={g.announced ? 'yes' : 'no'} data-reason={g.reason} data-from={g.from} data-to={g.to}>
+  <li className="exp-live-gap" data-gap data-announced={g.announced ? 'yes' : 'no'} data-reason={g.reason} data-from={g.from} data-to={g.to}>
    <strong>Gap ({g.reason}):</strong> stream sequences {g.from === g.to ? <code>{g.from}</code> : <><code>{g.from}</code> to <code>{g.to}</code></>} were not delivered; {GAP_REASONS[g.reason] ?? 'the server did not say more'}.
    {g.announced ? <> Committed feed: after <Cursors cursors={g.after} />, through <Cursors cursors={g.through} />.</> : <> This browser noticed it; the server did not announce it.</>}
   </li>
@@ -50,17 +51,17 @@ function GapItem(props: { item: LiveGapItem }): React.JSX.Element {
 function RowItem(props: { item: LiveRow }): React.JSX.Element {
  const r = props.item;
  return (
-  <li className="live-row" data-row data-sequence={r.sequence} data-time={r.time}>
-   <span className="live-meta"><code>#{r.sequence}</code> <TimeText ns={r.time} /> project <code>{r.project}</code></span>
-   <code className="log-line" data-line>{r.line}</code>{r.multiplicity !== '1' && <small> (× {r.multiplicity} identical)</small>}
-   <small className="live-labels"> labels <code>{labelsText(r.labels)}</code> · stream labels <code>{labelsText(r.streamLabels)}</code> · structured metadata {r.metadata.length === 0 ? 'none' : <code>{labelsText(r.metadata)}</code>}</small>
+  <li className="exp-live-row" data-row data-sequence={r.sequence} data-time={r.time}>
+   <span className="exp-live-meta"><code>#{r.sequence}</code> <TimeText ns={r.time} /> project <code>{r.project}</code></span>
+   <code className="exp-line" data-line>{r.line}</code>{r.multiplicity !== '1' && <small> (× {r.multiplicity} identical)</small>}
+   <small className="exp-live-labels"> labels <code>{labelsText(r.labels)}</code> · stream labels <code>{labelsText(r.streamLabels)}</code> · structured metadata {r.metadata.length === 0 ? 'none' : <code>{labelsText(r.metadata)}</code>}</small>
   </li>
  );
 }
 
 /** The held rows and gaps, oldest first. Every value is a text node: a log line or label is never interpreted as markup. */
 export function LiveItems(props: { items: LiveItem[] }): React.JSX.Element {
- return <ol className="live-items" tabIndex={0} aria-label="Live log rows and gaps, oldest first">{props.items.map((item, i) => (item.kind === 'gap' ? <GapItem key={`g${i}:${item.from}`} item={item} /> : <RowItem key={item.sequence} item={item} />))}</ol>;
+ return <ol className="exp-live-items" tabIndex={0} aria-label="Live log rows and gaps, oldest first">{props.items.map((item, i) => (item.kind === 'gap' ? <GapItem key={`g${i}:${item.from}`} item={item} /> : <RowItem key={item.sequence} item={item} />))}</ol>;
 }
 
 function endOf(error: unknown): LiveEnd {
@@ -77,12 +78,12 @@ function Banner(props: { view: LiveView; fault: QueryFault | null }): React.JSX.
  if (end === null) return null;
  const seq = view.lastSequence;
  switch (end.kind) {
-  case 'revoked': return <p role="alert" className="banner banner-warning" data-end="revoked"><strong>Access ended.</strong> {END_WORDS[end.reason] ?? 'The server revoked this live view.'} Every buffered row was cleared and nothing further will be shown. ({end.reason})</p>;
-  case 'refused': return <p role="alert" className="banner banner-warning" data-end="refused"><strong>Not found.</strong> This live view was not found or is not available to this account. Nothing is shown.</p>;
-  case 'error': return <p role="alert" className="banner banner-warning" data-end="error" data-reason={end.reason}><strong>The stream ended with an error ({end.reason}).</strong> {END_WORDS[end.reason] ?? 'The server ended the stream.'} Rows already received are kept; this is not a complete tail.</p>;
-  case 'stopped': return <p role="status" className="banner" data-end="stopped"><strong>Stopped by you.</strong> Rows already received are kept. Resuming continues after sequence {seq} and shows a gap if events were lost.</p>;
-  case 'interrupted': return <p role="alert" className="banner banner-warning" data-end="interrupted"><strong>The connection ended without a final event.</strong> Rows already received are kept and the view may be incomplete. Nothing reconnects by itself: resuming continues after sequence {seq} and shows a gap if events were lost.</p>;
-  case 'failed': return <p role="alert" className="banner banner-warning" data-end="failed" data-code={end.code}><strong>The live view could not be started or continued ({end.code}).</strong>{fault?.language ? <> Language error, category {fault.language.category}{fault.language.languageCode ? `, code ${fault.language.languageCode}` : ''}: {fault.language.detail}.</> : null}</p>;
+  case 'revoked': return <Callout tone="high" role="alert"><span data-end="revoked"><strong>Access ended.</strong> {END_WORDS[end.reason] ?? 'The server revoked this live view.'} Every buffered row was cleared and nothing further will be shown. ({end.reason})</span></Callout>;
+  case 'refused': return <Callout tone="high" role="alert"><span data-end="refused"><strong>Not found.</strong> This live view was not found or is not available to this account. Nothing is shown.</span></Callout>;
+  case 'error': return <Callout tone="high" role="alert"><span data-end="error" data-reason={end.reason}><strong>The stream ended with an error ({end.reason}).</strong> {END_WORDS[end.reason] ?? 'The server ended the stream.'} Rows already received are kept; this is not a complete tail.</span></Callout>;
+  case 'stopped': return <Callout tone="info" role="status"><span data-end="stopped"><strong>Stopped by you.</strong> Rows already received are kept. Resuming continues after sequence {seq} and shows a gap if events were lost.</span></Callout>;
+  case 'interrupted': return <Callout tone="high" role="alert"><span data-end="interrupted"><strong>The connection ended without a final event.</strong> Rows already received are kept and the view may be incomplete. Nothing reconnects by itself: resuming continues after sequence {seq} and shows a gap if events were lost.</span></Callout>;
+  case 'failed': return <Callout tone="high" role="alert"><span data-end="failed" data-code={end.code}><strong>The live view could not be started or continued ({end.code}).</strong>{fault?.language ? <> Language error, category {fault.language.category}{fault.language.languageCode ? `, code ${fault.language.languageCode}` : ''}: {fault.language.detail}.</> : null}</span></Callout>;
  }
 }
 
@@ -143,18 +144,19 @@ export function LiveLogView(props: { request: LiveTicketRequest; context: ViewCo
  const rows = view.items.filter((i) => i.kind === 'row').length;
  const words = view.phase === 'idle' ? 'Not started.' : view.phase === 'connecting' ? 'Connecting: waiting for the server to open the stream.' : view.phase === 'live' ? `Live: connected to stream ${view.streamId}.` : 'Ended.';
  return (
-  <section className="panel" aria-labelledby="live-heading" data-live-state={view.phase} data-live-end={view.end?.kind ?? ''}>
+  <div className="exp-live col g12" data-live-state={view.phase} data-live-end={view.end?.kind ?? ''}>
    <h3 id="live-heading">Live log view</h3>
-   <p>One open server-sent stream of the log query below, through a real one-use ticket. It never polls and never reconnects by itself. The server keeps 60 seconds of replay: a resume after that starts with an explicit <code>replay_expired</code> gap.</p>
-   <dl className="scope-bar">
+   <p className="small t2">One open server-sent stream of the log query below, through a real one-use ticket. It never polls and never reconnects by itself. The server keeps 60 seconds of replay: a resume after that starts with an explicit <code>replay_expired</code> gap.</p>
+   <dl className="props">
     <dt>Query</dt><dd><code data-testid="live-expression">{shownRequest.expression}</code></dd>
     <dt>Projects</dt><dd><code>{shownRequest.projects.join(', ')}</code></dd>
     <dt>Profile</dt><dd><code>{shownRequest.profile}</code>, feature set <code>{shownRequest.feature_set}</code></dd>
    </dl>
-   <div className="field-row">
-    {!running && <button type="button" className="primary" onClick={() => start(false)}>{view.phase === 'idle' ? 'Start live view' : 'Start a new live view'}</button>}
-    {running && <button type="button" onClick={stop}>Stop live view</button>}
-    {canResume && <button type="button" onClick={() => start(true)}>Resume after sequence {view.lastSequence}</button>}
+   <div className="row wrap">
+    {!running && <button type="button" className="btn btn-primary" onClick={() => start(false)}>{view.phase === 'idle' ? 'Start live view' : 'Start a new live view'}</button>}
+    {running && <button type="button" className="btn" onClick={stop}>Stop live view</button>}
+    {canResume && <button type="button" className="btn" onClick={() => start(true)}>Resume after sequence {view.lastSequence}</button>}
+    <Pill tone={view.phase === 'live' ? 'ok' : view.phase === 'ended' ? 'high' : 'unk'}>{view.phase === 'live' ? 'Streaming' : view.phase === 'connecting' ? 'Connecting' : view.phase === 'ended' ? 'Ended' : 'Not started'}</Pill>
    </div>
    <p role="status" aria-live="polite" data-testid="live-status">{words}{view.replaced ? ' The retained stream had expired, so this is a new stream: see the gap below.' : ''}</p>
    <Banner view={view} fault={current.fault} />
@@ -163,10 +165,10 @@ export function LiveLogView(props: { request: LiveTicketRequest; context: ViewCo
     <li>Gap events: <strong data-testid="live-gaps">{view.gaps}</strong></li>
     <li>Heartbeats: {view.heartbeats}{view.lastHeartbeatAt !== null ? `, last at ${new Date(view.lastHeartbeatAt).toISOString()}` : ''}; events ignored as already handled: {view.duplicates}</li>
    </ul>
-   {view.evicted > 0 && <p role="status" className="banner" data-truncated={view.evicted}><strong>Truncated view.</strong> Only the newest {view.items.length} of {view.items.length + view.evicted} rows and gaps are held. {view.evicted} older items were delivered but are no longer held here.</p>}
+   {view.evicted > 0 && <Callout tone="warn" role="status" testId="live-truncated"><span data-truncated={view.evicted}><strong>Truncated view.</strong> Only the newest {view.items.length} of {view.items.length + view.evicted} rows and gaps are held. {view.evicted} older items were delivered but are no longer held here.</span></Callout>}
    {view.items.length === 0
     ? <p data-testid="live-empty">{view.end?.kind === 'revoked' || view.end?.kind === 'refused' ? 'Nothing is shown.' : running ? 'No row has arrived yet. Rows appear as soon as they are committed.' : 'No rows.'}</p>
     : <LiveItems items={view.items} />}
-  </section>
+  </div>
  );
 }

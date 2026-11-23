@@ -32,6 +32,14 @@ async function as(m:Member,fragment:string):Promise<Page>{
 }
 const artifactPost=(page:Page,operation:string,org:string,project:string,artifactId:string)=>
  postJson(page,'/api/v1/artifacts',{operation,org,project,id:artifactId});
+// Entity-page forms (map frames, compare, open another) are folded under a details "Tools" summary: open it by keyboard, as a person would.
+async function tools(page:Page,label:RegExp):Promise<void>{
+ const d=page.locator('details.tools').filter({has:page.locator('summary',{hasText:label})});
+ if(await d.evaluate((e)=>(e as HTMLDetailsElement).open))return;
+ await d.locator('summary').focus();
+ await page.keyboard.press('Enter');
+ await expect(d).toHaveAttribute('open','');
+}
 
 test.beforeAll(async({browser})=>{
  test.setTimeout(300_000);
@@ -45,7 +53,7 @@ test.afterEach(async()=>{for(const c of contexts.splice(0))await c.close();});
 
 test('release page: identity, label as a separate revision, ancestry from parent edges only, unknown never guessed, label text is text',async()=>{
  const page=await as(seed.admin,hash(seed.org,'releases',{project:seed.project,id:seed.releases.child}));
- await expect(page.getByRole('heading',{name:/^Release /})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'v1.1-renamed',exact:true})).toHaveAttribute('data-release',seed.releases.child);
  // The renamed label is the current display label; the original is kept in the label history; the artifact binding did not change.
  await expect(page.getByTestId('release-label')).toContainText('v1.1-renamed');
  await expect(page.getByRole('list',{name:'Label history'}).getByRole('listitem')).toHaveText(['Revision 1: v1.1','Revision 2: v1.1-renamed']);
@@ -56,6 +64,7 @@ test('release page: identity, label as a separate revision, ancestry from parent
  await expect(page.getByTestId('release-parents').locator('li').first()).toContainText(seed.releases.root);
  await expect(page.getByTestId('release-parents').locator('li').first()).toContainText('registered');
  // Compare: a parent (descendant), a sibling (concurrent), itself, and a release that was never registered (unknown).
+ await tools(page,/Compare with other releases/);
  await page.getByLabel(/Compare with release IDs/).fill([seed.releases.root,seed.releases.sibling,seed.releases.child,seed.releases.unregistered].join(', '));
  await page.getByRole('button',{name:'Compare ancestry'}).click();
  const cmp=page.getByTestId('release-comparisons').locator('li');
@@ -87,7 +96,7 @@ test('release page: a project reader is told it needs an organization administra
  const ungranted=await as(seed.outsider,hash(seed.otherOrg,'releases',{project:seed.project,id:seed.releases.child}));
  const texts:string[]=[];
  for(const p of [stranger,missing,ungranted]){
-  await expect(p.getByRole('heading',{name:/^Release /})).toBeVisible();
+  await expect(p.getByRole('heading',{level:1,name:'Release',exact:true})).toBeVisible();
   const status=p.locator('.status').first();
   await expect(status).toContainText('Not found');
   texts.push((await status.innerText()).replace(/Request\s+[0-9a-f]{32}\.?/,'').trim());
@@ -98,7 +107,7 @@ test('release page: a project reader is told it needs an organization administra
 
 test('issue page: grouping version and hash, occurrences, unknown ancestry, no regression claimed; the stored detail needs telemetry.read; strangers and project readers',async()=>{
  const page=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
- await expect(page.getByRole('heading',{name:/^Issue /})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1}).and(page.locator(`[data-issue="${seed.issue.id}"]`))).toBeVisible();
  await expect(page.getByTestId('grouping-version')).toHaveText('1');
  await expect(page.getByTestId('grouping-hash')).toContainText(seed.issue.fingerprint);
  await expect(page.getByTestId('workflow')).toContainText('open');
@@ -120,7 +129,9 @@ test('issue page: grouping version and hash, occurrences, unknown ancestry, no r
  await expect(stored.locator('.status')).toContainText('telemetry.read');
  await expect(stored.getByTestId('occ-class')).toHaveCount(0);
  await expect(page.getByTestId('issue-expected-version')).toHaveText(/^\d+$/);
+ await page.getByTestId('issue-action-open').first().click();
  for(const label of ['Resolve','Ignore','Stop ignoring','Reopen'])await expect(page.getByRole('radio',{name:label})).toBeVisible();
+ await page.keyboard.press('Escape');
  // An issue that does not exist and one in another scope are the same Not found.
  const unknown=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:id()}));
  await expect(unknown.locator('.status').first()).toContainText('Not found');
@@ -128,8 +139,10 @@ test('issue page: grouping version and hash, occurrences, unknown ancestry, no r
  await expect(stranger.locator('.status').first()).toContainText('Not found');
  await expect(stranger.getByTestId('grouping-hash')).toHaveCount(0);
  const reader=await as(seed.telemetry,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
- await expect(reader.locator('.status').getByText('Persisted issue evidence can only be read by an organization administrator')).toBeVisible();
- await expect(reader.getByTestId('grouping-hash')).toHaveCount(0);
+ // A project reader (telemetry.read only) reads the issue evidence under their own scope (D92), and the stored record behind an occurrence, which their telemetry.read covers.
+ await expect(reader.getByTestId('grouping-hash')).toContainText(seed.issue.fingerprint);
+ await expect(reader.locator('li[data-section="occurrence_detail"]')).toHaveAttribute('data-state','ready');
+ await expect(reader.getByText('can only be read by an organization administrator')).toHaveCount(0);
  // An administrator who also holds telemetry.read stays the administrator: the evidence and the stored detail are both readable.
  const analyst=await as(seed.analyst,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(analyst.getByTestId('grouping-hash')).toContainText(seed.issue.fingerprint);
@@ -137,7 +150,13 @@ test('issue page: grouping version and hash, occurrences, unknown ancestry, no r
 });
 
 const reasonField=(page:Page)=>page.getByLabel(/^Reason/);
+// The action form lives in a dialog opened by the workflow's own button (Resolve error issue, Ignore, Stop ignoring or Reopen); it offers every action as a radio, and a committed change closes it.
+async function openActions(page:Page):Promise<void>{
+ if(await page.getByTestId('issue-action-dialog').count()===0)await page.getByTestId('issue-action-open').first().click();
+ await expect(page.getByRole('form',{name:'Issue action'})).toBeVisible();
+}
 async function submitIssueAction(page:Page,label:string,reason:string,fixedIn?:string):Promise<void>{
+ await openActions(page);
  await page.getByRole('radio',{name:label}).check();
  await reasonField(page).fill(reason);
  if(fixedIn!==undefined)await page.getByLabel(/^Fixed in releases/).fill(fixedIn);
@@ -153,6 +172,7 @@ test('issue actions: ignore, stop ignoring, resolve and reopen are committed by 
  const posts:string[]=[];
  page.on('request',(r)=>{if(r.method()==='POST'&&new URL(r.url()).pathname==='/api/v1/actions')posts.push(r.postData()??'');});
  // No reason: the browser refuses to send, and a blank reason is refused before anything is sent.
+ await openActions(page);
  await page.getByRole('radio',{name:'Ignore'}).check();
  await page.getByRole('button',{name:'Submit: Ignore'}).click();
  expect(await reasonField(page).evaluate((el:HTMLTextAreaElement)=>el.validity.valueMissing)).toBe(true);
@@ -214,6 +234,7 @@ test('issue actions: ignore, stop ignoring, resolve and reopen are committed by 
  await expect(refused).toContainText('Not applied');
  await expect(refused).toContainText('not_found');
  await expect(gone.getByTestId('issue-action-committed')).toHaveCount(0);
+ await second.keyboard.press('Escape');
  await second.getByRole('button',{name:'Reload issue'}).click();
  await expect(second.getByTestId('workflow')).toContainText(`open (revision ${r0+4})`);
  // The same actions without the grant or from another organization are the same not-found at the route, with nothing changed.
@@ -263,6 +284,7 @@ test('real bundle: the frames of the real failure are mapped by the real source 
  const again=await open();
  await expect.poll(()=>again.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
  // A label is never an identity: it is refused as a frame's artifact before anything is sent.
+ await tools(again,/map frames/);
  await again.getByLabel('Build ID').fill(seed.build);
  await again.getByLabel(/^Frames \(/).fill(`v1.1-label-renamed-again ${bundle.frames[0]?.line} 7 boom`);
  await again.getByRole('button',{name:'Resolve frames'}).click();
@@ -312,17 +334,19 @@ test('stored occurrence: class, mechanism, handled and fatal, code, chain and fr
  await expect(d.getByTestId('occ-release-link')).toContainText(seed.real.release);
  await expect(d.getByTestId('occ-trace')).toContainText(seed.real.span);
  await d.getByTestId('occ-release-link').click();
- await expect(page.getByRole('heading',{name:/^Release /})).toContainText(seed.real.release);
+ await expect(page.getByRole('heading',{level:1}).and(page.locator(`[data-release="${seed.real.release}"]`))).toBeVisible();
  await expect(page.getByTestId('release-artifacts')).toContainText(seed.artifact);
  await page.goBack();
- await expect(page.getByRole('heading',{name:/^Issue /})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1}).and(page.locator(`[data-issue="${seed.real.issue}"]`))).toBeVisible();
  await page.getByRole('button',{name:`Show stored detail of occurrence ${seed.real.occurrence}`}).click();
  await page.locator('[data-section="occurrence-detail"]').getByTestId('occ-trace-link').click();
- await expect(page.getByRole('heading',{name:/^Trace /})).toContainText(seed.real.trace);
+ // The trace page's own h1 (another lane) shows the trace ID shortened.
+ await expect(page.getByRole('heading',{name:/^Trace /})).toContainText(seed.real.trace.slice(0,8));
  await expect(page.getByTestId('critical-path')).toContainText('op.request');
 });
 
 async function resolve(page:Page,build:string,lines:string[],sources:boolean):Promise<void>{
+ await tools(page,/map frames/);
  await page.getByLabel('Build ID').fill(build);
  await page.getByLabel(/^Frames \(/).fill(lines.join('\n'));
  if(sources)await page.getByLabel(/Also request source context/).check();
@@ -408,17 +432,18 @@ test('regression: the stored explanation of each occurrence after a resolution i
  await expect(sibling.locator('li[data-section="regression"]')).toHaveAttribute('data-state','empty');
  // The issue link on the release page opens the issue with the same evaluations.
  await rootRows.nth(0).getByRole('link').first().click();
- await expect(root.getByRole('heading',{name:/^Issue /})).toContainText(identity);
+ await expect(root.getByRole('heading',{level:1}).and(root.locator(`[data-issue="${identity}"]`))).toBeVisible();
  await expect(root.getByTestId('regression-list').locator('tbody tr')).toHaveCount(3);
- // A project reader is told the evidence needs an administrator and sees no evaluation; a stranger sees the one not-found.
+ // A project reader reads the same stored evaluations under their own scope (D92); a stranger sees the one not-found.
  const reader=await as(seed.telemetry,hash(seed.org,'issues',target));
- await expect(reader.getByTestId('regression-list')).toHaveCount(0);
+ await expect(reader.getByTestId('regression-list').locator('tbody tr')).toHaveCount(3);
  const stranger=await as(seed.outsider,hash(seed.org,'issues',target));
  await expect(stranger.locator('.status').first()).toContainText('Not found');
  await expect(stranger.getByTestId('regression-list')).toHaveCount(0);
 });
 test('frames: the real map is found for its build, an unmapped position is said so, original frames and reasons are shown, no URL is ever fetched, markup is text',async()=>{
  const page=await as(seed.srcOwner,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
+ await tools(page,/map frames/);
  await expect(page.getByRole('form',{name:'Resolve frames'})).toBeVisible();
  const requests:Request[]=[];
  page.on('request',(r)=>requests.push(r));
@@ -450,7 +475,8 @@ test('frames: the real map is found for its build, an unmapped position is said 
  // Every request the page made is a same-origin POST to an evidence route: no map, source or runtime URL was fetched by the page, and the artifact route was never called from it.
  const made=requests.map((r)=>`${r.method()} ${new URL(r.url()).origin===origin()?new URL(r.url()).pathname:r.url()}`);
  expect(made).toContain('POST /api/v1/evidence/frames');
- for(const m of made)expect(['POST /api/v1/evidence/frames','POST /api/v1/evidence/issue']).toContain(m);
+ // The page also reads the issue list and the incident queue (lineage, title, owner): same-origin POSTs to console routes, never a map, source or runtime URL.
+ for(const m of made)expect(['POST /api/v1/evidence/frames','POST /api/v1/evidence/issue','POST /api/v1/issues/list','POST /api/v1/queue']).toContain(m);
 });
 
 test('frames: a map-only reader asked for sources is told the source grant is missing; a telemetry-only reader sees sanitized frames and no mapping',async()=>{
@@ -517,7 +543,12 @@ test('artifact bytes: the scoped route releases the map without source text to a
 
 test('keyboard and labels: every control is reachable by label and role and the results take focus',async()=>{
  const page=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
- for(const name of ['Open an issue','Resolve frames','Issue action'])await expect(page.getByRole('form',{name})).toBeVisible();
+ await tools(page,/map frames/);
+ for(const name of ['Open an issue','Resolve frames'])await expect(page.getByRole('form',{name})).toBeVisible();
+ await openActions(page);
+ await expect(page.getByRole('form',{name:'Issue action'})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('form',{name:'Issue action'})).toHaveCount(0);
  await page.getByLabel('Build ID').focus();
  await page.keyboard.type(seed.build);
  await page.keyboard.press('Tab');

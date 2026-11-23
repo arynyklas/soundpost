@@ -77,6 +77,14 @@ describe('act() maps the server answer without hiding or inventing a result', ()
   respond(501, { state: 'not_available', reason: 'issue_control_handler_not_built', entity_kind: 'incident', kind: 'ack', target_id: I });
   expect((await act(req(), signal)).state).toBe('not_available');
  });
+ test('501 needs_contracted_installation is a refusal with its own detail, never the not_available answer', async () => {
+  respond(501, { code: 'unsupported', detail: 'needs_contracted_installation', request_id: 'e'.repeat(32) });
+  const error = await act(req({ kind: 'title', payload: { title: 'x' } }), signal).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(ApiFault);
+  expect([(error as ApiFault).status, (error as ApiFault).code, (error as ApiFault).detail]).toEqual([501, 'unsupported', 'needs_contracted_installation']);
+  respond(501, 'not json');
+  expect(await act(req(), signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
+ });
  test('a transport failure is an unknown outcome, never a plain failure', async () => {
   globalThis.fetch = (async () => { throw new TypeError('network down'); }) as unknown as typeof fetch;
   expect(await act(req(), signal).catch((e: unknown) => e)).toBeInstanceOf(OutcomeUnknown);

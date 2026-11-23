@@ -5,10 +5,12 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { SpanTarget } from '../api/types';
 import { CriticalPath } from './CriticalPath';
+import { SpanDetails } from './SpanDetails';
 import { MS, bounds, cleanPath, segment, sid, span, tree, unknownBounds } from './fixture';
 
 const CANARY = '<img src=x onerror="window.__pwn=1"> & <script>window.__pwn=2</script>';
 const render = (el: React.ReactElement): string => renderToStaticMarkup(el);
+const details = (props: React.ComponentProps<typeof SpanDetails>): string => render(React.createElement(SpanDetails, props));
 const noElementsFromText = (html: string): void => {
  expect(html).not.toMatch(/<img/i);
  expect(html).not.toMatch(/<script/i);
@@ -25,7 +27,7 @@ describe('CriticalPath markup', () => {
     span(2, 1, 0, 70, { operation: CANARY }), span(3, 1, 0, 40, { operation: CANARY }),
    ],
   });
-  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), exploreHref: () => '#x' }));
+  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1) })) + details({ path: p, selectedSpan: sid(1), windowHref: () => '#x' });
   noElementsFromText(html);
   expect((html.match(/&lt;img src=x onerror=/g) ?? []).length).toBeGreaterThanOrEqual(5);
   expect(html).not.toMatch(/\sstyle=/i);
@@ -63,7 +65,7 @@ describe('CriticalPath markup', () => {
   expect(html).not.toMatch(/exactly 0/);
  });
  test('accessible structure: labelled regions, a caption per tree, buttons that name the span, the selection exposed to assistive technology', () => {
-  const html = render(React.createElement(CriticalPath, { path: cleanPath(), selectedSpan: sid(2) }));
+  const html = render(React.createElement(CriticalPath, { path: cleanPath(), selectedSpan: sid(2) })) + details({ path: cleanPath(), selectedSpan: sid(2) });
   expect(html).toContain('aria-labelledby="cp-heading"');
   expect(html).toContain('aria-labelledby="cp-detail-heading"');
   expect(html).toContain('<caption>');
@@ -74,7 +76,7 @@ describe('CriticalPath markup', () => {
   expect(html).toContain('tabindex="-1"');
  });
  test('the selected span shows ids of its job, replay and profile as text with the statement that access is checked elsewhere', () => {
-  const html = render(React.createElement(CriticalPath, { path: cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32), replay_id: '2'.repeat(32), profile_id: '3'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] }), selectedSpan: sid(1) }));
+  const html = details({ path: cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32), replay_id: '2'.repeat(32), profile_id: '3'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] }), selectedSpan: sid(1) });
   for (const c of ['1', '2', '3']) expect(html).toContain(c.repeat(32));
   expect(html).toContain('its access is checked there, not here');
  });
@@ -87,7 +89,7 @@ describe('CriticalPath markup', () => {
    { span_id: sid(1), kind: 'error', id: '4'.repeat(32), relation: 'explicit', available: true },
    { span_id: sid(2), kind: 'job', id: '5'.repeat(32), relation: 'explicit', available: true },
   ];
-  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets, targetHref: (t) => (t.kind === 'error' ? null : `#open-${t.kind}-${t.id.slice(0, 2)}`) }));
+  const html = details({ path: p, selectedSpan: sid(1), targets, targetHref: (t) => (t.kind === 'error' ? null : `#open-${t.kind}-${t.id.slice(0, 2)}`) });
   expect(html).toContain('data-target-kind="job" data-target-available="yes"');
   expect(html).toContain('<a href="#open-job-11">Open this job</a>');
   expect(html).toContain('<a href="#open-profile-33">Open this profile</a>');
@@ -103,16 +105,16 @@ describe('CriticalPath markup', () => {
  test('an error occurrence with an issue is an anchor to that issue', () => {
   const p = cleanPath({ spans: [span(1, null, 0, 100), span(2, 1, 0, 70), span(3, 1, 0, 40)] });
   const targets: SpanTarget[] = [{ span_id: sid(1), kind: 'error', id: '4'.repeat(32), relation: 'explicit', available: true, issue_id: '6'.repeat(32) }];
-  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets, targetHref: () => '#issue-x' }));
+  const html = details({ path: p, selectedSpan: sid(1), targets, targetHref: () => '#issue-x' });
   expect(html).toContain('<a href="#issue-x">Open the issue holding this occurrence</a>');
   expect(html).not.toContain('no issue holds it yet');
  });
  test('an empty list of resolved targets shows none, and a view the server did not resolve keeps the plain statement', () => {
   const p = cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] });
-  const resolvedNone = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets: [] }));
+  const resolvedNone = details({ path: p, selectedSpan: sid(1), targets: [] });
   expect(resolvedNone).not.toContain('data-target-kind');
   expect(resolvedNone).not.toContain('its access is checked there, not here');
-  expect(render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1) }))).toContain('its access is checked there, not here');
+  expect(details({ path: p, selectedSpan: sid(1) })).toContain('its access is checked there, not here');
  });
  test('producer gaps and late spans are sections of text, and a hostile reason or operation stays escaped', () => {
   const p = cleanPath({

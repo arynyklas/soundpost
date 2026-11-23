@@ -24,7 +24,7 @@ test('with every shard removed the query route refuses and the page says Error i
  for(let i=0;i<8;i++)await ingestMetric(api,source,{name:`state_s${i}`,at:at(10),value:i+1});
  const page=await (await browser.newContext()).newPage();
  await login(page,reader.email,reader.password);
- const link=`/#${new URLSearchParams({org,projects:p1,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+ const link=`/#${new URLSearchParams({org,projects:p1,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'metrics'})}`;
  const run=async(expression:string):Promise<void>=>{
   await page.getByLabel('Query expression').fill(expression);
   await page.getByRole('button',{name:'Run query',exact:true}).click();
@@ -32,7 +32,7 @@ test('with every shard removed the query route refuses and the page says Error i
 
  // The control: before the loss the same query is ready and shows the ingested values.
  await page.goto(link);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  await run('{__name__=~"state_s.+"}');
  await expect(page.getByTestId('results').locator(`[data-project="${p1}"]`)).toHaveAttribute('data-state','ready');
  await expect(page.locator('.status[data-state="error"]')).toHaveCount(0);

@@ -17,8 +17,10 @@ const password=process.env.SOUNDPOST_ELEVATION_PASSWORD;
 const selected=process.env.SOUNDPOST_TEST_ORG;
 if(!admin||!password||!selected)throw new Error('A real separate MFA-free instance-admin fixture and administered organization are required for the console elevation acceptance');
 
-const linkFor=(org:string,project:string):string=>`/#${new URLSearchParams({org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+const linkFor=(org:string,project:string):string=>`/#${new URLSearchParams({org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'metrics'})}`;
 const UINT64_MAX='18446744073709551615';
+// The minimum data position lives under the collapsed "Advanced query options".
+const advanced=async(page:Page)=>{const d=page.locator('details.exp-advanced');if(!(await d.evaluate((e)=>(e as HTMLDetailsElement).open)))await d.locator('summary').click();};
 async function run(page:Page,expression:string):Promise<void>{
  await page.getByLabel('Query expression').fill(expression);
  await page.getByRole('button',{name:'Run query',exact:true}).click();
@@ -55,7 +57,7 @@ test('a console query carries the audited elevation for an organization it was g
  const {project,metric}=await adminProject(page,'console elevation project');
  const sent=queryBodies(page);
  await reopen(page,linkFor(selected,project));
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  // Control: without elevation the real route refuses (an organization administrator holds no data grant) and the console says it is not available to this account.
  await run(page,`${metric}`);
  await expect(page.getByTestId('results').locator('.status[data-state="unauthorized"]')).toBeVisible();
@@ -63,7 +65,7 @@ test('a console query carries the audited elevation for an organization it was g
  expect(sent.map((b)=>[b.elevation,b.csrf])).toEqual([[undefined,true]]);
 
  const handle=await elevate(page,selected,'Console elevated read acceptance',password);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  const [answer]=await Promise.all([page.waitForResponse((r)=>r.url().endsWith('/api/v1/query')&&r.request().method()==='POST'),run(page,`${metric}`)]);
 expect(answer.status(),`${answer.request().postData()} -> ${await answer.text()} headers ${JSON.stringify(answer.request().headers())}`).toBe(200);
  const results=page.getByTestId('results');
@@ -77,7 +79,7 @@ expect(answer.status(),`${answer.request().postData()} -> ${await answer.text()}
  // Clearing the elevated view takes the handle away: the same query is refused again and nothing elevated stays on the screen.
  await page.getByRole('button',{name:'Clear elevated view'}).click();
  await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden();
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  await run(page,`${metric}`);
  await expect(page.getByTestId('results').locator('.status[data-state="unauthorized"]')).toBeVisible();
  await expect(page.getByTestId('elevated-read')).toHaveCount(0);
@@ -93,9 +95,9 @@ test('an account change detected by the periodic session check drops the elevati
  const reader=await createReader(a,selected,[project]);
  const sent=queryBodies(a);
  await reopen(a,linkFor(selected,project));
- await expect(a.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(a.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  const handle=await elevate(a,selected,'Account change must not carry the elevation',password);
- await expect(a.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(a.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  await run(a,`${metric}`);
  await expect(a.getByTestId('elevated-read')).toBeVisible();
  expect(sent.map((x)=>x.elevation)).toEqual([handle]);
@@ -104,7 +106,7 @@ test('an account change detected by the periodic session check drops the elevati
  await login(b,reader.email,reader.password);
  await expect(a.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden({timeout:30_000});
  await expect(a.getByTestId('elevated-read')).toHaveCount(0);
- await expect(a.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(a.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  await run(a,`${metric}`);
  await expect(a.getByTestId('results').locator(`[data-project="${project}"]`)).toHaveAttribute('data-state','ready');
  expect(sent.map((x)=>x.elevation)).toEqual([handle,undefined]);
@@ -117,7 +119,7 @@ test('the server\'s own throttle on elevation reads that found nothing is the Ra
  await login(page,admin,password);
  const {project,metric}=await adminProject(page,'console rate limit project');
  await reopen(page,linkFor(selected,project));
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  const handle=await elevate(page,selected,'Console rate limited acceptance',password);
  // Control: the elevated read is answered while the credential is under its limit.
  const [answer]=await Promise.all([page.waitForResponse((r)=>r.url().endsWith('/api/v1/query')&&r.request().method()==='POST'),run(page,`${metric}`)]);
@@ -157,13 +159,13 @@ test('a minimum data position the read has not reached is refused by the real qu
  const page=await (await browser.newContext()).newPage();
  await login(page,reader.email,reader.password);
  await reopen(page,linkFor(org,project));
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  // The control: a read with no minimum is complete, and reports the cursors it read through.
  await run(page,`{__name__="${metric}"}`);
  const panel=page.getByTestId('results').locator(`[data-project="${project}"]`);
  await expect(panel).toHaveAttribute('data-state','ready');
  await panel.locator('summary').click();
- const cursor=(await panel.locator('.cursor-list code').first().innerText()).trim();
+ const cursor=(await panel.locator('.exp-cursors code').first().innerText()).trim();
  const [group,index]=cursor.split(':');
  expect(group).toMatch(/^[0-9a-f]{32}$/);
  // The server is shared: while a person reads and types, other writers ingest into this group too (the first cursor of the answer is only the first of the
@@ -179,6 +181,7 @@ test('a minimum data position the read has not reached is refused by the real qu
  expect(landed,`no fresh series was routed to the group ${group} within 600 batches`).toBe(true);
  const beyond=`${group}:${UINT64_MAX}`;
  // Without partial results the engine refuses the whole query: the console says Error (stale) in words and shows no value.
+ await advanced(page);
  await page.getByLabel(/Minimum data position/).fill(beyond);
  await run(page,`{__name__=~"${metric}"}`);
  const error=page.locator('.status[data-state="error"][data-code="stale"]');
@@ -204,6 +207,7 @@ test('a minimum data position the read has not reached is refused by the real qu
  await expect(stale.locator('[data-series]').first()).toBeVisible();
  await expect(stale).not.toHaveAttribute('data-state','empty');
  // A malformed position is refused in the form, before any request.
+ await advanced(page);
  await page.getByLabel(/Minimum data position/).fill('not a cursor');
  await page.getByRole('button',{name:'Run query',exact:true}).click();
  await expect(page.getByTestId('form-problems')).toContainText('minimum data position');

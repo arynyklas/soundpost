@@ -6,8 +6,10 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ErrorOccurrenceView, IssueEvidenceView, OccurrenceEvidence, SafeFrame, ViewContext } from '../api/types';
 import { MAX_FRAMES } from '../evidence/model';
-import { IssueActions } from './IssueActions';
-import { IssueBody } from './IssuePage';
+import { NO_NAMES } from '../shell/ShellContext';
+import type { IssueActionChoice } from './pageModel';
+import { IssueActionForm, IssueActions, actionsFor } from './IssueActions';
+import { IssueBody, IssueHero, ReloadIssueButton } from './IssuePage';
 import { OccurrenceFacts } from './OccurrenceDetail';
 
 const A = 'a'.repeat(32), P = '1'.repeat(32), I = '3'.repeat(32), B = 'b'.repeat(32);
@@ -18,7 +20,7 @@ const view = (over: Partial<IssueEvidenceView> = {}): IssueEvidenceView => ({
  org: A, project: P, issue: I, state: 'ready', occurrences: [occ(O1), occ(O2)], late_history: [occ(O3, { late: true })], sections: [],
  grouping: { grouping_version: 1, fingerprint: 'f'.repeat(8), workflow: 'open', revision: '7', resolution_frontier: [], observed_releases: [], fixed_descendants: [], migration_links: [] }, ...over,
 });
-const body = (v: IssueEvidenceView, selected: string | null, reloading = false): string => renderToStaticMarkup(React.createElement(IssueBody, { context, project: P, id: I, view: v, selected, onSelect: () => undefined, reloading, onReload: () => undefined }));
+const body = (v: IssueEvidenceView, selected: string | null): string => renderToStaticMarkup(React.createElement(IssueBody, { context, project: P, id: I, view: v, selected, onSelect: () => undefined, href: (section) => `#${section}` }));
 const frame = (n: number): SafeFrame => ({ module_id: 'app', function: `f${n}`, artifact_id: A, line: n, column: n, in_app: true, async: false });
 const occurrenceView = (frames: SafeFrame[]): ErrorOccurrenceView => ({ org: A, project: P, issue: I, occurrence: O1, state: 'ready', sections: [], detail: { exception_class: 'Error', mechanism: 'onerror', handled: false, fatal: true, code: null, build_id: B, frames } });
 const facts = (frames: SafeFrame[]): string => renderToStaticMarkup(React.createElement(OccurrenceFacts, { context, project: P, view: occurrenceView(frames) }));
@@ -56,34 +58,65 @@ describe('the issue body shows the stored detail of exactly the occurrence that 
  });
 });
 
-describe('the issue body carries the action panel for the revision the server stated', () => {
- test('the panel shows the revision it acts on, and Reload is disabled while the page re-reads', () => {
-  expect(body(view(), null)).toContain('data-testid="issue-expected-version">7<');
-  expect(body(view({ grouping: undefined }), null)).toContain('data-testid="issue-expected-version">unknown<');
-  expect(body(view(), null)).not.toMatch(/<button[^>]*disabled=""[^>]*>Reload issue/);
-  expect(body(view(), null, true)).toMatch(/<button[^>]*disabled=""[^>]*>Reload issue/);
+describe('the issue hero states the revision the server stated, and the actions follow the workflow', () => {
+ const hero = (v: IssueEvidenceView | undefined): string => renderToStaticMarkup(React.createElement(IssueHero, { id: I, context, view: v, summary: { kind: 'loading' }, lineage: [], actions: null }));
+ test('the revision is the one h1 page figure; with no stored grouping no revision is claimed', () => {
+  expect(hero(view())).toContain('data-testid="issue-expected-version">7<');
+  expect(hero(view({ grouping: undefined }))).not.toContain('issue-expected-version');
+  expect(hero(view())).toMatch(/<h1 tabindex="-1" data-issue="3{32}">Error issue<\/h1>/);
+  expect(hero(undefined).match(/<h1/g)).toHaveLength(1);
  });
- test('the page being re-read reaches the action panel: it is busy exactly when the body is reloading', () => {
-  expect(body(view(), null)).toContain('aria-busy="false"');
-  expect(body(view(), null, true)).toContain('aria-busy="true"');
+ test('an open issue offers resolve and ignore, an ignored one stop ignoring, a resolved one reopen; an unknown state offers none', () => {
+  expect(actionsFor('open')).toEqual(['resolve', 'ignore']);
+  expect(actionsFor('ignored')).toEqual(['unignore']);
+  expect(actionsFor('resolved')).toEqual(['reopen']);
+  expect(actionsFor(undefined)).toEqual([]);
+  const html = renderToStaticMarkup(React.createElement(IssueActions, { org: A, project: P, view: view(), busy: false, names: NO_NAMES, owner: undefined, incidents: [], onChanged: () => undefined }));
+  expect(html).toContain('Resolve error issue');
+  expect(html).toContain('>Ignore<');
+  expect(html).toContain('Reassign');
+  expect(html).not.toContain('<dialog');
  });
+});
+
+describe('the reload issue button', () => {
+ const button = (reloading: boolean): string => renderToStaticMarkup(React.createElement(ReloadIssueButton, { reloading, onReload: () => undefined }));
+ test('is disabled exactly while the page re-reads', () => {
+  expect(button(true)).toContain('disabled=""');
+  expect(button(false)).not.toContain('disabled');
+  expect(button(true)).toContain('Reload issue');
+ });
+});
+
+describe('the action form', () => {
+ const form = (busy: boolean, initialKind: IssueActionChoice = 'resolve'): string => renderToStaticMarkup(React.createElement(IssueActionForm, { org: A, project: P, view: view(), busy, initialKind, incidents: [], onChanged: () => undefined, onCommitted: () => undefined, onPending: () => undefined, onCancel: () => undefined }));
  test('while the page re-reads, the whole action form is disabled: nothing can be submitted against a revision about to change', () => {
-  const idle = renderToStaticMarkup(React.createElement(IssueActions, { org: A, project: P, view: view(), busy: false, onChanged: () => undefined }));
-  const busy = renderToStaticMarkup(React.createElement(IssueActions, { org: A, project: P, view: view(), busy: true, onChanged: () => undefined }));
+  const idle = form(false);
+  const busy = form(true);
   expect(idle).not.toContain('disabled');
   expect(busy).toContain('aria-busy="true"');
   expect(busy).toMatch(/<fieldset disabled="">/);
   expect(busy).toMatch(/<textarea[^>]*disabled=""/);
   expect(busy).toMatch(/<button[^>]*disabled=""[^>]*>Submit: Resolve/);
  });
- test('resolve is the first choice and carries the fix-release field; the reason is required', () => {
-  const html = renderToStaticMarkup(React.createElement(IssueActions, { org: A, project: P, view: view(), busy: false, onChanged: () => undefined }));
+ test('the choice the person opened is the checked one and carries the fix-release field only for a resolve; the reason is required', () => {
+  const html = form(false);
   expect(html).toContain('<input type="radio" name="issue-action" checked="" value="resolve"/>');
   expect(html.match(/checked=""/g)).toHaveLength(1);
   expect(html).toContain('name="fixed-in"');
   expect(html).toMatch(/<textarea[^>]*name="reason"[^>]*required=""/);
   for (const label of ['Resolve', 'Ignore', 'Stop ignoring', 'Reopen']) expect(html).toContain(label);
   expect(html).toContain('data-outcome="idle"');
+  const reopen = form(false, 'reopen');
+  expect(reopen).toContain('checked="" value="reopen"');
+  expect(reopen).not.toContain('name="fixed-in"');
+ });
+ test('it says in words what the action does to the other entities, which keep their own lifecycles', () => {
+  const html = form(false);
+  expect(html).toContain('data-testid="issue-action-consequences"');
+  expect(html).toContain('Alert rules and their conditions keep their own state.');
+  expect(html).toContain('Releases are unaffected.');
+  expect(html).toContain('nothing is applied and you see their change');
  });
 });
 

@@ -151,3 +151,15 @@ export function describeWriteFailure(error: unknown): { kind: FailureKind; text:
  }
  return { kind: 'failed', text: 'The change could not be confirmed. Nothing is shown as saved; reload to see the current settings.' };
 }
+
+export interface UrgencyStep { id: 'urgent' | 'reminders' | 'suppression' | 'digest'; title: string; text: string; badge: string }
+/** The notification policy the server holds, told as the steps a person reads. Every number is the committed one; nothing the policy contract does not carry (routes, escalation, windows) is stated. */
+export function urgencySteps(p: NotificationPolicyView): UrgencyStep[] {
+ const codes = p.critical_codes.length === 0 ? 'no critical operation code is set' : `critical codes ${p.critical_codes.join(', ')}`;
+ return [
+  { id: 'urgent', title: 'What is urgent', text: `A change is urgent when a critical code occurs (${codes}), a regression reaches ${p.regression_min} occurrence${p.regression_min === 1 ? '' : 's'}, or the window has at least ${p.min_operations} operations and ${p.min_failures} failures at a failure rate of at least ${basisPointsText(p.rate_basis_points)}%.`, badge: p.source === 'default' ? 'default policy' : `own policy, revision ${p.revision}` },
+  { id: 'reminders', title: 'Reminders', text: `The first reminder comes after ${durationWords(p.first_reminder_ns)}, then one every ${durationWords(p.reminder_every_ns)}.`, badge: `${durationWords(p.first_reminder_ns)} · ${durationWords(p.reminder_every_ns)}` },
+  { id: 'suppression', title: 'Snooze and maintenance', text: `A snooze or a maintenance window lasts at most ${durationWords(p.max_suppression_ns)}.`, badge: `at most ${durationWords(p.max_suppression_ns)}` },
+  { id: 'digest', title: 'Digest', text: `Digests are cut in the time zone ${p.default_zone === '' ? 'UTC' : p.default_zone}.`, badge: p.default_zone === '' ? 'UTC' : p.default_zone },
+ ];
+}

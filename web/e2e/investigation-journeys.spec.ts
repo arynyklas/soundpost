@@ -55,10 +55,10 @@ async function keyTo(target:Locator,max=200):Promise<number>{
 /** Enter on a control the keyboard has reached. */
 async function activate(target:Locator):Promise<void>{await keyTo(target);await page.keyboard.press('Enter');}
 async function typeInto(target:Locator,text:string):Promise<void>{await keyTo(target);await page.keyboard.press('Control+A');await page.keyboard.type(text);}
-const section=(name:string):Locator=>page.getByRole('navigation',{name:'Investigation sections'}).getByRole('link',{name,exact:true});
+const section=(name:string):Locator=>page.getByRole('navigation',{name:'Main',exact:true}).getByRole('link',{name,exact:true});
 async function goTo(name:string):Promise<void>{
  await activate(section(name));
- await expect(page.getByRole('heading',{level:2,name:`Investigation: ${name}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name})).toBeFocused();
 }
 /** The sign-in form with the keyboard alone: typed characters and Enter. */
 async function signIn(email:string,password:string):Promise<void>{
@@ -67,15 +67,18 @@ async function signIn(email:string,password:string):Promise<void>{
  await keyTo(page.getByLabel('Password',{exact:true}));
  await page.keyboard.type(password);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:1,name:'Account access'})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();
 }
 /** The window the console must print for a start and end in nanoseconds: computed here from the seeded values, not by the console's own formatter. */
 const windowWords=(start:string,end:string):string=>{
  const at=(ns:string):string=>new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',dateStyle:'medium',timeStyle:'medium'}).format(new Date(Number(BigInt(ns)/1_000_000n)));
  return `${at(start)} to ${at(end)} (end excluded)`;
 };
-/** The organization, project and window are on screen, and the window is the one the deep link carried (the seeded start and end, both ends). */
+/** The organization, project and window are on screen (the console keeps them under the "Scope identifiers" disclosure, which a person opens with Enter), and the window is the one the deep link carried (the seeded start and end, both ends). */
 async function scopeVisible():Promise<void>{
+ const details=page.locator('details.scope-details');
+ if(!await details.evaluate((e)=>(e as HTMLDetailsElement).open))await activate(details.locator('summary'));
+ await expect(details).toHaveAttribute('open','');
  await expect(page.getByTestId('visible-org')).toHaveText(scope.org);
  await expect(page.getByTestId('visible-projects')).toHaveText(scope.project);
  const win=page.getByRole('term').filter({hasText:'Window'}).locator('xpath=following-sibling::dd[1]');
@@ -118,15 +121,12 @@ test('sign in with the keyboard alone, then open a native deep link: the scope i
  await signIn(seed.explore.reader.email,seed.explore.reader.password);
  // A deep link is an address, so opening it is the one step that is not a key press on the page.
  await page.goto(deepLink(seed,'queue'));
- await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:'Incidents'})).toBeFocused();
  await scopeVisible();
 });
 
-test('log: Explore with LogQL chosen by the keyboard returns the real ingested lines',async()=>{
- await goTo('Explore');
- await keyTo(page.getByRole('radio',{name:'PromQL',exact:true})); // Tab reaches only the checked radio of a group; the arrow key moves the choice
- await page.keyboard.press('ArrowRight');
- await expect(page.getByRole('radio',{name:'LogQL',exact:true})).toBeChecked();
+test('log: the Logs screen returns the real ingested lines for a query typed with the keyboard',async()=>{
+ await goTo('Logs');
  await typeInto(page.getByLabel('Query expression'),'{app="web"}');
  await activate(page.getByRole('button',{name:'Run query',exact:true}));
  await expect(page.getByTestId('evaluated-with')).toBeVisible();
@@ -135,13 +135,9 @@ test('log: Explore with LogQL chosen by the keyboard returns the real ingested l
  await record('log',{state:'ready',evaluatedWith:(await page.getByTestId('evaluated-with').innerText()).replace(/\s+/g,' ').trim()});
 });
 
-test('metric: PromQL chosen by the keyboard returns the exact ingested sample',async()=>{
- await keyTo(page.getByRole('radio',{name:'LogQL',exact:true}));
- await page.keyboard.press('ArrowLeft');
- await expect(page.getByRole('radio',{name:'PromQL',exact:true})).toBeChecked();
- await keyTo(page.getByRole('radio',{name:'Range over the selected window',exact:true}));
- await page.keyboard.press('ArrowLeft');
- await expect(page.getByRole('radio',{name:'Instant',exact:true})).toBeChecked();
+test('metric: the Metrics screen returns the exact ingested sample for a query typed with the keyboard',async()=>{
+ await goTo('Metrics');
+ await expect(page.getByRole('radio',{name:'Instant',exact:true})).toBeChecked(); // Metrics opens on an instant query
  await typeInto(page.getByLabel('Query expression'),'explore_gauge');
  await activate(page.getByRole('button',{name:'Run query',exact:true}));
  const panel=page.getByTestId('results').locator(`[data-project="${seed.explore.p1}"]`);
@@ -154,7 +150,8 @@ test('replay: the keyboard opens the masked replay and steps it; the viewer repo
  await goTo('Replays');
  await typeInto(page.getByLabel('Replay ID'),seed.replays.clean.replay);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Replay ${seed.replays.clean.replay}`})).toBeFocused();
+ // The replay page's own h1 names the replay by its short identifier (the full one is the code element's title).
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Replay ${seed.replays.clean.replay.slice(0,8)}`)})).toBeFocused();
  await expect(page.getByTestId('replay-frame')).toBeVisible();
  await activate(page.getByRole('button',{name:'Step to the next event'}));
  await expect(page.getByTestId('viewer-status')).toHaveAttribute('data-status','ready');
@@ -179,7 +176,7 @@ test('profile: the keyboard opens the native profile with its measurement kinds 
  await goTo('Profiles');
  await typeInto(page.getByLabel('Profile ID'),seed.profile);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Profile ${seed.profile}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Profile ${seed.profile.slice(0,8)}`)})).toBeFocused();
  await expect(page.locator('main [data-state="measured"]').first()).toBeVisible();
  await expect(page.locator('main [data-state="not_measured"]').first()).toBeVisible();
  await record('profile',{state:'ready',profile:seed.profile});
@@ -203,7 +200,7 @@ test('an organization administrator signs in with the keyboard alone and opens t
  await page.goto('/');
  await signIn(real.reader.email,real.reader.password);
  await page.goto(realLink(real,'queue'));
- await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:'Incidents'})).toBeFocused();
  await scopeVisible();
 });
 
@@ -211,7 +208,7 @@ test('queue to incident: the incident the runner opened from an ingested error i
  const row=page.locator(`tr[data-incident="${real.incident}"]`);
  await expect(row).toBeVisible();
  await activate(row.getByRole('link'));
- await expect(page.getByRole('heading',{level:2,name:`Incident ${real.incident}`})).toBeFocused();
+ await expect(page.locator('h1.inc-title')).toBeFocused();
  await expect(page.getByTestId('revision')).toBeVisible();
  await expect(page.getByTestId('source-badge')).toBeVisible();
  await record('queue-to-incident',{state:'ready',incident:real.incident,words:await page.getByTestId('response-words').innerText()});
@@ -222,14 +219,15 @@ test('trace to source: frontend, API and database in one trace, the real failure
  await goTo('Traces');
  await typeInto(page.getByLabel('Trace ID'),real.trace.trace);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${real.trace.trace}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Trace ${real.trace.trace.slice(0,8)}`)})).toBeFocused();
  await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(3);
  await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('dependency boundary');
  await activate(page.getByRole('button',{name:'Show details of span op.api, server, level 2'}));
  const details=page.getByTestId('span-details');
  await expect(details.locator('[data-target-kind="error"][data-target-available="yes"]')).toContainText(real.trace.occurrence);
  await activate(details.getByRole('link',{name:'Open the issue holding this occurrence'}));
- await expect(page.getByRole('heading',{level:2,name:`Issue ${real.ev.real.issue}`})).toBeFocused();
+ const issueHeading=page.getByRole('heading',{level:1}).and(page.locator(`[data-issue="${real.ev.real.issue}"]`));
+ await expect(issueHeading).toBeFocused();
  await activate(page.getByRole('button',{name:`Show stored detail of occurrence ${real.trace.occurrence}`}));
  const frames=page.getByTestId('stored-frames').getByRole('article');
  await expect(frames).toHaveCount(2);
@@ -248,7 +246,9 @@ test('trace to source: frontend, API and database in one trace, the real failure
 
 test('release: the occurrence names the release it ran in; the keyboard opens the registered release with its artifact binding and its ancestry',async()=>{
  await activate(page.getByTestId('occ-release-link'));
- await expect(page.getByRole('heading',{level:2,name:`Release ${real.ev.real.release}`})).toBeFocused();
+ const releaseHeading=page.getByRole('heading',{level:1}).and(page.locator(`[data-release="${real.ev.real.release}"]`));
+ await expect(releaseHeading).toContainText('v1.1');
+ await expect(releaseHeading).toBeFocused();
  await expect(page.getByTestId('release-label')).toContainText('v1.1');
  await expect(page.getByTestId('release-artifacts')).toContainText(real.ev.artifact);
  await expect(page.getByTestId('release-artifacts')).toContainText(real.ev.debugId);
@@ -263,8 +263,10 @@ test('job: a run the real Python SDK produced (attempt 1 raised, the retry succe
  await goTo('Jobs');
  const row=page.locator(`[data-testid=job-row][data-job="${job}"]`);
  await expect(row).toContainText('Succeeded');
- await activate(row.getByRole('button',{name:`Open job ${job}`}));
- await expect(page.getByRole('heading',{name:`Job ${job}`})).toBeVisible();
+ await activate(row.getByRole('link',{name:`Open job ${job}`}));
+ const jobHeading=page.getByRole('heading',{level:1,name:'Job',exact:true});
+ await expect(jobHeading).toBeVisible();
+ await expect(jobHeading).toHaveAttribute('data-job',job);
  await expect(page.getByTestId('job-health')).toContainText('Current job health: Succeeded');
  const runRow=page.locator(`[data-testid=run-row][data-run="${run}"]`);
  await expect(runRow).toContainText('Run recovery: Recovered after retry');
@@ -297,13 +299,15 @@ test('outage: a schedule observer whose data path lagged leaves a scheduled job 
  expect(fed.status,fed.text).toBe(200);
  // The previous case ended inside the Jobs section: activating the Jobs link there re-reads the section in place (same address, so no route
  // change to announce and focus stays on the link). The heading is announced when the section changes, so leave and come back.
- await goTo('Queue');
+ await goTo('Incidents');
  await goTo('Jobs');
  const row=page.locator(`[data-testid=job-row][data-job="${job}"]`);
  await expect(row).toContainText('Unknown');
  await expect(row).not.toContainText('Missed');
- await activate(row.getByRole('button',{name:`Open job ${job}`}));
- await expect(page.getByRole('heading',{name:`Job ${job}`})).toBeVisible();
+ await activate(row.getByRole('link',{name:`Open job ${job}`}));
+ const jobHeading=page.getByRole('heading',{level:1,name:'Job',exact:true});
+ await expect(jobHeading).toBeVisible();
+ await expect(jobHeading).toHaveAttribute('data-job',job);
  await expect(page.getByTestId('job-health')).toContainText('Unknown');
  await expect(page.getByTestId('job-health')).not.toContainText('Missed');
  await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
@@ -331,7 +335,7 @@ test('the investigator of the reference estate signs in with the keyboard alone 
  await page.goto('/');
  await signIn(estate.analyst.email,estate.analyst.password);
  await page.goto(estateLink(estate,'queue'));
- await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:'Incidents'})).toBeFocused();
  await scopeVisible();
 });
 
@@ -339,7 +343,7 @@ test('trace (page to gateway to API to PostgreSQL and the dependency): eight rea
  await goTo('Traces');
  await typeInto(page.getByLabel('Trace ID'),estate.priced.trace);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.priced.trace}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Trace ${estate.priced.trace.slice(0,8)}`)})).toBeFocused();
  await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(8);
  await expect(page.getByTestId('observed-duration')).toContainText('Observed duration of this trace: exactly');
  await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('3 dependency calls end at the dependency boundary');
@@ -352,18 +356,20 @@ test('trace (gateway to dependency): the call to the uninstrumented dependency e
  const details=page.getByTestId('span-details');
  await expect(details).toContainText('Limits of this span');
  await expect(details).toContainText('dependency boundary: internals not captured');
+ await goTo('Traces');
  await typeInto(page.getByLabel('Trace ID'),estate.dark.trace);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.dark.trace}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Trace ${estate.dark.trace.slice(0,8)}`)})).toBeFocused();
  await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(4);
  await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('1 dependency call ends at the dependency boundary');
  await record('trace-gateway-dependency',{state:'ready',trace:estate.dark.trace,spans:4});
 });
 
 test('trace to source: the failure the real page threw, its issue and its frames mapped by the real source map of the real build',async()=>{
+ await goTo('Traces');
  await typeInto(page.getByLabel('Trace ID'),estate.unpriced.trace);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.unpriced.trace}`})).toBeFocused();
+ await expect(page.getByRole('heading',{level:1,name:new RegExp(`^Trace ${estate.unpriced.trace.slice(0,8)}`)})).toBeFocused();
  await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(8);
  await activate(page.getByRole('button',{name:'Show details of span ui.action, internal, level 1'}));
  const details=page.getByTestId('span-details');
@@ -372,7 +378,9 @@ test('trace to source: the failure the real page threw, its issue and its frames
  const occurrence=/Error occurrence ([0-9a-f]{32})/.exec(await target.innerText())?.[1]??'';
  expect(occurrence).toBe(estate.occurrence);
  await activate(details.getByRole('link',{name:'Open the issue holding this occurrence'}));
- await expect(page.getByRole('heading',{level:2,name:/^Issue [0-9a-f]{32}$/})).toBeFocused();
+ const issueHeading=page.getByRole('heading',{level:1});
+ await expect(issueHeading).toHaveAttribute('data-issue',/^[0-9a-f]{32}$/);
+ await expect(issueHeading).toBeFocused();
  await activate(page.getByRole('button',{name:`Show stored detail of occurrence ${occurrence}`}));
  const frames=page.getByTestId('stored-frames').getByRole('article');
  await expect(frames.first()).toBeVisible();

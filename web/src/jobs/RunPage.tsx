@@ -6,6 +6,7 @@ import { encodeHash, formatNs, scopeKey, type ViewContext } from '../app/context
 import { StatusPanel } from '../app/StatusPanel';
 import { EvidenceSections } from '../evidence/Sections';
 import { dataOf, useEvidence } from '../evidence/useEvidence';
+import { DataTable, type Column } from '../ui/primitives';
 import {
  CANCELLED_NOTE, CORRECTION_NOTE, ERROR_LINK_NOTE, FINAL_ATTEMPT_TEXT, LATE_RESULT_TEXT, LATE_STARTED_TEXT, TRACE_LINK_NOTE, attemptHeadline, correctionText, dedupText, finalOrdinal, foldText, healthBasisText, jobReasonText,
  originalResultText, overlapText, readChange, runRecoveryText, runStatusWord, scheduledText, supersededText,
@@ -45,42 +46,51 @@ export function Refreshing(props: { active: boolean }): React.JSX.Element | null
  return props.active ? <p role="status" data-testid="refreshing">Refreshing: the answer shown is the previous one until the new answer arrives.</p> : null;
 }
 
-function AttemptRow(props: { attempt: JobAttemptView; format: (ns: string) => string; traceHref: (trace: Id) => string }): React.JSX.Element {
- const { attempt: a, format, traceHref } = props;
- return (
-  <tr data-testid="attempt-row" data-attempt={a.id} data-state={a.effective}>
-   <th scope="row">
-    <p><strong>{attemptHeadline(a)}</strong></p>
-    <p>Attempt ID <code>{a.id}</code></p>
-    {a.final && <p>{FINAL_ATTEMPT_TEXT}</p>}
-    {a.effective === 'cancelled' && <p>{CANCELLED_NOTE}</p>}
-   </th>
-   <td>
-    <p>{originalResultText(a, format)}</p>
-    {a.corrections.length > 0 && (
-     <>
-      <ul aria-label="Corrections of this attempt">
-       {a.corrections.map((c) => <li key={c.version} data-testid="correction">{correctionText(c, format)}</li>)}
-      </ul>
-      <p>{CORRECTION_NOTE}</p>
-     </>
-    )}
-   </td>
-   <td>
-    <p>{`Observed at ${format(a.observed_ns)}`}</p>
-    <p>{`${a.events_accepted} events accepted for this attempt`}</p>
-    {a.after_newer_occurrence && <><p>{LATE_STARTED_TEXT}</p><p>{LATE_RESULT_TEXT}</p></>}
-    {(a.cause_trace !== undefined || a.cause_error !== undefined) && (
-     <div data-testid="cause-links">
-      {a.cause_trace !== undefined && <p>Cause trace <code>{a.cause_trace}</code> <a href={traceHref(a.cause_trace)}>Open this trace in the Traces view</a></p>}
-      {a.cause_trace !== undefined && <p>{TRACE_LINK_NOTE}</p>}
-      {a.cause_error !== undefined && <p>Cause error <code>{a.cause_error}</code></p>}
-      {a.cause_error !== undefined && <p>{ERROR_LINK_NOTE}</p>}
-     </div>
-    )}
-   </td>
-  </tr>
- );
+function attemptColumns(format: (ns: string) => string, traceHref: (trace: Id) => string): Column<JobAttemptView>[] {
+ return [
+  {
+   key: 'attempt', header: 'Attempt', cell: (a) => (
+    <>
+     <p><strong>{attemptHeadline(a)}</strong></p>
+     <p>Attempt ID <code>{a.id}</code></p>
+     {a.final && <p>{FINAL_ATTEMPT_TEXT}</p>}
+     {a.effective === 'cancelled' && <p>{CANCELLED_NOTE}</p>}
+    </>
+   ),
+  },
+  {
+   key: 'result', header: 'Result', cell: (a) => (
+    <>
+     <p>{originalResultText(a, format)}</p>
+     {a.corrections.length > 0 && (
+      <>
+       <ul aria-label="Corrections of this attempt">
+        {a.corrections.map((c) => <li key={c.version} data-testid="correction">{correctionText(c, format)}</li>)}
+       </ul>
+       <p>{CORRECTION_NOTE}</p>
+      </>
+     )}
+    </>
+   ),
+  },
+  {
+   key: 'evidence', header: 'Evidence', cell: (a) => (
+    <>
+     <p>{`Observed at ${format(a.observed_ns)}`}</p>
+     <p>{`${a.events_accepted} events accepted for this attempt`}</p>
+     {a.after_newer_occurrence && <><p>{LATE_STARTED_TEXT}</p><p>{LATE_RESULT_TEXT}</p></>}
+     {(a.cause_trace !== undefined || a.cause_error !== undefined) && (
+      <div data-testid="cause-links">
+       {a.cause_trace !== undefined && <p>Cause trace <code>{a.cause_trace}</code> <a href={traceHref(a.cause_trace)}>Open this trace in the Traces view</a></p>}
+       {a.cause_trace !== undefined && <p>{TRACE_LINK_NOTE}</p>}
+       {a.cause_error !== undefined && <p>Cause error <code>{a.cause_error}</code></p>}
+       {a.cause_error !== undefined && <p>{ERROR_LINK_NOTE}</p>}
+      </div>
+     )}
+    </>
+   ),
+  },
+ ];
 }
 
 /** One run of a job view with every attempt, in ordinal order. Recovery is this run's own; whether the run is the basis of the job's current health is a separate statement; a failed attempt stays visible with its original result whatever came after it. */
@@ -93,9 +103,9 @@ export function RunDetailView(props: { view: JobView; timezone: string; traceHre
  const fold = foldText(run.occurrence);
  const accepted = run.attempts.reduce((sum, a) => sum + a.events_accepted, 0);
  return (
-  <div data-testid="run-detail" data-run={run.id}>
+  <div data-testid="run-detail" data-run={run.id} className="col g12">
    <p data-testid="run-recovery">{runRecoveryText(run, finalOrdinal(run.attempts))}</p>
-   <div data-testid="run-health-basis">
+   <div data-testid="run-health-basis" className="job-block">
     <p>{healthBasisText(health.status, run.basis_of_health)}</p>
     {run.superseded_by !== undefined && <p>{supersededText(run.superseded_by)}</p>}
    </div>
@@ -109,11 +119,10 @@ export function RunDetailView(props: { view: JobView; timezone: string; traceHre
     {run.overlaps.length > 0 && <li>Overlapping run IDs: {run.overlaps.map((id, i) => <React.Fragment key={id}>{i > 0 ? ', ' : ''}<code>{id}</code></React.Fragment>)}</li>}
    </ul>
    <p data-testid="run-dedup">{dedupText(run.attempts.length, accepted)}</p>
-   <table className="data-table" aria-label="Attempts of this run">
-    <caption>Attempts of this run in ordinal order. A failed attempt stays visible with its original result whatever came after it.</caption>
-    <thead><tr><th scope="col">Attempt</th><th scope="col">Result</th><th scope="col">Evidence</th></tr></thead>
-    <tbody>{run.attempts.map((a) => <AttemptRow key={a.id} attempt={a} format={format} traceHref={traceHref} />)}</tbody>
-   </table>
+   <DataTable
+    label="Attempts of this run" caption="Attempts of this run in ordinal order. A failed attempt stays visible with its original result whatever came after it." rows={run.attempts} rowKey={(a) => a.id} columns={attemptColumns(format, traceHref)}
+    rowAttrs={(a) => ({ 'data-testid': 'attempt-row', 'data-attempt': a.id, 'data-state': a.effective })}
+   />
   </div>
  );
 }
@@ -128,14 +137,16 @@ export function RunPage(props: { jobId: Id; runId: Id; context: ViewContext; pro
  const view = dataOf(evidence.state);
  const traceHref = (trace: Id): string => encodeHash(context, 'traces', '', null, { project, id: trace });
  return (
-  <section className="panel" aria-labelledby="run-heading" data-testid="run-page">
-   <h3 id="run-heading">Run <code>{runId}</code></h3>
-   <p>Job <code>{jobId}</code>. Times are shown in {context.timezone}.</p>
-   <Refreshing active={evidence.reloading} />
-   <StatusPanel state={evidence.state} />
-   {view && <EvidenceSections sections={view.sections} />}
-   {view && <ReasonNotes testid="run-reason" reason={view.reason} sections={view.sections} />}
-   {view && <RunDetailView view={view} timezone={context.timezone} traceHref={traceHref} />}
+  <section className="card" aria-labelledby="run-heading" data-testid="run-page">
+   <div className="card-head"><h2 id="run-heading">Run <code>{runId}</code></h2></div>
+   <div className="card-body col g12">
+    <p>Job <code>{jobId}</code>. Times are shown in {context.timezone}.</p>
+    <Refreshing active={evidence.reloading} />
+    <StatusPanel state={evidence.state} />
+    {view && <EvidenceSections sections={view.sections} />}
+    {view && <ReasonNotes testid="run-reason" reason={view.reason} sections={view.sections} />}
+    {view && <RunDetailView view={view} timezone={context.timezone} traceHref={traceHref} />}
+   </div>
   </section>
  );
 }

@@ -1,5 +1,5 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
-import { SECTIONS, isId } from './context';
+import { isId, sectionOf } from './context';
 
 /** D33: the server also serves the console shell for GET on a path-shaped link /<section>[/<entity>]?org=..&projects=..
  * (IDs only), and the console, still hash-routed, rewrites that path to the equivalent hash route before it renders and
@@ -14,7 +14,7 @@ const SCOPE_PARAMS = ['org', 'env', 'start', 'end', 'tz'] as const;
 export function hashForPath(pathname: string, search: string): string | null {
  if (pathname.includes('\\') || !pathname.startsWith('/')) return null;
  const [section = '', entity, ...rest] = pathname.slice(1).split('/');
- if (rest.length > 0 || !SECTIONS.some((s) => s.id === section)) return null;
+ if (rest.length > 0 || sectionOf(section) === undefined) return null;
  const entityParam = ENTITY_PARAM[section];
  if (entity !== undefined && (entityParam === undefined || entity === '')) return null;
  const query = new URLSearchParams(search);

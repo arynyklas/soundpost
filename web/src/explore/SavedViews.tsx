@@ -2,7 +2,8 @@
 import * as React from 'react';
 import { deleteSavedView, isAbort, listSavedViews, saveSavedView, stateOfFault } from '../api/client';
 import type { Id, LoadState, SavedView } from '../api/types';
-import { formatNs, scopeKey, type ViewContext } from '../app/context';
+import { encodeHash, formatNs, scopeKey, type ViewContext } from '../app/context';
+import { Callout, Card } from '../ui/primitives';
 import { StatusPanel } from '../app/StatusPanel';
 import { newCommandId } from '../incidents/model';
 import type { QueryForm } from './form';
@@ -99,67 +100,74 @@ export function SavedViews(props: { context: ViewContext; registry: readonly Pro
  };
  const pending = outcome.kind === 'pending';
  return (
-  <section className="panel" aria-labelledby="saved-heading" data-section="saved-views">
-   <h3 id="saved-heading">Saved views</h3>
-   <p>Saving is an explicit action. The query text is stored on the server under the project you choose and can then be read by every account that holds telemetry.read on that project; until you press Save it stays in this page&rsquo;s memory only, and nothing is ever kept in this browser&rsquo;s storage. A project keeps at most {MAX_VIEWS_PER_PROJECT} saved views.</p>
-   <form aria-label="Save this query as a view" onSubmit={(e) => { e.preventDefault(); save(false); }} aria-busy={pending}>
-    <fieldset disabled={pending}>
-     <legend>Save the query in the form above</legend>
-     <div className="field-row">
-      <label>Name (at most {MAX_NAME_BYTES} bytes) <input name="view-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></label>
-      <label>Owning project <select name="view-owner" value={ownerProject} onChange={(e) => setOwner(e.target.value)}>{form.projects.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
-      <button type="submit" className="primary">Save as a new view</button>
-      {editing !== null && <button type="button" onClick={() => save(true)} data-testid="saved-update">Update &ldquo;{editing.name}&rdquo;</button>}
-     </div>
-    </fieldset>
-   </form>
-   <div data-outcome={outcome.kind} aria-live="polite">
-    {outcome.kind === 'pending' && <p role="status"><strong>Waiting for the server.</strong> Nothing has been saved yet.</p>}
-    {outcome.kind === 'invalid' && <ul role="alert" className="error" data-testid="saved-problems">{outcome.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
-    {outcome.kind === 'saved' && <p role="status" data-testid="saved-committed"><strong>{outcome.updated ? 'Updated' : 'Saved'}.</strong> &ldquo;{outcome.view.name}&rdquo; is now stored under project <code>{outcome.view.project}</code> at revision {outcome.view.revision}.</p>}
-    {outcome.kind === 'deleted' && <p role="status" data-testid="saved-deleted"><strong>Deleted.</strong> &ldquo;{outcome.name}&rdquo; is gone from the server.</p>}
-    {outcome.kind === 'conflict' && <p role="alert" className="error" data-testid="saved-conflict"><strong>Not applied.</strong> The view changed or was removed since you read it, or the project is full. Nothing was {outcome.what === 'save' ? 'saved' : 'deleted'}; the list below was read again.</p>}
-    {outcome.kind === 'unknown' && <p role="alert" className="error" data-testid="saved-unknown"><strong>Outcome unknown.</strong> The connection failed after the request was sent, so the {outcome.what} may or may not have happened. The list below was read again; check it. Pressing the same button again repeats the same request under the same command, so it cannot be applied twice.</p>}
-    {outcome.kind === 'refused' && <p role="alert" className="error" data-testid="saved-refused"><strong>Not applied.</strong> {refusalWords(outcome.status)} Code <code>{outcome.code}</code>.{outcome.requestId && <> Request <code>{outcome.requestId}</code>.</>}</p>}
-    {opened !== null && <p role="alert" className="error" data-testid="saved-open-refused"><strong>Not opened.</strong> {opened.text}</p>}
-   </div>
-   {context.projects.map((project) => {
-    const state = lists[project] ?? { kind: 'loading' as const };
-    const views = 'data' in state ? state.data : [];
-    return (
-     <section key={project} className="panel" aria-label={`Saved views of project ${project}`} data-project={project} data-state={state.kind}>
-      <h4>Project <code>{project}</code></h4>
-      <StatusPanel state={state} />
-      {state.kind === 'empty' && <p data-testid="saved-none">No saved view is stored for this project.</p>}
-      {views.length > 0 && (
-       <>
-        <table className="data-table">
-         <caption>Saved views of this project, as the server holds them</caption>
-         <thead><tr><th scope="col">Name</th><th scope="col">Query</th><th scope="col">Runs over</th><th scope="col">Updated</th><th scope="col">Revision</th><th scope="col">Actions</th></tr></thead>
-         <tbody>
-          {views.map((v) => (
-           <tr key={v.id} data-view={v.id} data-name={v.name}>
-            <th scope="row">{v.name}</th>
-            <td><code>{v.language}</code> / <code>{v.profile}</code>; {v.mode}{v.mode === 'range' && v.step_seconds !== undefined ? `, step ${v.step_seconds} s` : ''}<pre className="expr">{v.expression}</pre></td>
-            <td>{v.projects.length} project{v.projects.length === 1 ? '' : 's'}</td>
-            <td>{formatNs(v.updated_ns, context.timezone)}</td>
-            <td>{v.revision}</td>
-            <td>
-             <button type="button" onClick={() => open(v)} aria-label={`Open view ${v.name}`}>Open</button>{' '}
-             {confirming === v.id
-              ? <><button type="button" className="danger" onClick={() => remove(v)} disabled={pending}>Confirm delete of {v.name}</button> <button type="button" onClick={() => setConfirming(null)}>Keep it</button></>
-              : <button type="button" onClick={() => setConfirming(v.id)} disabled={pending} aria-label={`Delete view ${v.name}`}>Delete</button>}
-            </td>
-           </tr>
-          ))}
-         </tbody>
-        </table>
-        <button type="button" onClick={() => download(project, exportDocument(context.org, project, views))} data-testid="saved-export">Export these views as JSON</button>
-       </>
-      )}
-     </section>
-    );
-   })}
-  </section>
+  <div data-section="saved-views">
+   <Card title="Saved views" titleId="saved-heading" bodyClass="col g12">
+    <p className="small t2">Saving is an explicit action. The query text is stored on the server under the project you choose and can then be read by every account that holds telemetry.read on that project; until you press Save it stays in this page&rsquo;s memory only, and nothing is ever kept in this browser&rsquo;s storage. A project keeps at most {MAX_VIEWS_PER_PROJECT} saved views.</p>
+    <form aria-label="Save this query as a view" onSubmit={(e) => { e.preventDefault(); save(false); }} aria-busy={pending}>
+     <fieldset disabled={pending} className="exp-fs">
+      <legend>Save the query in the form above</legend>
+      <div className="exp-fields">
+       <label>Name (at most {MAX_NAME_BYTES} bytes) <input name="view-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></label>
+       <label>Owning project <select name="view-owner" value={ownerProject} onChange={(e) => setOwner(e.target.value)}>{form.projects.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
+       <button type="submit" className="btn btn-primary">Save as a new view</button>
+       {editing !== null && <button type="button" className="btn" onClick={() => save(true)} data-testid="saved-update">Update &ldquo;{editing.name}&rdquo;</button>}
+      </div>
+     </fieldset>
+    </form>
+    <div data-outcome={outcome.kind} aria-live="polite" className="col g4">
+     {outcome.kind === 'pending' && <p role="status"><strong>Waiting for the server.</strong> Nothing has been saved yet.</p>}
+     {outcome.kind === 'invalid' && <ul role="alert" className="error" data-testid="saved-problems">{outcome.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+     {outcome.kind === 'saved' && <Callout tone="ok" role="status" testId="saved-committed"><strong>{outcome.updated ? 'Updated' : 'Saved'}.</strong> &ldquo;{outcome.view.name}&rdquo; is now stored under project <code>{outcome.view.project}</code> at revision {outcome.view.revision}.</Callout>}
+     {outcome.kind === 'deleted' && <Callout tone="ok" role="status" testId="saved-deleted"><strong>Deleted.</strong> &ldquo;{outcome.name}&rdquo; is gone from the server.</Callout>}
+     {outcome.kind === 'conflict' && <p role="alert" className="error" data-testid="saved-conflict"><strong>Not applied.</strong> The view changed or was removed since you read it, or the project is full. Nothing was {outcome.what === 'save' ? 'saved' : 'deleted'}; the list below was read again.</p>}
+     {outcome.kind === 'unknown' && <p role="alert" className="error" data-testid="saved-unknown"><strong>Outcome unknown.</strong> The connection failed after the request was sent, so the {outcome.what} may or may not have happened. The list below was read again; check it. Pressing the same button again repeats the same request under the same command, so it cannot be applied twice.</p>}
+     {outcome.kind === 'refused' && <p role="alert" className="error" data-testid="saved-refused"><strong>Not applied.</strong> {refusalWords(outcome.status)} Code <code>{outcome.code}</code>.{outcome.requestId && <> Request <code>{outcome.requestId}</code>.</>}</p>}
+     {opened !== null && <p role="alert" className="error" data-testid="saved-open-refused"><strong>Not opened.</strong> {opened.text}</p>}
+    </div>
+    {context.projects.map((project) => {
+     const state = lists[project] ?? { kind: 'loading' as const };
+     const views = 'data' in state ? state.data : [];
+     return (
+      <section key={project} className="exp-saved-project col g12" aria-label={`Saved views of project ${project}`} data-project={project} data-state={state.kind}>
+       <h3>Project <code>{project}</code></h3>
+       <StatusPanel state={state} />
+       {state.kind === 'empty' && <p data-testid="saved-none">No saved view is stored for this project.</p>}
+       {views.length > 0 && (
+        <>
+         <div className="table-region" tabIndex={0} role="region" aria-label={`Saved views table of project ${project}`}>
+          <table className="table">
+           <caption className="sr-only">Saved views of this project, as the server holds them</caption>
+           <thead><tr><th scope="col">Name</th><th scope="col">Query</th><th scope="col">Runs over</th><th scope="col">Updated</th><th scope="col">Revision</th><th scope="col">Actions</th></tr></thead>
+           <tbody>
+            {views.map((v) => (
+             <tr key={v.id} data-view={v.id} data-name={v.name}>
+              <th scope="row">{v.name}</th>
+              <td><code>{v.language}</code> / <code>{v.profile}</code>; {v.mode}{v.mode === 'range' && v.step_seconds !== undefined ? `, step ${v.step_seconds} s` : ''}<pre className="exp-expr">{v.expression}</pre></td>
+              <td>{v.projects.length} project{v.projects.length === 1 ? '' : 's'}</td>
+              <td>{formatNs(v.updated_ns, context.timezone)}</td>
+              <td>{v.revision}</td>
+              <td>
+               <div className="row wrap g4">
+                {v.language === form.language
+                 ? <button type="button" className="btn btn-sm" onClick={() => open(v)} aria-label={`Open view ${v.name}`}>Open</button>
+                 : <a className="btn btn-sm" href={encodeHash(context, v.language === 'logql' ? 'logs' : 'metrics')}>Opens on {v.language === 'logql' ? 'Logs' : 'Metrics'}</a>}
+                {confirming === v.id
+                 ? <><button type="button" className="btn btn-sm btn-danger" onClick={() => remove(v)} disabled={pending}>Confirm delete of {v.name}</button><button type="button" className="btn btn-sm" onClick={() => setConfirming(null)}>Keep it</button></>
+                 : <button type="button" className="btn btn-sm" onClick={() => setConfirming(v.id)} disabled={pending} aria-label={`Delete view ${v.name}`}>Delete</button>}
+               </div>
+              </td>
+             </tr>
+            ))}
+           </tbody>
+          </table>
+         </div>
+         <div><button type="button" className="btn btn-sm" onClick={() => download(project, exportDocument(context.org, project, views))} data-testid="saved-export">Export these views as JSON</button></div>
+        </>
+       )}
+      </section>
+     );
+    })}
+   </Card>
+  </div>
  );
 }

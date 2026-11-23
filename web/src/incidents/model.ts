@@ -4,6 +4,7 @@ import type { ActionPayload, ActionRequest, ConditionFreshness, ConditionState, 
 export const ACTION_LABEL: Record<IncidentActionKind, string> = {
  assign: 'Assign owner', ack: 'Acknowledge', resolve: 'Resolve', link: 'Link evidence', impact: 'Report impact',
  snooze: 'Snooze reminders', unsnooze: 'End snooze', maintenance: 'Start maintenance', maintenance_end: 'End maintenance',
+ title: 'Set title', note: 'Add note',
 };
 export const DURATIONS: readonly { minutes: number; label: string }[] = [
  { minutes: 15, label: '15 minutes' }, { minutes: 60, label: '1 hour' }, { minutes: 240, label: '4 hours' }, { minutes: 1440, label: '24 hours' }, { minutes: 10080, label: '7 days (maximum)' },
@@ -13,6 +14,8 @@ export const SEVERITIES: readonly Severity[] = ['minor', 'major', 'critical'];
 export const CONDITION_STATES: readonly ConditionState[] = ['firing', 'recovered', 'unknown'];
 export const FRESHNESS: readonly ConditionFreshness[] = ['fresh', 'stale', 'unknown'];
 const MAX_REASON_BYTES = 512;
+export const MAX_TITLE_BYTES = 160;
+export const MAX_NOTE_BYTES = 2000;
 
 /** The actions an incident can take in its current state. The server still decides: this only
  * avoids offering what C08 would refuse (a resolved incident accepts nothing; a window can only
@@ -39,9 +42,11 @@ export interface Draft {
  state: ConditionState;
  freshness: ConditionFreshness;
  minutes: number;
+ title: string;
+ note: string;
 }
 export function emptyDraft(kind: IncidentActionKind): Draft {
- return { kind, reason: '', owner: '', linkKind: 'issue', linkId: '', severity: 'major', state: 'firing', freshness: 'fresh', minutes: 60 };
+ return { kind, reason: '', owner: '', linkKind: 'issue', linkId: '', severity: 'major', state: 'firing', freshness: 'fresh', minutes: 60, title: '', note: '' };
 }
 
 /** A fresh random 128-bit command ID (32 lowercase hexadecimal characters). */
@@ -60,6 +65,16 @@ export type Built = { ok: true; request: ActionRequest } | { ok: false; error: s
 /** Builds the wire request for a draft against the incident revision the user is looking at.
  * Nothing here is committed or shown as committed: it only prepares the request. */
 export function buildRequest(view: IncidentView, draft: Draft, commandId: Id, nowMs: number): Built {
+ if (draft.kind === 'title' || draft.kind === 'note') {
+  const text = (draft.kind === 'title' ? draft.title : draft.note).trim();
+  const limit = draft.kind === 'title' ? MAX_TITLE_BYTES : MAX_NOTE_BYTES;
+  const noun = draft.kind === 'title' ? 'title' : 'note';
+  if (text === '') return { ok: false, error: `Write the ${noun} first: it must not be empty.` };
+  if (new TextEncoder().encode(text).length > limit) return { ok: false, error: `The ${noun} may be at most ${limit} bytes.` };
+  if (draft.kind === 'title' ? /\p{Cc}/u.test(text) : /[^\P{Cc}\n]/u.test(text)) return { ok: false, error: draft.kind === 'title' ? 'The title must not contain control characters.' : 'The note must not contain control characters other than line breaks.' };
+  const payload: ActionPayload = draft.kind === 'title' ? { title: text } : { note: text };
+  return { ok: true, request: { org: view.org, command_id: commandId, expected_version: view.version, project_id: view.project_id, target_id: view.incident_id, entity_kind: 'incident', kind: draft.kind, payload } };
+ }
  const reason = draft.reason.trim();
  if (!validReason(reason)) return { ok: false, error: 'The reason may be at most 512 bytes and must not contain control characters.' };
  if (reasonRequired(draft.kind) && reason === '') return { ok: false, error: 'A reason is required for this action.' };
@@ -112,12 +127,20 @@ const FAULT_TEXT: Record<string, string> = {
  incident_condition_mismatch: 'That impact names a different condition than this incident is linked to.',
  incident_action_invalid: 'The server rejected the action as invalid.',
  action_payload_invalid: 'The server rejected the action fields as invalid.',
+ incident_title_unchanged: 'The incident already has this title.',
+ incident_title_invalid: 'The title must be 1 to 160 bytes without control characters.',
+ incident_note_invalid: 'The note must be 1 to 2000 bytes; control characters other than line breaks are refused.',
+ incident_notes_full: 'The timeline keeps room for acknowledging and resolving, so it accepts no further notes.',
+ issue_owner_unknown: 'That user is not a member of this organization.',
+ needs_contracted_installation: 'This installation is not contracted yet, so titles, notes, owners and links are refused until the one-way step of the upgrade guide is taken. Nothing was applied.',
 };
 export function faultText(detail: string, status: number): string {
  if (status === 401) return 'Your session has ended. Sign in again; nothing was applied.';
- if (status === 403 || status === 404) return 'This incident was not found or is not available to this account. Nothing was applied.';
+ if (status === 403 || status === 404) return 'This item was not found or is not available to this account. Nothing was applied.';
+ const known = FAULT_TEXT[detail];
+ if (known !== undefined) return known;
  if (status === 429) return 'Too many requests. Wait and retry; nothing was applied.';
- return FAULT_TEXT[detail] ?? 'The server refused this action. Nothing was applied.';
+ return 'The server refused this action. Nothing was applied.';
 }
 
 /** The honest rate of an incident's source. No denominator is recorded anywhere in an incident,

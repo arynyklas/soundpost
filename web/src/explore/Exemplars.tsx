@@ -1,9 +1,10 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { exemplars, investigate, isAbort, stateOfFault, stateOfQueryFault } from '../api/client';
-import type { Exemplar, ExemplarRequest, ExemplarResult, LoadState, QueryLanguage } from '../api/types';
-import { latestOnly, scopeKey, type ViewContext } from '../app/context';
+import type { Exemplar, ExemplarRequest, ExemplarResult, LoadState } from '../api/types';
+import { encodeHash, latestOnly, scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
+import { Card } from '../ui/primitives';
 import { LabelText, SampleValue, TimeText } from './MetricResult';
 import { runLatest } from './runner';
 
@@ -33,9 +34,9 @@ function TraceLink(props: { exemplar: Exemplar; context: ViewContext }): React.J
   );
  };
  switch (link.kind) {
-  case 'unchecked': return <button type="button" onClick={check}>Check trace link</button>;
+  case 'unchecked': return <button type="button" className="btn btn-sm" onClick={check}>Check trace link</button>;
   case 'checking': return <span role="status">Checking the trace link…</span>;
-  case 'available': return <span data-link="available" role="status">Trace link authorized for this scope: trace <code>{link.trace}</code> in project <code>{link.project}</code>. The trace view itself is not built yet.</span>;
+  case 'available': return <span data-link="available" role="status">Trace link authorized for this scope: trace <code>{link.trace}</code> in project <code>{link.project}</code>. <a href={encodeHash(context, 'traces', '', null, { project: link.project, id: link.trace })}>Open the trace</a></span>;
   case 'not_found': return <span data-link="not-found" role="status">Not found. This trace was not found or is not available to this account.</span>;
   case 'failed': return <span data-link="failed" role="alert">The link check failed ({link.code}). No link is shown.</span>;
  }
@@ -53,8 +54,8 @@ const MAX_HELD = 500;
 
 /** Exemplars of the series a PromQL expression selects. A trace id is only ever text here: a link to it appears only through
  * the server's scope-resolved link route, so an exemplar can never reveal or link a trace this account may not read. */
-export function Exemplars(props: { context: ViewContext; language: QueryLanguage; projects: string[]; profile: string; featureSet: string; expression: string }): React.JSX.Element {
- const { context, language, projects, profile, featureSet, expression } = props;
+export function Exemplars(props: { context: ViewContext; projects: string[]; profile: string; featureSet: string; expression: string }): React.JSX.Element {
+ const { context, projects, profile, featureSet, expression } = props;
  const [limit, setLimit] = React.useState('20');
  const [problem, setProblem] = React.useState('');
  const [held, setHeld] = React.useState<Held | null>(null);
@@ -82,39 +83,34 @@ export function Exemplars(props: { context: ViewContext; language: QueryLanguage
   });
  };
  return (
-  <section className="panel" aria-labelledby="exemplar-heading" data-section="exemplars">
-   <h3 id="exemplar-heading">Exemplars</h3>
-   {language !== 'promql'
-    ? <p role="status">Exemplars link metric samples to traces, so they exist only for PromQL metric expressions.</p>
-    : (
-     <>
-      <p>Exemplars of the series the expression above selects in the selected window. A trace is only linked after the server confirms that this account may read it.</p>
-      <form aria-label="Find exemplars" onSubmit={(e) => { e.preventDefault(); load(false); }}>
-       <label>Page size (1 to 500) <input value={limit} onChange={(e) => setLimit(e.target.value)} inputMode="numeric" autoComplete="off" /></label>
-       <button type="submit">Find exemplars</button>
-      </form>
-      {problem && <p role="alert" className="error">{problem}</p>}
-      {view !== null && <StatusPanel state={view.status} />}
-      {view !== null && view.items.length > 0 && (
-       <table className="data-table" data-testid="exemplar-table">
-        <caption>{view.items.length} exemplars, ordered by project, series, time and record</caption>
-        <thead><tr><th scope="col">Series</th><th scope="col">Value</th><th scope="col">Time (nanoseconds)</th><th scope="col">Trace</th><th scope="col">Trace link</th></tr></thead>
-        <tbody>
-         {view.items.map((e) => (
-          <tr key={e.record_id} data-exemplar data-trace={e.trace_id}>
-           <th scope="row"><LabelText labels={e.labels} /><br /><small>project <code>{e.project_id}</code></small></th>
-           <td><SampleValue sample={e.sample} /></td>
-           <td><TimeText ns={e.sample.time} /></td>
-           <td><code>{e.trace_id}</code>{e.span_id !== undefined && <small> span <code>{e.span_id}</code></small>}</td>
-           <td><TraceLink exemplar={e} context={context} /></td>
-          </tr>
-         ))}
-        </tbody>
-       </table>
-      )}
-      {view !== null && view.next !== null && view.status.kind !== 'loading' && <button type="button" onClick={() => load(true)}>Load the next page ({view.items.length} loaded)</button>}
-     </>
-    )}
-  </section>
+  <Card title="Exemplars" titleId="exemplar-heading" bodyClass="col g12" testId="exemplars">
+   <p className="small t2">Exemplars of the series the expression above selects in the selected window. A trace is only linked after the server confirms that this account may read it.</p>
+   <form aria-label="Find exemplars" className="exp-fields" onSubmit={(e) => { e.preventDefault(); load(false); }}>
+    <label>Page size (1 to 500) <input value={limit} onChange={(e) => setLimit(e.target.value)} inputMode="numeric" autoComplete="off" /></label>
+    <button type="submit" className="btn">Find exemplars</button>
+   </form>
+   {problem && <p role="alert" className="error">{problem}</p>}
+   {view !== null && <StatusPanel state={view.status} />}
+   {view !== null && view.items.length > 0 && (
+    <div className="table-region" tabIndex={0} role="region" aria-label="Exemplars" data-testid="exemplar-table">
+     <table className="table tight">
+      <caption className="sr-only">{view.items.length} exemplars, ordered by project, series, time and record</caption>
+      <thead><tr><th scope="col">Series</th><th scope="col">Value</th><th scope="col">Time (nanoseconds)</th><th scope="col">Trace</th><th scope="col">Trace link</th></tr></thead>
+      <tbody>
+       {view.items.map((e) => (
+        <tr key={e.record_id} data-exemplar data-trace={e.trace_id}>
+         <th scope="row"><LabelText labels={e.labels} /><br /><small>project <code>{e.project_id}</code></small></th>
+         <td><SampleValue sample={e.sample} where={`exemplar of project ${e.project_id.slice(0, 8)}`} /></td>
+         <td><TimeText ns={e.sample.time} /></td>
+         <td><code>{e.trace_id}</code>{e.span_id !== undefined && <small> span <code>{e.span_id}</code></small>}</td>
+         <td><TraceLink exemplar={e} context={context} /></td>
+        </tr>
+       ))}
+      </tbody>
+     </table>
+    </div>
+   )}
+   {view !== null && view.next !== null && view.status.kind !== 'loading' && <div><button type="button" className="btn" onClick={() => load(true)}>Load the next page ({view.items.length} loaded)</button></div>}
+  </Card>
  );
 }

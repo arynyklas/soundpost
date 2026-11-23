@@ -45,8 +45,8 @@ async function loggedIn(who:Reader):Promise<Page>{
 interface ExportLine{time_ns:string;project:string;payload:Record<string,unknown>}
 /** The real Explore export (asynchronous, authorized again per chunk) of one signal of one project in the window around now, downloaded through the real console. */
 async function exported(page:Page,project:string,signal:string):Promise<ExportLine[]>{
- await page.goto(`/${hash(project,'explore')}`);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await page.goto(`/${hash(project,'logs')}`);
+ await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
  const panel=page.locator('[data-section="export"]');
  await panel.getByLabel('Signal').selectOption(signal);
  await panel.getByRole('button',{name:'Start export',exact:true}).click();

@@ -6,7 +6,7 @@ import {at,createOrg,createProject,createReader,ingestLog,login,onboardLogSource
 // Last-Event-ID), opened and resumed only by explicit clicks. Nothing here fakes a server answer.
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
 interface World{org:string;project:string;admin:Page;api:APIRequestContext;source:Source;browser:Browser}
-const hashFor=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+const hashFor=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'logs'})}`;
 
 async function world(browser:Browser):Promise<World>{
  const o=owner();
@@ -20,12 +20,11 @@ async function readerPage(w:World,reader:Reader):Promise<Page>{
  const page=await (await w.browser.newContext()).newPage();
  await login(page,reader.email,reader.password);
  await page.goto(`/${hashFor(w.org,w.project)}`);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
  return page;
 }
-/** Selects LogQL, types the query, opens the live view and starts it: three explicit clicks, nothing automatic. */
+/** Types the LogQL query on the Logs screen, opens the live view and starts it: three explicit clicks, nothing automatic. */
 async function startLive(page:Page,expression:string):Promise<void>{
- await page.getByRole('radio',{name:'LogQL',exact:true}).check();
  await page.getByLabel('Query expression').fill(expression);
  await page.getByRole('button',{name:'Open the live log view for this query',exact:true}).click();
  await page.getByRole('button',{name:'Start live view',exact:true}).click();
@@ -59,12 +58,12 @@ test('a real revoke of the reader mid-stream ends the view and clears every buff
  await expect(rows(page)).toHaveCount(0);
  await expect(page.getByTestId('live-rows')).toHaveText('0');
  await expect(page.getByTestId('live-empty')).toHaveText('Nothing is shown.');
- expect(await page.locator('.live-items').count()).toBe(0);
+ expect(await page.locator('.exp-live-items').count()).toBe(0);
  // More real lines are committed after the revoke: not one of them is rendered, and the stream is not read again.
  await lineAt(w,4,'user3');await lineAt(w,5,'user4');
  await page.waitForTimeout(2500);
  await expect(rows(page)).toHaveCount(0);
- expect(await page.locator('.investigation').innerText()).not.toMatch(/user[0-4]/);
+ expect(await page.locator('main').innerText()).not.toMatch(/user[0-4]/);
  expect(gets).toHaveLength(1);
  expect(tickets).toHaveLength(1);
  // The revoked reader cannot start again: the server answers Not found and nothing is shown.
@@ -114,7 +113,7 @@ test('a resume inside the replay window continues exactly after Last-Event-ID; a
  await lineAt(w,7,'user6');
  await expect(rows(page)).toHaveCount(6);
  await expect(rows(page).last()).toContainText('user6');
- expect(await page.locator('.live-items').innerText()).not.toContain('user5');
+ expect(await page.locator('.exp-live-items').innerText()).not.toContain('user5');
  expect((await gets[2]!.allHeaders())['last-event-id']).toBe('5');
  expect(tickets).toHaveLength(3);
 });

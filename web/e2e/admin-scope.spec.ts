@@ -11,7 +11,11 @@ import {adminCommand,createOrg,createProject,field,id,login,onboardMetricSource,
 // the real HTTP routes by the Go test TestRealDeletionWithOneUnavailableGroupStaysFencingThenCompletesOnce (soundpost_faults build).
 const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
 const WINDOW={start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000)};
-const settings=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:'settings'})}`;
+const view=(name:string,org:string,project:string,page=''):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:name,...(page?{page}:{})})}`;
+const settings=(org:string,project:string,page='project'):string=>view('settings',org,project,page);
+const routing=(org:string,project:string):string=>view('routing',org,project);
+// The change forms of a list row open in a dialog (the page behind it is inert): close it before anything else on the page is used.
+const closeDialogs=async(page:Page):Promise<void>=>{if(await page.locator('dialog[open]').count()>0)await page.getByRole('button',{name:'Close',exact:true}).click({timeout:3000}).catch(()=>undefined);};
 interface Seen{phase:string;physical:string}
 /** Begins one real retire_project deletion at the current admin revision; returns the operation id. */
 async function begin(page:Page,org:string,project:string):Promise<string>{
@@ -51,6 +55,7 @@ test('a real deletion is pending while it fences, never success early, and compl
  // The page the person is on: the project they were reading is now denied, the same as a project that never existed.
  await page.reload();
  await expect(page.locator('[data-state="unauthorized"]').first()).toBeVisible();
+ await page.locator('[data-settings-tab="operations"]').click();
  await page.getByLabel('Operation ID',{exact:true}).fill(operation);
  await page.getByRole('button',{name:'Show progress',exact:true}).click();
  const panel=page.getByTestId('operation');
@@ -76,6 +81,7 @@ test('a real deletion is pending while it fences, never success early, and compl
  // A complete answer before physical erasure (physical pending) is labelled "Logically complete", never "Complete": only the last answer is both.
  expect(phases.at(-1)?.physical).toBe('done');
  // The retired project stays denied.
+ await page.locator('[data-settings-tab="project"]').click();
  await page.reload();
  await expect(page.locator('[data-state="unauthorized"]').first()).toBeVisible();
 });
@@ -95,9 +101,8 @@ async function policyView(page:Page,org:string,project:string):Promise<Record<st
  expect(r.status,r.text).toBe(200);
  return r.json as Record<string,unknown>;
 }
-const SECRET='E2E-SECRET-VALUE-never-shown',TOKEN='TOKEN-ABC-in-the-path';
 
-test('project settings change the notification policy, retention and destinations through audited commands',async({page,browser})=>{
+test('project settings change the notification policy and retention through audited commands',async({page,browser})=>{
  test.setTimeout(240_000);
  const who=owner();
  await login(page,who.email,who.password);
@@ -107,14 +112,16 @@ test('project settings change the notification policy, retention and destination
  await adminCommand(page,org,'create_user',{id:writer.id,email:writer.email,password:writer.password});
  await adminCommand(page,org,'membership',{user_id:writer.id,enabled:true});
  await adminCommand(page,org,'grant',{user_id:writer.id,project_id:project,enabled:true,permissions:['policy.write']});
- const bodies:string[]=[];
- const collect=(p:Page):void=>{p.on('response',async(r)=>{if(r.url().includes('/api/v1/policies')||r.url().includes('/api/v1/admin/'))bodies.push(await r.text().catch(()=>''));});};
- collect(page);
+ // The organization already has one destination (its own screen is covered by destination-settings.spec.ts): the policy writer reads it below.
+ const destination=await postJson(page,'/api/v1/destinations',{org,project_id:project,operation:'save',command_id:id(),expected_version:'0',reason:'the organization already has a destination',destination:{id:id(),type:'smtp',address:'ops@example.test',enabled:true}});
+ expect(destination.status,destination.text).toBe(200);
 
- await page.goto(`/${settings(org,project)}`);
+ // Notification routes: the urgency policy of the project.
+ await page.goto(`/${routing(org,project)}`);
  const notification=page.locator('[data-section="policy-notification"]');
  await expect(notification).toContainText('approved default policy (revision 1)');
  await expect(page.getByTestId('policy-revision')).toContainText('You administer this organization');
+ await expect(notification.locator('[data-urgency-step]')).toHaveCount(4);
 
  // The notification policy: a local mistake is refused before anything is sent; then a real save.
  const n=form(page,'notification_policy');
@@ -128,13 +135,15 @@ test('project settings change the notification policy, retention and destination
  await save(n,'tighten the failure policy','Save notification policy');
  await expect(n.locator('[data-write-result="committed"]')).toContainText('The server committed this change');
  await expect(notification).toContainText('This project has its own policy, revision 2');
+ await expect(notification.locator('[data-urgency-step="reminders"]')).toContainText('5 minutes');
  const saved=await policyView(page,org,project);
  expect(saved.notification).toMatchObject({source:'project',revision:'2',min_failures:9,rate_basis_points:750,critical_codes:['auth_down','payment_failed'],first_reminder_ns:'300000000000'});
  // A reload shows the committed policy, not a client copy.
  await page.reload();
  await expect(page.locator('[data-write="notification_policy"]').getByLabel('Minimum failures',{exact:true})).toHaveValue('9');
 
- // Retention: nothing is shown as saved while the server has not answered.
+ // Project settings: retention. Nothing is shown as saved while the server has not answered.
+ await reopen(page,`/${settings(org,project)}`);
  const r=form(page,'retention');
  await expect(page.locator('[data-retention="logs"]')).toContainText('Not set');
  const gate=Promise.withResolvers<void>();
@@ -152,30 +161,6 @@ test('project settings change the notification policy, retention and destination
  await expect(r.locator('[data-write-result="committed"]')).toBeVisible();
  await page.unroute('**/api/v1/policies');
  await expect(page.locator('[data-retention="logs"]')).toContainText('45');
-
- // A destination: the secret and the endpoint path are write-only.
- const add=form(page,'destination-new');
- await add.getByLabel('Endpoint (https, no credentials, query or fragment)').fill('https://hooks.example.test/notify?token=1');
- await save(add,'add the pager hook','Add destination');
- await expect(add.locator('[data-write-result="local"]')).toContainText('https endpoint without credentials, query or fragment');
- await add.getByLabel('Endpoint (https, no credentials, query or fragment)').fill(`https://hooks.example.test/notify/${TOKEN}`);
- await add.getByLabel('Secret (write-only; sealed on save and never shown again)').fill(SECRET);
- await save(add,'add the pager hook','Add destination');
- await expect(add.locator('[data-write-result="committed"]')).toBeVisible();
- const row=page.locator('[data-destination]');
- await expect(row).toHaveCount(1);
- await expect(row).toContainText('endpoint host hooks.example.test');
- await expect(row).toHaveAttribute('data-destination-secret','set');
- await expect(row).toHaveAttribute('data-destination-enabled','true');
- await expect(page.locator('body')).not.toContainText(SECRET);
- await expect(page.locator('body')).not.toContainText(TOKEN);
- // Disabling it keeps its endpoint and secret (the page never held them).
- const d=row.locator('[data-write^="destination-"]');
- await d.getByLabel('Enabled').uncheck();
- await save(d,'pause the pager hook','Save destination');
- await expect(d.locator('[data-write-result="committed"]')).toBeVisible();
- await expect(row).toHaveAttribute('data-destination-enabled','false');
- await expect(row).toHaveAttribute('data-destination-secret','set');
 
  // Another signal changed elsewhere since the page read is no conflict: a stale page conflicts only on the SAME object (per-object epochs).
  const unrelatedBase=await page.getByTestId('policy-revision').getAttribute('data-revision');
@@ -206,13 +191,14 @@ test('project settings change the notification policy, retention and destination
  // The account that holds only policy.write: its project's retention and policy, not the organization's destinations.
  const ctx=await browser.newContext();
  const wp=await ctx.newPage();
- collect(wp);
  await login(wp,writer.email,writer.password);
- await wp.goto(`/${settings(org,project)}`);
+ await wp.goto(`/${routing(org,project)}`);
  await expect(wp.getByTestId('policy-revision')).toContainText('You hold policy.write on this project');
- await expect(wp.locator('[data-section="policy-destinations"]')).toContainText('Only organization administrators change destinations');
+ await expect(wp.locator('[data-settings-page="destinations"]')).toContainText('Only organization administrators change destinations');
  await expect(wp.locator('[data-destination]')).toHaveCount(1);
  await expect(wp.locator('[data-write^="destination-"]')).toHaveCount(0);
+ await expect(wp.getByRole('button',{name:/^New destination/})).toHaveCount(0);
+ await reopen(wp,`/${settings(org,project)}`);
  await expect(wp.locator('[data-retention="logs"]')).toContainText('45');
  const wr=form(wp,'retention');
  await wr.getByLabel('Signal').selectOption('logs');
@@ -226,7 +212,7 @@ test('project settings change the notification policy, retention and destination
  const stranger=await postJson(wp,'/api/v1/policies',{org,project_id:id(),operation:'read'});
  expect(stranger.status).toBe(404);
 
- // The audit log names who changed what, and no response or page ever carried the secret or the endpoint path.
+ // The audit log names who changed what.
  const audit=await postJson(page,'/api/v1/admin/read',{org_id:org,kind:'audit'});
  const audits=field(audit.json,'audits');
  if(!Array.isArray(audits))throw Error(`audit: ${audit.text}`);
@@ -235,9 +221,6 @@ test('project settings change the notification policy, retention and destination
  if(typeof me!=='string')throw Error('no session user');
  expect(named('retention',writer.id,'writer extends logs')).toBe(true);
  expect(named('notification_policy',me,'tighten the failure policy')).toBe(true);
- expect(named('destination',me,'pause the pager hook')).toBe(true);
- for(const body of bodies){expect(body).not.toContain(SECRET);expect(body).not.toContain(TOKEN);}
- expect(bodies.length).toBeGreaterThan(5);
  await ctx.close();
 });
 
@@ -259,11 +242,10 @@ async function signedIn(browser:Browser,p:Person):Promise<{ctx:BrowserContext;pa
  return {ctx,page};
 }
 const policyStatus=async(page:Page,org:string,project:string):Promise<number>=>(await postJson(page,'/api/v1/policies',{org,project_id:project,operation:'read'})).status;
-const PAGES:Record<string,string>={organization:'organization',teams:'teams',sources:'source-policies',sso:'sso'};
+const PAGES:Record<string,string>={organization:'organization',teams:'teams',sources:'source-policies',sso:'sso',operations:'operations'};
 async function openTab(page:Page,org:string,project:string,tab:string):Promise<Locator>{
  // A fresh document every time: the specs that call this after an administration change elsewhere need the console to read the organization again.
- await reopen(page,`/${settings(org,project)}`);
- await page.locator(`[data-settings-tab="${tab}"]`).click();
+ await reopen(page,`/${settings(org,project,tab)}`);
  const content=page.locator(`[data-settings-page="${PAGES[tab]}"]`);
  await expect(content).toBeVisible();
  return content;
@@ -328,15 +310,17 @@ test('organization settings: projects, members and grants are audited commands, 
  await expect(row).toHaveAttribute('data-team-state','enabled');
  await expect(row).toContainText('policy.write');
  expect(await policyStatus(mp,org,project)).toBe(200);
+ await row.getByRole('button',{name:/^Change team/}).click();
  const edit=row.locator('[data-write^="team-"]');
  await edit.getByLabel('Team enabled').uncheck();
  await save(edit,'the policy owners team is paused','Save team');
  await expect(edit.locator('[data-write-result="committed"]')).toBeVisible();
  await expect(row).toHaveAttribute('data-team-state','disabled');
  expect(await policyStatus(mp,org,project)).toBe(404);
+ await closeDialogs(page);
 
  // The audit trail names every change and who made it.
- await page.locator('[data-settings-tab="organization"]').click();
+ await page.locator('[data-settings-tab="operations"]').click();
  const trail=page.locator('[data-section="org-audit"]');
  for(const action of ['create_project','membership','grant','team'])await expect(trail.locator(`[data-audit-action="${action}"]`).first()).toBeVisible();
  await expect(trail).toContainText('policy owner of the first project');
@@ -403,11 +387,11 @@ test('single sign-on settings: the mapping is validated, saved and shown, and th
  await expect(add.locator('[data-write-result="committed"]')).toBeVisible();
  const provider=page.locator('[data-sso]');
  await expect(provider).toHaveCount(1);
- await expect(provider).toContainText('issuer https://idp.example.test');
+await expect(provider).toContainText('https://idp.example.test');
  await expect(provider).toContainText('1 identity mapping');
- await expect(provider).toContainText('client secret write-only (never shown)');
+ await expect(provider).toContainText('write-only (never shown)');
  await expect(page.locator('body')).not.toContainText(SSO_SECRET);
- await expect(provider.getByLabel(/^Client secret/)).toHaveValue('');
+ await provider.getByRole('button',{name:/^Change provider/}).click();
 
  // An identity mapped to an account outside this organization is refused, and nothing changes.
  const edit=provider.locator('[data-write^="sso-"]');
@@ -415,11 +399,14 @@ test('single sign-on settings: the mapping is validated, saved and shown, and th
  await save(edit,'map a ghost','Save provider');
  await expect(edit.locator('[data-write-result="not_found"]')).toContainText('Nothing was changed');
  await expect(provider).toContainText('1 identity mapping');
+ await closeDialogs(page);
  // A second identity, the secret left empty: the sealed one is kept and no response ever carries it.
  const second=await person(page,org,'sso-user-two');
  // Enrolling that account changed the organization behind this page's back: a save on the page as it was read would be refused (see
  // the stale-page test), so the page reads the organization again first.
  await openTab(page,org,project,'sso');
+ await provider.getByRole('button',{name:/^Change provider/}).click();
+ await expect(edit.getByLabel(/^Client secret/)).toHaveValue('');
  await edit.getByLabel(/^Identity mapping/).fill(`alice = ${mapped.id}\nbob = ${second.id}`);
  await save(edit,'map the second user','Save provider');
  await expect(edit.locator('[data-write-result="committed"]')).toBeVisible();
@@ -449,7 +436,9 @@ test('source policies: the access policy and the admitted policy change through 
 
  // Onboarding a source writes its access policy (enabled, for its project), so its admitted policy can be changed at once. A
  // change takes effect through a fence: the person sees it in progress, never as done, and then complete.
+const changeButton=row.getByRole('button',{name:/^Change the admitted policy/});
  const toggle=row.locator('[data-write^="source-policy-"]');
+ await changeButton.click();
  await toggle.getByLabel('Session replay enabled').check();
  await save(toggle,'turn replay on','Save admitted policy');
  const first=content.locator('[data-fence]').first();
@@ -458,7 +447,8 @@ test('source policies: the access policy and the admitted policy change through 
  await expect(row).toContainText(/replay enabled;/);
  await expect(row).toContainText('admitted policy revision 2');
  await expect(row).toHaveAttribute('data-source-state','active');
- await expect(toggle).toBeVisible();
+ await closeDialogs(page);
+ await expect(changeButton).toBeVisible();
  await expect(content.locator(`[data-source-access="${source.id}"]`)).toContainText('enabled');
 
  // The access policy of a live source fences it too: disabling it closes the source's admitted policy, and says so while it happens.
@@ -474,14 +464,17 @@ test('source policies: the access policy and the admitted policy change through 
  await expect(row).toContainText(/policy disabled;/);
  await expect(row).toContainText('admitted policy revision 3');
  await expect(row).toHaveAttribute('data-source-state','active');
- await expect(toggle).toBeVisible();
+ await closeDialogs(page);
+ await expect(changeButton).toBeVisible();
 
  // An admitted policy that enables the source while its access policy is disabled is refused, and nothing changes.
+ await changeButton.click();
  await toggle.getByLabel('Policy enabled').check();
  await save(toggle,'enable it against the access policy','Save admitted policy');
  await expect(toggle.locator('[data-write-result="forbidden"]')).toContainText('Nothing was changed');
  await expect(row).toContainText(/policy disabled;/);
  await expect(row).toContainText('admitted policy revision 3');
+ await closeDialogs(page);
 
  // Enabling the access policy again, through the same visible fence, lets the source ingest under the replay policy it keeps.
  await access.getByLabel('Enabled',{exact:true}).check();
@@ -523,7 +516,7 @@ test('another organization\'s administrator and an ordinary member see none of i
  // Another organization's administrator and an ordinary member: every page is the same not-found, and so is every route.
  for(const [name,p] of [['admin of B',adminB],['plain member',plain]] as const){
   const s=await signedIn(browser,p);
-  await s.page.goto(`/${settings(orgA,projectA)}`);
+ await s.page.goto(`/${settings(orgA,projectA,'organization')}`);
   for(const tab of ['organization','teams','sources','sso']){
    await s.page.locator(`[data-settings-tab="${tab}"]`).click();
    await expect(s.page.locator(`[data-settings-page="${PAGES[tab]}"] [data-state="unauthorized"]`).first(),`${name}: ${tab}`).toBeVisible();
@@ -559,6 +552,7 @@ test('another organization\'s administrator and an ordinary member see none of i
  await t.page.locator('[data-settings-tab="organization"]').click();
  await expect(t.page.locator('[data-settings-page="organization"] [data-state="unauthorized"]').first()).toBeVisible();
  expect((await postJson(t.page,'/api/v1/admin/read',{org_id:orgA,kind:'organization'})).status).toBe(404);
+ await page.locator('[data-settings-tab="operations"]').click();
  await expect(page.locator('[data-section="org-audit"]')).toContainText('temporary administrator leaves');
  await t.ctx.close();
 });

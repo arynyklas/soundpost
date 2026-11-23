@@ -8,7 +8,9 @@ import {activate,adminCommand,createOrg,createProject,field,id,login,owner,postJ
 // unconfirmed save resends the same command, and neither the secret nor the endpoint path is ever in a response or on the page.
 const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
 const WINDOW={start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000)};
-const settings=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:'settings'})}`;
+const settings=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:'routing'})}`;
+// The change forms of a list row open in a dialog (the page behind it is inert): close it before anything else on the page is used.
+const closeDialogs=async(page:Page):Promise<void>=>{if(await page.locator('dialog[open]').count()>0)await page.getByRole('button',{name:'Close',exact:true}).click({timeout:3000}).catch(()=>undefined);};
 const SECRET='E2E-DEST-SECRET-never-shown',TOKEN='TOKEN-DEST-in-the-path',ROTATED='E2E-ROTATED-secret-never-shown';
 const form=(page:Page,name:string):Locator=>page.locator(`[data-write="${name}"]`);
 async function save(f:Locator,reason:string,button:string):Promise<void>{
@@ -17,9 +19,8 @@ async function save(f:Locator,reason:string,button:string):Promise<void>{
 }
 async function openDestinations(page:Page,org:string,project:string):Promise<Locator>{
  // A fresh document, not a fragment change of the one on screen: Firefox answers goto(sameDocument#fragment) with a same-document navigation, its late `hashchange`
- // makes SessionBoundary revalidate and mount the console again, and a settings tab clicked before that falls back to the Project tab (observed in the full suite).
+ // makes SessionBoundary revalidate and mount the console again.
  await reopen(page,`/${settings(org,project)}`);
- await page.locator('[data-settings-tab="destinations"]').click();
  const content=page.locator('[data-settings-page="destinations"]');
  await expect(content).toBeVisible();
  return content;
@@ -47,6 +48,7 @@ test('an organization administrator adds, pauses and rotates destinations throug
  await expect(content.locator('[data-state="empty"]')).toContainText('No destination is configured');
 
  // A local mistake is refused before anything is sent.
+ await page.getByRole('button',{name:/^New destination/}).click();
  const add=form(page,'destination-new');
  await add.getByLabel('Endpoint (https, no credentials, query or fragment)').fill(`https://hooks.example.test/notify?token=${TOKEN}`);
  await save(add,'add the pager hook','Add destination');
@@ -94,9 +96,11 @@ test('an organization administrator adds, pauses and rotates destinations throug
  await expect(add.locator('[data-write-result="committed"]')).toBeVisible();
  await expect(page.locator('[data-destination-channel="telegram"]')).toContainText('Telegram; enabled');
  await expect(page.locator('[data-destination]')).toHaveCount(3);
+ await closeDialogs(page);
 
  // Pausing keeps the endpoint and the secret (the page never held them) and moves the version.
  const row=page.locator(`[data-destination="${hookId}"]`);
+ await row.getByRole('button',{name:/^Change/}).click();
  const change=form(page,`destination-${hookId}`);
  await change.getByLabel('Enabled').uncheck();
  await save(change,'pause while the receiver moves','Save destination');
@@ -126,7 +130,6 @@ test('an organization administrator adds, pauses and rotates destinations throug
  // A reload shows what the server holds.
  await page.reload();
  await activate(page);
- await page.locator('[data-settings-tab="destinations"]').click();
  await expect(page.locator(`[data-destination="${hookId}"]`)).toHaveAttribute('data-destination-version','4');
  await expect(page.locator('[data-destination]')).toHaveCount(3);
 

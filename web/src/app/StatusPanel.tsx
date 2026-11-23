@@ -4,6 +4,9 @@ import type { LoadState } from '../api/types';
 import { EVIDENCE_REASON } from '../evidence/model';
 
 const REASONS: Record<string, string> = {
+ not_built: 'This installation does not serve this part yet. Nothing is shown in its place; it is not an empty list.',
+ public_origin_not_configured: 'The public address of this installation is not configured, so no link can be built.',
+ search_scan_capped: 'The title search scanned its bounded number of occurrences; more may match. This is a partial answer.',
  service_not_built: 'The service behind this view is not available in this installation yet.',
  separate_grant_required: 'This data needs a separate grant (replay or profile access) that your account does not hold on this project.',
  view_not_built: 'This part of the view is not available yet.',
@@ -36,6 +39,17 @@ const REASONS: Record<string, string> = {
  job_evidence_incomplete: 'Evidence the health of this job needs is missing, so the verdict is not conclusive.',
  schedule_observer_stale: "The external schedule observer's newest report is older than its stale-after limit, so the schedule health is unknown rather than last observed.",
  no_schedule_observer: 'No external schedule observer has reported for this scheduled job, so a missed run cannot be established.',
+ titles_not_available: 'The titles of some issues could not be read (no grant to read the stored occurrences, or the record is gone), so they are shown as not available.',
+ search_title_unreadable: 'The title of a candidate issue could not be read, so a title search cannot match it and this is a partial answer.',
+ regression_not_available: 'This installation has no regression lifecycle wired, so no issue is claimed to be regressed.',
+ release_scan_capped: 'The release scan reached its bound, so older releases may be missing.',
+ issue_evidence_compacted: 'Some issues have folded evidence, so the counts shown are lower bounds.',
+ issue_counts_not_available: 'The issue evidence could not be read, so the counts of new, regressed and resolved issues are not available. They are not zero.',
+ scan_capped: 'The scan reached its bound, so this answer is partial: what is shown is real and more may exist.',
+ projects_capped: 'Only the first projects of the organization were read, so this list may be missing deliveries.',
+ no_finished_spans: 'Spans were read but none had finished, so there is no duration. That is not zero latency.',
+ spans_sampled: 'A stored span carries a sample probability below 1, so the figures count the stored spans, not the requests that were made.',
+ list_source_not_wired: 'This installation does not read the stored data this view needs, so nothing is shown in its place.',
  evidence_loss_recorded: 'Producer or evidence loss is recorded for this job. It is reported separately from the job outcome.',
 };
 export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }

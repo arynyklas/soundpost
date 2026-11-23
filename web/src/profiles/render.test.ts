@@ -59,18 +59,18 @@ describe('profile page markup: structure and hooks', () => {
    expect(regions(html, id).length, id).toBeGreaterThanOrEqual(1);
   }
   expect(regions(html, 'capability-row')).toHaveLength(3);
-  expect(html).toContain('<caption>');
+  expect(html).toContain('<caption');
   expect(html).toContain('scope="col"');
   expect(html).toContain('scope="row"');
-  expect(html).toMatch(/<h3 id="pp-units-heading">/);
+  expect(html).toMatch(/<h2 id="pp-units-heading">/);
   expect(html).toContain('aria-labelledby="pp-units-heading"');
   expect(html).toContain('aria-labelledby="pt-heading"');
-  expect(html).toMatch(/<h4 id="pf-heading">Frames<\/h4>/);
+  expect(html).toMatch(/<h3 id="pf-heading">Frames<\/h3>/);
  });
  test('the page carries its heading, its status and the window sentence while loading, and names no data it has not read', () => {
   const context: ViewContext = { org: ORG, projects: [PROJECT], environment: '', start: '1700000000000000000', end: '1700000600000000000', timezone: 'UTC', generation: 1 };
   const html = render(React.createElement(ProfilePage, { id: PROFILE, project: PROJECT, context }));
-  expect(html).toContain('<h2 id="profile-heading">Profile <code>' + PROFILE + '</code></h2>');
+  expect(html).toContain('<h1 tabindex="-1">Profile <code title="' + PROFILE + '">');
   expect(html).toContain('data-state="loading"');
   expect(html).toContain('Observations are read from');
   expect(html).not.toContain('data-testid="profile-state"');

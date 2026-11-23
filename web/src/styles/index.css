@@ -1,0 +1,16 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Every stylesheet of the console, in cascade order. Screens add their own file below; no component imports CSS (bun test renders components). */
+@import './tokens.css';
+@import './base.css';
+@import './ui.css';
+@import './shell.css';
+@import './charts.css';
+@import './legacy.css';
+@import '../app/accessibility.css';
+@import '../profiles/profiles.css';
+@import './home.css';
+@import './incidents.css';
+@import './issues.css';
+@import './explore.css';
+@import './services.css';
+@import './settings.css';

@@ -11,11 +11,11 @@ const PROM_310='promql-prometheus-3.1.0',PROM_3135='promql-prometheus-3.13.5';
 test.describe.configure({mode:'serial'});
 let seed:ExploreSeed,ctx:BrowserContext,owners:Page,api:APIRequestContext;
 
-const hashFor=(org:string,projects:string[],view='explore'):string=>`#${new URLSearchParams({org,projects:projects.join(','),start:String(at(0)),end:String(at(70)),tz:'UTC',view})}`;
-async function open(projects:string[]=[seed.p1,seed.p2],org=seed.org):Promise<Page>{
+const hashFor=(org:string,projects:string[],view='metrics'):string=>`#${new URLSearchParams({org,projects:projects.join(','),start:String(at(0)),end:String(at(70)),tz:'UTC',view})}`;
+async function open(projects:string[]=[seed.p1,seed.p2],org=seed.org,view='metrics'):Promise<Page>{
  const page=await ctx.newPage();
- await page.goto(`/${hashFor(org,projects)}`);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await page.goto(`/${hashFor(org,projects,view)}`);
+ await expect(page.getByRole('heading',{level:1,name:view==='logs'?'Logs':'Metrics',exact:true})).toBeVisible();
  return page;
 }
 const results=(page:Page):Locator=>page.getByTestId('results');
@@ -32,6 +32,8 @@ async function run(page:Page,expression:string):Promise<void>{
  await settled(page);
 }
 const only=async(page:Page,project:string,others:string[])=>{for(const o of others)await page.getByRole('checkbox',{name:o}).uncheck();await expect(page.getByRole('checkbox',{name:project})).toBeChecked();};
+// Features, the minimum data position and the restricted source live under the collapsed "Advanced query options".
+const advanced=async(page:Page)=>{const d=page.locator('details.exp-advanced');if(!(await d.evaluate((e)=>(e as HTMLDetailsElement).open)))await d.locator('summary').click();};
 const rowOf=(scope:Locator,text:string):Locator=>scope.locator('[data-series]').filter({hasText:text});
 
 test.beforeAll(async({browser})=>{
@@ -95,13 +97,15 @@ test('a missing sample is a gap in the line, never a zero',async()=>{
  await run(page,'explore_stale');
  const series=panel(page,seed.p1).locator('[data-series]');
  await expect(series).toHaveCount(1);
- const chart=series.locator('svg.series-chart');
+ const chart=panel(page,seed.p1).locator('[data-series-chart]');
+ await expect(chart).toHaveCount(1);
  await expect(chart).toHaveAttribute('data-segments','2');
  await expect(chart).toHaveAttribute('data-gap-count','1');
- await expect(chart.locator('[data-gap]')).toHaveAttribute('data-after',String(at(20)));
- await expect(chart.locator('[data-gap]')).toHaveAttribute('data-before',String(at(60)));
- await expect(series.locator('.gap-list')).toContainText('no sample for 3 evaluation steps');
- await expect(series.locator('.gap-list')).toContainText('A missing sample is absent, not zero.');
+ const gap=series.locator('.exp-gap-list [data-gap]');
+ await expect(gap).toHaveAttribute('data-after',String(at(20)));
+ await expect(gap).toHaveAttribute('data-before',String(at(60)));
+ await expect(series.locator('.exp-gap-list')).toContainText('no sample for 3 evaluation steps');
+ await expect(series.locator('.exp-gap-list')).toContainText('A missing sample is absent, not zero.');
  await series.locator('summary').filter({hasText:'Data table'}).click();
  await expect(series.locator('tr[data-sample]')).toHaveCount(5);
  await expect(series.locator('tr[data-sample] [data-kind]')).toHaveText(['10','11','12','20','20']);
@@ -131,7 +135,7 @@ test('ordinary NaN, infinities and negative zero are values; a stale marker is t
  await page.getByRole('radio',{name:'Range over the selected window',exact:true}).check();
  await page.getByLabel('Step (seconds)').fill('10');
  await run(page,'explore_nan');
- const chart=panel(page,seed.p1).locator('svg.series-chart');
+ const chart=panel(page,seed.p1).locator('[data-series-chart]');
  await expect(chart).toHaveAttribute('data-nan-count','7');
  await expect(chart).toHaveAttribute('data-gap-count','0');
  // Instant at +40s: the stale marker at +30s ended `explore_stale`; the answer is empty, not NaN and not 0.
@@ -147,7 +151,7 @@ test('a native histogram is shown bucket by bucket, and mixed float and histogra
  const page=await open();
  await only(page,seed.p1,[seed.p2]);
  await run(page,'explore_hist');
- const hist=panel(page,seed.p1).locator('details.histogram');
+ const hist=panel(page,seed.p1).locator('details.exp-histogram');
  await expect(hist.locator('summary')).toHaveText('Native histogram (float variant): count 4, sum 5.5, schema 0');
  await hist.locator('summary').click();
  await expect(hist).toContainText('count 1, threshold 0');
@@ -177,6 +181,7 @@ test('language errors are typed and located; a disabled feature is refused until
  await expect(alert.getByTestId('language-detail')).toContainText('promql-experimental-functions');
  await expect(alert).toContainText('function.feature-disabled');
  await expect(alert.getByTestId('expression-mark')).toHaveText('mad_over_time');
+ await advanced(page);
  await page.getByRole('checkbox',{name:'promql-experimental-functions',exact:true}).check();
  await expect(page.getByTestId('feature-set')).toContainText('179fdd6cfed03b91edcd310dd974c0547bf495d308888cbbee4d1a78a06be6e3');
  await run(page,'mad_over_time(explore_gauge[1m])');
@@ -190,14 +195,19 @@ test('language errors are typed and located; a disabled feature is refused until
  await run(page,'1+1');
  await expect(page.getByTestId('evaluated-with')).toContainText(PROM_3135);
  await expect(page.getByTestId('evaluated-with')).not.toContainText(PROM_310);
- // LogQL: a syntax error and a gated feature, then the same gate opened.
- await page.getByRole('radio',{name:'LogQL',exact:true}).check();
+});
+
+test('LogQL on the Logs screen: a syntax error and a gated feature, then the same gate opened',async()=>{
+ const page=await open([seed.p1,seed.p2],seed.org,'logs');
+ await only(page,seed.p1,[seed.p2]);
+ const alert=results(page).locator('[data-state="error"]');
  await run(page,'{app=');
  await expect(alert).toHaveAttribute('data-code','language');
  await expect(alert).toContainText('syntax.unexpected-token');
  const variants='variants(count_over_time({app="web"}[1m]),bytes_over_time({app="web"}[1m])) of ({app="web"}[1m])';
  await run(page,variants);
  await expect(alert.getByTestId('language-detail')).toHaveText('multi-variant queries are disabled');
+ await advanced(page);
  await page.getByRole('checkbox',{name:'multi-variant-queries',exact:true}).check();
  await run(page,variants);
  await expect(panel(page,seed.p1)).toHaveAttribute('data-state','ready');
@@ -222,9 +232,8 @@ test('a query over budget is a typed quota error: no panel, no shortened answer'
 });
 
 test('log entries keep exact nanoseconds, duplicate nanoseconds and the language order; log text is only text',async()=>{
- const page=await open();
+ const page=await open([seed.p1,seed.p2],seed.org,'logs');
  await only(page,seed.p1,[seed.p2]);
- await page.getByRole('radio',{name:'LogQL',exact:true}).check();
  await page.getByLabel('Log order').selectOption('forward');
  await run(page,'{app="web"}');
  const entries=panel(page,seed.p1).locator('tr[data-entry]');
@@ -244,7 +253,7 @@ test('log entries keep exact nanoseconds, duplicate nanoseconds and the language
  await expect(entries.nth(0).locator('[data-line]')).toHaveText('<img src=x onerror="window.__pwn=1"> user alice signed in & <b>x</b>');
  await expect(entries.nth(4).locator('[data-line]')).toContainText('<script>window.__pwn=1</script>');
  await expect(entries.nth(5).locator('[data-cell="stream-labels"]')).toContainText('canary="<img src=x onerror=window.__pwn=2>"');
- expect(await page.locator('.log-table img, .log-table script, .log-table b').count()).toBe(0);
+ expect(await page.locator('.exp-logs img, .exp-logs script, .exp-logs b').count()).toBe(0);
  expect(await page.evaluate(()=>(window as unknown as {__pwn?:number}).__pwn)).toBeUndefined();
  // An explicit page size returns exactly the first part and says that more exist.
  await page.getByLabel('Log page size').fill('2');
@@ -350,7 +359,7 @@ test('a denied project and a missing organization are the same Not found, and no
   await expect(state).toHaveCount(1);
   await expect(state).toContainText('Not found');
   await expect(results(page).locator('[data-project], [data-series]')).toHaveCount(0);
-  texts.push((await state.innerText()).replace(/Request [0-9a-f]{32}\./,'').trim());
+  texts.push((await state.innerText()).replace(/\s+/g,' ').replace(/Request [0-9a-f]{32}\./,'').trim());
   await page.close();
  }
  expect(new Set(texts).size).toBe(1);
@@ -400,17 +409,22 @@ test('the pinned profiles and feature sets are read from the server registry, an
  const committed=readdirSync(dir).filter((f)=>f.endsWith('.json')).sort().map((f)=>JSON.parse(readFileSync(resolve(dir,f),'utf8')) as {id:string;feature_sets:{id:string;enabled:string[]}[]});
  expect(registry.profiles.map((p)=>p.id)).toEqual(committed.map((c)=>c.id));
  for(const c of committed)expect(registry.profiles.find((p)=>p.id===c.id)?.feature_sets).toEqual(c.feature_sets);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
- // The profile choices are the served PromQL profiles, in the served order, and LogQL offers the served LogQL profile.
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
+ // The profile choices are the served PromQL profiles, in the served order; the Logs screen offers the served LogQL profile. The console
+ // shows its heading while the registry request is still in flight (a stated loading state with no form: the select exists only once the
+ // served registry has rendered), so the options are read with a retrying assertion, never with a one-shot read right after the heading.
  const profileSelect=page.getByLabel('Pinned profile');
- expect(await profileSelect.locator('option').allTextContents()).toEqual(registry.profiles.filter((p)=>p.language==='promql').map((p)=>p.id));
- await page.getByRole('radio',{name:'LogQL'}).check();
- expect(await profileSelect.locator('option').allTextContents()).toEqual(registry.profiles.filter((p)=>p.language==='logql').map((p)=>p.id));
- await page.getByRole('radio',{name:'PromQL'}).check();
+ await expect(profileSelect.locator('option')).toHaveText(registry.profiles.filter((p)=>p.language==='promql').map((p)=>p.id));
+ const logs=await ctx.newPage();
+ await logs.goto(`/${hashFor(seed.org,[seed.p1,seed.p2],'logs')}`);
+ await expect(logs.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
+ await expect(logs.getByLabel('Pinned profile').locator('option')).toHaveText(registry.profiles.filter((p)=>p.language==='logql').map((p)=>p.id));
+ await logs.close();
  // Every served feature of the newer PromQL profile is offered, and selecting one shows (and later sends) the served set that enables exactly it.
  await profileSelect.selectOption(PROM_3135);
  const served=registry.profiles.find((p)=>p.id===PROM_3135);
  if(!served)throw Error('the served registry lacks '+PROM_3135);
+ await advanced(page);
  for(const f of served.features)await expect(page.getByRole('checkbox',{name:f,exact:true})).toBeVisible();
  const feature=served.features[served.features.length-1]!;
  await page.getByRole('checkbox',{name:feature,exact:true}).check();
@@ -421,6 +435,23 @@ test('the pinned profiles and feature sets are read from the server registry, an
  page.on('request',(r)=>{if(r.method()==='POST'&&r.url().endsWith('/api/v1/query'))sent.push(r.postDataJSON() as (typeof sent)[number]);});
  await run(page,'1+1');
  expect(sent).toEqual([expect.objectContaining({profile:PROM_3135,feature_set:want.id})]);
+});
+
+test('while the registry request is in flight the console states loading and offers no query form; the served profiles appear when it answers',async()=>{
+ const page=await ctx.newPage();
+ // The one registry request is held until the test releases it; the answer is then the real server's, unchanged.
+ const gate=Promise.withResolvers<void>();
+ await page.route((u)=>u.pathname==='/api/v1/query/profiles',async(r)=>{await gate.promise;await r.continue();});
+ const answered=page.waitForResponse((r)=>new URL(r.url()).pathname==='/api/v1/query/profiles');
+ await page.goto(`/${hashFor(seed.org,[seed.p1,seed.p2],'logs')}`);
+ await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
+ await expect(page.locator('[data-section="explore"] [data-state="loading"]')).toBeVisible();
+ await expect(page.getByLabel('Pinned profile')).toHaveCount(0);
+ await expect(page.getByLabel('Query expression')).toHaveCount(0);
+ gate.resolve();
+ const registry=await (await answered).json() as {profiles:{id:string;language:string}[]};
+ await expect(page.getByLabel('Pinned profile').locator('option')).toHaveText(registry.profiles.filter((p)=>p.language==='logql').map((p)=>p.id));
+ await expect(page.getByLabel('Query expression')).toBeVisible();
 });
 
 test('a registry that cannot be read is a stated state and no query form, never a guessed feature set',async()=>{
@@ -445,7 +476,7 @@ test('a saved view is an explicit project-owned action: stored on the server, li
   const p=await c.newPage();
   await login(p,who.email,who.password);
   await p.goto(`/${hashFor(seed.org,projects)}`);
-  await expect(p.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  await expect(p.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
   return p;
  };
  const section=(p:Page,project:string):Locator=>p.locator(`[data-section="saved-views"] [data-project="${project}"]`);
@@ -549,7 +580,7 @@ test('a save whose outcome is unknown is repeated under the same command ID, so 
   const page=await c.newPage();
   await login(page,author.email,author.password);
   await page.goto(`/${hashFor(seed.org,[seed.p1])}`);
-  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
   const NAME='Unknown outcome view';
   await page.getByLabel('Query expression').fill('explore_gauge{job="api"} # unknown-outcome-canary');
   await page.getByLabel(/^Name/).fill(NAME);
@@ -594,9 +625,13 @@ test('an export completes, downloads the exact records, and an export revoked be
  const page=await rctx.newPage();
  await login(page,reader.email,reader.password);
  await page.goto(`/${hashFor(seed.org,[seed.p1])}`);
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Metrics',exact:true})).toBeVisible();
  const exportPanel=page.locator('[data-section="export"]');
  await exportPanel.getByLabel('Signal').selectOption('log');
+ // The saved views card sits above the export card and changes height when the server's answer renders (loading panel, then the list or "none").
+ // A press made while that answer is still pending can be released on the shifted layout (the button gets the mouse down, the form the mouse up,
+ // so no click reaches it: measured on Firefox with the answer held back 40-60 ms), so the first press waits until nothing above it is loading.
+ await expect(page.locator('[data-section="saved-views"] [data-state="loading"]')).toHaveCount(0);
  await exportPanel.getByRole('button',{name:'Start export',exact:true}).click();
  await expect(exportPanel.getByTestId('export-status')).toContainText('Complete:',{timeout:30_000});
  const [download]=await Promise.all([page.waitForEvent('download'),exportPanel.getByRole('button',{name:'Download the export',exact:true}).click()]);
@@ -634,14 +669,13 @@ test('a restricted raw source is invisible to a telemetry-only reader: no rows, 
  const plain=await onboardLogSource(owners,seed.org,project,{names:['alice']});
  await ingestLog(api,plain,{at:at(1),name:'alice'});
  for(let i=0;i<RAW.length;i++)await ingestRawLog(api,raw,{at:at(2+i),text:RAW[i]!});
- const hash=`#${new URLSearchParams({org:seed.org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+ const hash=`#${new URLSearchParams({org:seed.org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'logs'})}`;
  const query='{app="web"}';
  const logs=async(page:Page,source?:string):Promise<void>=>{
   await page.goto(`/${hash}`);
-  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
-  await page.getByRole('radio',{name:'LogQL',exact:true}).check();
+  await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
   await page.getByLabel('Log order').selectOption('forward');
-  if(source!==undefined)await page.getByLabel(/Restricted source ID/).fill(source);
+  if(source!==undefined){await advanced(page);await page.getByLabel(/Restricted source ID/).fill(source);}
   await run(page,query);
  };
  // The telemetry-only reader (the same account the rest of this spec uses) gets the structured line and nothing else.

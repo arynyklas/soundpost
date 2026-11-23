@@ -102,7 +102,7 @@ async function expectPanelShows(page:Page,v:View):Promise<void>{
 }
 
 async function openPanel(page:Page):Promise<void>{
- const hash=new URLSearchParams({org,projects:project,start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000),tz:'UTC',view:'settings'});
+ const hash=new URLSearchParams({org,projects:project,start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000),tz:'UTC',view:'cutover'});
  await reopen(page,`/#${hash}`);
  await expect(panelOf(page)).toBeVisible();
  await expect(panelOf(page).getByRole('heading',{name:'Notification cutover'})).toBeVisible();

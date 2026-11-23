@@ -60,7 +60,7 @@ test('frontend to API to PostgreSQL with overlapping work: the path follows the 
  await expect(limits(page).locator('[data-limit="none_reported"]')).toHaveCount(0);
 });
 
-test('selecting a span shows its recorded details as text, moves focus to them, and links to the Explore window of that span',async()=>{
+test('selecting a span shows its recorded details as text, moves focus to them, and links to the Logs and Metrics windows of that span',async()=>{
  const page=await open(seed.clean.trace);
  const api=path(page).getByRole('button',{name:'Show details of span op.api, server, level 2'});
  await api.focus();
@@ -72,13 +72,16 @@ test('selecting a span shows its recorded details as text, moves focus to them, 
  await expect(details).toContainText('exactly 90 ms');
  await expect(path(page).locator(`tr[data-span="${seed.clean.api}"]`)).toHaveAttribute('aria-selected','true');
  await expect(api).toHaveAttribute('aria-pressed','true');
- const link=details.getByRole('link',{name:'Explore metrics and logs in the window of this span'});
+ const link=details.getByRole('link',{name:'Logs in the window of this span'});
  const target=new URLSearchParams((await link.getAttribute('href'))!.slice(1));
  expect(BigInt(target.get('start')!)).toBe(ANCHOR+ms(5)-1_000_000_000n);
  expect(BigInt(target.get('end')!)).toBe(ANCHOR+ms(95)+1_000_000_001n);
- expect(target.get('view')).toBe('explore');
+ expect(target.get('view')).toBe('logs');
+ const metricsLink=new URLSearchParams(((await details.getByRole('link',{name:'Metrics in the window of this span'}).getAttribute('href'))!).slice(1));
+ expect(metricsLink.get('view')).toBe('metrics');
+ expect(metricsLink.get('start')).toBe(target.get('start'));
  await link.click();
- await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Logs',exact:true})).toBeVisible();
 });
 
 test('gateway to dependency: the dependency boundary is stated, and an asynchronous job link never extends the request',async()=>{
@@ -238,10 +241,13 @@ test('a selected span links to its job, replay, profile and error through the se
  }).toPass({timeout:90_000});
  await openIssue.click();
  await expect(page).toHaveURL(new RegExp(`view=issues&target=${p1}%3A[0-9a-f]{32}`));
- await expect(page.getByRole('heading',{name:/^Issue [0-9a-f]{32}$/})).toBeVisible();
- // Persisted issue evidence is an organization-administrator read (the issue view takes no time window: it lists every stored occurrence): a reader holding telemetry.read only lands on the issue and is told so, and sees no occurrence.
- await expect(page.locator('.status')).toContainText('organization administrator');
- await expect(page.locator('tr[data-occurrence]')).toHaveCount(0);
+ const issueHeading=page.locator('h1[data-issue]');
+ await expect(issueHeading).toBeVisible();
+ await expect(issueHeading).toHaveAttribute('data-issue',/^[0-9a-f]{32}$/);
+ // Persisted issue evidence is a project reader's read (D92, under the caller's own scope; the issue view takes no time window: it lists every stored occurrence): a reader holding telemetry.read only lands on the issue and reads the occurrence the span names.
+ await expect(page.locator(`tr[data-occurrence="${occurrence}"]`)).toBeVisible();
+ await expect(page.locator('tr[data-occurrence]')).toHaveCount(1);
+ await expect(page.getByText('can only be read by an organization administrator')).toHaveCount(0);
  await page.goBack();
  details=await selectSpan(page,'Show details of span op.api, internal, level 2');
  await expect(target(details,'replay','no')).toContainText('not available to this account.');
@@ -255,8 +261,8 @@ test('a selected span links to its job, replay, profile and error through the se
  details=await selectSpan(page,'Show details of span op.frontend, server, level 1');
  await expect(target(details,'job','yes')).toContainText('Access is checked again when it opens.');
  await details.getByRole('link',{name:'Open this job'}).click();
- await expect(page.getByRole('heading',{name:'Jobs',exact:true})).toBeVisible();
- await expect(page.getByTestId('job-panel')).toHaveAttribute('data-job',job);
+ await expect(page.getByTestId('job-heading')).toHaveAttribute('data-job',job);
+ await expect(page.locator(`h1[data-job="${job}"]`)).toBeVisible();
  await page.close();
 
  // A reader that also holds replay.read and profiles.read: the same references resolve, and each opens in its own view.

@@ -4,8 +4,12 @@ import type { Id } from '../api/types';
 import { StatusPanel } from '../app/StatusPanel';
 import { newCommandId } from '../incidents/model';
 import type { ViewContext } from '../app/context';
+import { memberName, useShell, type Names } from '../shell/ShellContext';
+import { Icon } from '../ui/Icon';
+import { DataTable, Dialog, Pill } from '../ui/primitives';
 import { PERMISSIONS, buildTeam, type AdminOrg, type TeamConfig } from './admin';
 import { AdminForm, useAdminRead } from './AdminForm';
+import { Panel } from './SettingsUi';
 
 const NEW = 'new';
 
@@ -23,45 +27,69 @@ function TeamForm(props: { org: AdminOrg; epoch: string; reload: () => void; tea
    onCommitted={() => { if (props.teamId === NEW) { setMembers(''); setChosen([]); setPermissions([]); setEnabled(true); setFresh(newCommandId()); } props.reload(); }}
    build={() => { const built = buildTeam(members, chosen, permissions, enabled); return built.ok ? { ok: true, value: { kind: 'team', payload: { id, config: built.value } } } : built; }}>
    <label>Members (user IDs, comma separated) <input value={members} onChange={(e) => setMembers(e.target.value)} autoComplete="off" spellCheck={false} /></label>
-   <fieldset>
+   <fieldset className="set-perm-set">
     <legend>Projects of this team</legend>
-    {projects.length === 0 ? <p data-state="empty">This organization has no project yet.</p> : projects.map(([pid, name]) => <label key={pid}><input type="checkbox" checked={chosen.includes(pid)} onChange={() => setChosen(flip(chosen, pid))} /> {name} <code>{pid}</code></label>)}
+    {projects.length === 0 ? <p data-state="empty" className="set-empty">This organization has no project yet.</p> : <div className="set-checks">{projects.map(([pid, name]) => <label className="check" key={pid}><input type="checkbox" checked={chosen.includes(pid)} onChange={() => setChosen(flip(chosen, pid))} /> {name} <code>{pid}</code></label>)}</div>}
    </fieldset>
-   <fieldset>
+   <fieldset className="set-perm-set">
     <legend>Permissions on those projects</legend>
-    {PERMISSIONS.map((p) => <label key={p.id}><input type="checkbox" checked={permissions.includes(p.id)} onChange={() => setPermissions(flip(permissions, p.id))} /> {p.label} <code>{p.id}</code></label>)}
+    <div className="set-checks">{PERMISSIONS.map((p) => <label className="check" key={p.id}><input type="checkbox" checked={permissions.includes(p.id)} onChange={() => setPermissions(flip(permissions, p.id))} /> {p.label} <code>{p.id}</code></label>)}</div>
    </fieldset>
-   <label><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Team enabled</label>
+   <label className="check"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Team enabled</label>
   </AdminForm>
  );
+}
+
+function ChangeTeam(props: { org: AdminOrg; epoch: string; reload: () => void; teamId: Id; config: TeamConfig }): React.JSX.Element {
+ const [open, setOpen] = React.useState(false);
+ return (
+  <>
+   <button type="button" className="btn btn-sm" aria-label={`Change team ${props.teamId}`} onClick={() => setOpen(true)}><Icon name="edit" size="xs" />Change</button>
+   <Dialog open={open} onClose={() => setOpen(false)} title="Change team" tall>
+    <div className="modal-body"><TeamForm {...props} /></div>
+   </Dialog>
+  </>
+ );
+}
+
+function who(ids: readonly Id[], names: Names): string {
+ const shown = ids.slice(0, 3).map((u) => memberName(names, u) ?? `${u.slice(0, 8)}…`);
+ return `${ids.length} member${ids.length === 1 ? '' : 's'}${shown.length > 0 ? `: ${shown.join(', ')}${ids.length > shown.length ? ` and ${ids.length - shown.length} more` : ''}` : ''}`;
 }
 
 /** Teams: a set of members holding the same permissions on the same projects. A team grants only what it names, only to members of this
  * organization, and a disabled team grants nothing. A team is replaced as a whole; a stale save is refused and nothing is changed. */
 export function TeamSettings(props: { context: ViewContext }): React.JSX.Element {
  const { load, reload } = useAdminRead(props.context, 'organization');
+ const { names } = useShell();
  const data = load.kind === 'ready' ? load.data : undefined;
  const org = data?.org;
  const teams = org ? Object.entries(org.teams).sort((a, b) => a[0].localeCompare(b[0])) : [];
+ const shown: Names = names.forOrg === props.context.org ? names : { ...names, members: new Map() };
  return (
-  <div data-settings-page="teams">
-   <h3>Teams of organization <code>{props.context.org}</code></h3>
+  <div data-settings-page="teams" className="col g16">
    {load.kind !== 'ready' && <StatusPanel state={load} />}
    {data && org && (
     <>
-     <p data-testid="admin-revision" data-epoch={data.epoch}>Read at organization policy epoch {data.epoch}.</p>
-     <section aria-labelledby="teams-list" data-section="teams">
-      <h4 id="teams-list">Teams</h4>
-      {teams.length === 0 ? <p role="status" data-state="empty">This organization has no team.</p> : (
-       <ul>{teams.map(([tid, team]) => (
-        <li key={tid} data-team={tid} data-team-state={team.enabled ? 'enabled' : 'disabled'}>
-         <code>{tid}</code> — {team.enabled ? 'enabled' : 'disabled'}; {team.members.length} member{team.members.length === 1 ? '' : 's'}; projects {team.projects.map((p) => org.projects[p] ?? p).join(', ') || 'none'}; permissions {team.permissions.join(', ') || 'none'}.
-         <TeamForm org={org} epoch={data.epoch} reload={reload} teamId={tid} config={team} />
-        </li>
-       ))}</ul>
-      )}
-      <TeamForm org={org} epoch={data.epoch} reload={reload} teamId={NEW} config={undefined} />
-     </section>
+     <p className="small t2" data-testid="admin-revision" data-epoch={data.epoch}>Read at organization policy epoch {data.epoch}. A team grants only what it names, only to members of this organization; a disabled team grants nothing.</p>
+     <div data-section="teams">
+      <Panel title="Teams of the organization">
+       <div className="col g12">
+        {teams.length === 0
+         ? <p role="status" data-state="empty" className="set-empty">This organization has no team.</p>
+         : <DataTable label="Teams, their members, projects and permissions" rows={teams} rowKey={([tid]) => tid} rowAttrs={([tid, t]) => ({ 'data-team': tid, 'data-team-state': t.enabled ? 'enabled' : 'disabled' })} columns={[
+          { key: 'id', header: 'Team', cell: ([tid]) => <code>{tid}</code> },
+          { key: 'state', header: 'State', cell: ([, t]) => <Pill tone={t.enabled ? 'ok' : 'line'} icon={t.enabled ? 'check' : 'pause'}>{t.enabled ? 'enabled' : 'disabled'}</Pill> },
+          { key: 'members', header: 'Members', cell: ([, t]) => who(t.members, shown) },
+          { key: 'projects', header: 'Projects', cell: ([, t]) => t.projects.map((p) => org.projects[p] ?? p).join(', ') || 'none' },
+          { key: 'perms', header: 'Permissions', cell: ([, t]) => <span className="set-perms">{t.permissions.length === 0 ? 'none' : t.permissions.map((p) => <code key={p}>{p}</code>)}</span> },
+          { key: 'act', header: <span className="sr-only">Change</span>, label: 'Change', cell: ([tid, t]) => <ChangeTeam org={org} epoch={data.epoch} reload={reload} teamId={tid} config={t} /> },
+         ]} />}
+        <h3 className="set-sub">Create a team</h3>
+        <TeamForm org={org} epoch={data.epoch} reload={reload} teamId={NEW} config={undefined} />
+       </div>
+      </Panel>
+     </div>
     </>
    )}
   </div>

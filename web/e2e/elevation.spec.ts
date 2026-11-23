@@ -8,6 +8,8 @@ if(!admin||!password||!selected)throw new Error('A real separate MFA-free instan
 
 async function signIn(page:Page,email:string,secret:string):Promise<void>{
  await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ // The console lands on Home; elevation, enrollment and restore are on the account page.
+ await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();await page.evaluate(()=>{location.hash='#view=account';});await expect(page.getByRole('heading',{name:'Account access',level:1})).toBeVisible();
 }
 /** Opens the elevation form for `org`, fills it and submits; resolves with the elevation response the page received. */
 async function elevate(page:Page,org:string,reason:string,secret:string){
@@ -56,7 +58,8 @@ test('selected organization elevation clears on navigation and expires at fiftee
  let first=await elevate(page,selected,'Generic browser acceptance scoped investigation',password);
  expect(first.status()).toBe(200);
  await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeVisible();
- await page.evaluate(()=>{location.hash='access';});await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden();
+ await page.evaluate(()=>{location.hash='#view=home';});await expect(page.getByRole('heading',{name:'Home',level:1})).toBeVisible();
+ await page.evaluate(()=>{location.hash='#view=account';});await expect(page.getByRole('heading',{name:'Account access',level:1})).toBeVisible();await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden();
  // A real project of the selected organization for the elevated reads below (an admin command needs a session fresh within five minutes).
  const project=await createProject(page,selected,'elevation expiry project');
  const second=await elevate(page,selected,'Generic browser acceptance expiry',password);

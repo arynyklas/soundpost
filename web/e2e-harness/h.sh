@@ -6,6 +6,9 @@
 #   h.sh sched           the real scheduler capture (sched_switch/sched_wakeup of a real workload); needs tracefs + CAP_PERFMON, i.e. root; the file
 #                        is copied to the browser host and named by E2E_NATIVE_SCHED_PROFILE (the real-scheduler case of replay-profile.spec.ts)
 #   h.sh up [oidc]       fresh server (+ OIDC fixture when "oidc"), bootstrap the owner, provision accounts
+#   h.sh demo            fresh server with the DEMO data set (e2e-provision/demo.spec.ts: Example Co, 3 projects, named people, 7 incidents, issue with mapped
+#                        frames, releases, traces, metrics with a gap, jobs, replays, profile) through the real routes; the server stays up; needs `prep`
+#   h.sh shots DIR       screenshots of every console screen, dark and light, of the running demo server into DIR (e2e-provision/shots.spec.ts)
 #   h.sh pw ARGS...      headless playwright (chromium project) with ARGS
 #   h.sh headed ARGS...  headed playwright under xvfb, screenshots + traces kept in $OUT
 #   h.sh down            stop server and fixture
@@ -221,6 +224,8 @@ case "${1:-}" in
 prep) prep ;;
 sched) sched ;;
 up) shift; up "$@" ;;
+demo) shift; export E2E_SANDBOX=${E2E_SANDBOX:-1}; up "$@"; cfgs; E2E_BROWSER=chromium DEMO_OUT=$T/demo.json pw_env exec_pw -c zz-pw.provision.config.ts e2e-provision/demo.spec.ts; echo "demo-ok $T/demo.json" ;;
+shots) shift; [ -n "${1:-}" ] || { echo "usage: $0 shots DIR" >&2; exit 2; }; mkdir -p "$1"; cfgs; E2E_BROWSER=chromium DEMO_JSON=$T/demo.json SHOTS_OUT=$(cd "$1" && pwd) pw_env exec_pw -c zz-pw.provision.config.ts e2e-provision/shots.spec.ts ;;
 down) down ;;
 pw) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; case " $* " in *" --project"*) ;; *) set -- --project=$b "$@" ;; esac; pw_env exec_pw -c $cfg "$@" ;;
 headed) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec sh '$ROOT/web/e2e-harness/in-trust-ns.sh' node node_modules/@playwright/test/cli.js test -c $cfg --project=$b \"\$@\"" sh "$@" ;;

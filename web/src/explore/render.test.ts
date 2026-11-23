@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryFault, type EvaluationWire, type LogEntry, type ProjectResult, type QueryRequest, type QueryValue, type Sample, type ViewContext } from '../api/types';
-import { DiagnosticList, FaultView, ProjectPanel } from './ExplorePage';
+import { DiagnosticList, FaultView, ProjectPanel } from './Results';
 import { LiveItems } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult } from './MetricResult';
@@ -87,7 +87,25 @@ describe('metric text is only ever text, and every value says what it is', () =>
   expect(html).toContain(`data-after="${at(20)}" data-before="${at(60)}"`);
   expect(html).toContain('no sample for 3 evaluation steps');
   expect(html).toContain('A missing sample is absent, not zero.');
-  expect(html).not.toMatch(/>0</);
+  expect(html).not.toMatch(/data-kind="finite"[^>]*>0</);
+  expect(html).toContain('data-series-chart');
+  expect(html).toContain('aria-label="Chart of 1 series');
+ });
+ test('NaN and the stale marker in a range are counted in words under the chart, not plotted and not gaps', () => {
+  const range: EvaluationWire = { instant: false, time: '0', start: at(0), end: at(70), step: String(10n * NS) };
+  const matrix = project({ type: 'matrix', matrix: [{ labels: [{ name: '__name__', value: 'explore_nan' }], samples: [sample(0, bitsOf(1)), sample(10, '7ff8000000000001'), sample(20, bitsOf(2)), sample(30, '7ff0000000000002'), sample(40, bitsOf(3)), sample(50, bitsOf(4)), sample(60, bitsOf(5)), sample(70, bitsOf(6))] }] });
+  const html = render(React.createElement(MetricResult, { result: matrix, evaluation: range }));
+  expect(html).toContain('data-nan-count="1"');
+  expect(html).toContain('data-stale-count="1"');
+  expect(html).toContain('data-gap-count="0"');
+  expect(html).toContain('Not plotted, and the line breaks there: 1 NaN (a value, not a gap), 1 stale marker (the absence of a sample).');
+ });
+ test('an instant evaluation of a range selector is a table with no chart, and says so', () => {
+  const instant: EvaluationWire = { instant: true, time: at(10), start: '0', end: '0', step: '0' };
+  const matrix = project({ type: 'matrix', matrix: [{ labels: [{ name: 'a', value: 'b' }], samples: [sample(0, bitsOf(1)), sample(10, bitsOf(2))] }] });
+  const html = render(React.createElement(MetricResult, { result: matrix, evaluation: instant }));
+  expect(html).not.toContain('data-series-chart');
+  expect(html).toContain('An instant evaluation has one moment');
  });
  test('a native histogram is shown with its buckets, not as a number', () => {
   const histogram: Sample = { time: at(0), histogram: { float: { flavor: 'counter', schema: 0, zero_threshold: bitsOf(0), sum: bitsOf(5.5), count: bitsOf(4), zero_count: bitsOf(1), positive_spans: [{ offset: 0, length: 2 }], negative_spans: [], positive_buckets: [bitsOf(2), bitsOf(1)], negative_buckets: [], reset_hint: 'unknown' } } };

@@ -9,6 +9,8 @@ const token=env('SOUNDPOST_RESTORE_TOKEN'),readerEmail=env('SOUNDPOST_RESTORE_RE
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
 const recovery={email:`recovery-${Date.now()}@example.test`,password:`recovery admin password ${Date.now()}`};
 const loginStatus=async(page:Page,email:string,password:string):Promise<number>=>(await page.request.post(`${origin}/api/v1/login`,{headers:{Origin:origin},data:{Email:email,Password:password,Code:''}})).status();
+// The console lands on Home after sign-in; the restored-installation panel is on the account page (#view=account).
+const openAccount=async(page:Page):Promise<void>=>{await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();await page.goto('/#view=account');await page.reload();};
 
 test.describe.configure({mode:'serial'});
 
@@ -24,6 +26,7 @@ test('restored accounts and credentials are inactive; the recovery bootstrap sho
  await page.getByLabel('Email',{exact:true}).fill(recovery.email);
  await page.getByLabel('Password',{exact:true}).fill(recovery.password);
  await page.getByRole('button',{name:'Initialize administrator',exact:true}).click();
+ await openAccount(page);
  const panel=page.getByRole('region',{name:'Restored installation'});
  await expect(panel).toBeVisible();
  await expect(panel.getByRole('heading',{name:'Restored installation: access is bootstrap-only'})).toBeVisible();
@@ -49,6 +52,7 @@ test('the recovery administrator reauthorizes one account with fresh authenticat
  await page.getByLabel('Email',{exact:true}).fill(recovery.email);
  await page.getByLabel('Password',{exact:true}).fill(recovery.password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await openAccount(page);
  const panel=page.getByRole('region',{name:'Restored installation'});
  await expect(panel).toBeVisible();
  const before=Number(((await panel.getByRole('status').first().innerText()).match(/(\d+) item/)??[])[1]);
@@ -81,8 +85,9 @@ test('project settings after a restore list the inactive sources and senders, an
  await page.getByLabel('Email',{exact:true}).fill(recovery.email);
  await page.getByLabel('Password',{exact:true}).fill(recovery.password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await openAccount(page);
  await expect(page.getByRole('region',{name:'Restored installation'})).toBeVisible();
- const params=new URLSearchParams({org,projects:project,start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000),tz:'UTC',view:'settings'});
+ const params=new URLSearchParams({org,projects:project,start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000),tz:'UTC',view:'settings',page:'project'});
  await page.goto(`/#${params}`);
  await page.reload();
  const panel=page.getByRole('region',{name:'Restored sources and senders'});

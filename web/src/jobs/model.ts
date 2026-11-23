@@ -205,3 +205,14 @@ export function readChange(before: { key: string; generation: number }, after: {
  if (before.key !== after.key) return 'new-target';
  return before.generation === after.generation ? 'none' : 'refresh';
 }
+
+/** The tone that only reinforces the health word: failure and a missed run read as critical, anything that is not a success or not known reads as a warning or as unknown. */
+export function healthTone(status: JobHealthStatus): 'ok' | 'crit' | 'high' | 'info' | 'unk' {
+ switch (status) {
+  case 'succeeded': return 'ok';
+  case 'failed': case 'missed': return 'crit';
+  case 'cancelled': case 'running_too_long': case 'late': return 'high';
+  case 'running': return 'info';
+  case 'unknown': return 'unk';
+ }
+}

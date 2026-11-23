@@ -170,3 +170,12 @@ export const sideWords = (side: SpanSide): string => SIDE_WORDS[side];
 export function kindCounts(by: Record<string, number>): { kind: string; count: number }[] {
  return Object.entries(by).map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count || (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
 }
+
+export type PathState = 'current' | 'passed' | 'not_reached';
+export const PATH_WORDS: Record<PathState, string> = { current: 'Current', passed: 'Passed', not_reached: 'Not reached' };
+/** Every phase of the cutover in its fixed order, each marked from the committed timeline only: the current one, the ones a committed step passed through, and the ones never reached. */
+export function phasePath(c: CutoverState): { phase: CutoverPhase; state: PathState }[] {
+ const seen = new Set<string>();
+ for (const s of c.timeline) { seen.add(s.to); if (s.from !== '') seen.add(s.from); }
+ return CUTOVER_PHASES.map((phase) => ({ phase, state: phase === c.phase ? 'current' : seen.has(phase) ? 'passed' : 'not_reached' }));
+}

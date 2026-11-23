@@ -69,8 +69,10 @@ async function open(who:Page,view='jobs'):Promise<void>{
 const row=(page:Page,job:string)=>page.locator(`[data-testid=job-row][data-job="${job}"]`);
 const run=(page:Page,r:string)=>page.locator(`[data-testid=run-row][data-run="${r}"]`);
 async function openJob(page:Page,job:string):Promise<void>{
- await row(page,job).getByRole('button',{name:`Open job ${job}`}).click();
- await expect(page.getByRole('heading',{name:`Job ${job}`})).toBeVisible();
+ await row(page,job).getByRole('link',{name:`Open job ${job}`}).click();
+ const heading=page.getByRole('heading',{level:1,name:'Job',exact:true});
+ await expect(heading).toBeVisible();
+ await expect(heading).toHaveAttribute('data-job',job);
 }
 async function loggedIn(who:Reader):Promise<Page>{
  const c=await br.newContext();

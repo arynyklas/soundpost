@@ -6,7 +6,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { JobSummaryView, JobView } from '../api/types';
 import type { ViewContext } from '../app/context';
-import { JobDetail, JobTable, JobsPage } from './JobsPage';
+import { JobDetail, JobTable, JobsList } from './JobsPage';
 import { ReasonNotes, RunDetailView, RunPage, timeIn } from './RunPage';
 
 const ORG = 'a'.repeat(32), P1 = 'b'.repeat(32), P2 = 'c'.repeat(32), JOB = 'd'.repeat(32), RUN = '1'.repeat(32), RUN2 = '2'.repeat(32), RUN3 = '3'.repeat(32);
@@ -42,28 +42,28 @@ const summary = (status: string, over: Record<string, unknown> = {}): JobSummary
 const detailProps = { timezone: 'UTC', selectedRun: '' as const, runsLimit: 25, openRun: () => undefined, moreRuns: () => undefined };
 const detail = (view: JobView, over: Partial<Parameters<typeof JobDetail>[0]> = {}): string => render(React.createElement(JobDetail, { ...detailProps, view, ...over }));
 
+const jobTable = (jobs: JobSummaryView[]): string => render(React.createElement(JobTable, { jobs, project: P1, href: () => '#jobs', strips: new Map() }));
+
 describe('the job list shows every health in words', () => {
  test('each status is a word in its row, next to the Open button for that job', () => {
   const statuses: [string, string][] = [['succeeded', 'Succeeded'], ['failed', 'Failed'], ['cancelled', 'Cancelled'], ['running', 'Running'], ['running_too_long', 'Running too long'], ['late', 'Late'], ['missed', 'Missed (external schedule observer evidence)'], ['unknown', 'Unknown']];
   for (const [status, word] of statuses) {
-   const html = render(React.createElement(JobTable, { jobs: [summary(status)], selected: '', open: () => undefined }));
-   expect(html).toContain(`<td>${word}</td>`);
+   const html = jobTable([summary(status)]);
+   expect(html).toContain(`>${word}</span>`);
    expect(html).toContain('data-testid="job-row"');
    expect(html).toContain(`data-job="${JOB}"`);
-   expect(html).toContain(`Open job ${JOB}`);
-   expect(html).toContain('<table class="data-table" aria-label="Jobs">');
+   expect(html).toContain(`aria-label="Open job ${JOB}"`);
+   expect(html).toContain('aria-label="Jobs"');
   }
  });
  test('completeness, erasure, counts and the selected row are stated', () => {
-  const html = render(React.createElement(JobTable, { jobs: [summary('unknown', { health: health({ status: 'unknown', complete: false }), erased: true }), summary('succeeded', { job: JOB.replace(/d/g, 'e') })], selected: JOB, open: () => undefined }));
+  const html = jobTable([summary('unknown', { health: health({ status: 'unknown', complete: false }), erased: true }), summary('succeeded', { job: JOB.replace(/d/g, 'e') })]);
   expect(html).toContain('Incomplete evidence. History erased');
-  expect(html).toContain('<td>Complete</td>');
-  expect(html).toContain('<td>3</td><td>5</td>');
-  expect(html).toContain('data-selected="yes"');
-  expect(html).toContain('data-selected="no"');
-  expect(html).toContain('aria-pressed="true"');
-  expect(html).toContain('scope="col"');
-  expect(html).toContain('<caption>');
+  expect(html).toContain('>Complete</span>');
+  expect(html).toContain('<span class="num">3</span>');
+  expect(html).toContain('<span class="num">5</span>');
+  expect(html).toMatch(/<th scope="col"[^>]*>Current health<\/th>/);
+  expect(html).toContain('<caption class="sr-only">');
  });
 });
 
@@ -141,7 +141,7 @@ describe('runs: recovery, basis of health, supersession, overlap and daylight sa
   runView({ id: RUN2, occurrence: { key: 's.old', scheduled: true, at_ns: ns(-3600), fold: 1 }, status: 'recovered', recovered: true, attempt_count: 2, failed_attempts: 1, basis_of_health: false, superseded_by: 's.new', overlaps: [RUN3], overlap_count: 2 }),
   runView({ id: RUN3, occurrence: { key: 'manual.1', scheduled: false, fold: 0 }, status: 'cancelled', attempt_count: 1, failed_attempts: 0, basis_of_health: false }),
  ];
- const rowOf = (html: string, id: string): string => text(new RegExp(`<tr data-testid="run-row" data-run="${id}"[^>]*>(.*?)</tr>`, 's').exec(html)?.[1] ?? '');
+ const rowOf = (html: string, id: string): string => text(new RegExp(`<tr[^>]*data-testid="run-row" data-run="${id}"[^>]*>(.*?)</tr>`, 's').exec(html)?.[1] ?? '');
  const html = detail(jobView({ runs, total_runs: 3, total_attempts: 5 }), { selectedRun: RUN2 });
  test('a recovered run is labelled as such while the job is currently failed, in two different sentences', () => {
   expect(block(html, 'job-health')).toContain('Current job health: Failed');
@@ -169,7 +169,7 @@ describe('runs: recovery, basis of health, supersession, overlap and daylight sa
   expect(html).toContain(`data-run="${RUN2}" data-selected="yes"`);
   expect(html).toContain(`Open run ${RUN3}`);
   expect(html).toContain('2 failed of 2 attempts');
-  expect(html).toContain('<table class="data-table" aria-label="Runs">');
+  expect(html).toContain('aria-label="Runs"');
  });
  test('the occurrence key and the scheduled instant are shown in the scope time zone', () => {
   const row = rowOf(html, RUN);
@@ -208,7 +208,7 @@ const attempt = (over: Record<string, unknown> = {}): Record<string, unknown> =>
 const runDetail = (attempts: Record<string, unknown>[], over: Record<string, unknown> = {}): JobView => jobView({ run: { ...runView({ attempt_count: attempts.length, final_attempt: attempts.at(-1)?.id, ...over }), attempts } });
 const traceHref = (id: string): string => `#traces-${id}`;
 const runHtml = (view: JobView): string => render(React.createElement(RunDetailView, { view, timezone: 'UTC', traceHref }));
-const rowText = (html: string, id: string): string => text(new RegExp(`<tr data-testid="attempt-row" data-attempt="${id}"[^>]*>(.*?)</tr>`, 's').exec(html)?.[1] ?? '');
+const rowText = (html: string, id: string): string => text(new RegExp(`<tr[^>]*data-testid="attempt-row" data-attempt="${id}"[^>]*>(.*?)</tr>`, 's').exec(html)?.[1] ?? '');
 
 describe('a run lists every attempt with its original result', () => {
  const recovered = runDetail(
@@ -289,10 +289,10 @@ describe('a run lists every attempt with its original result', () => {
   expect(rowText(runHtml(recovered), A1)).not.toContain('Completed after a newer occurrence');
  });
  test('an attempt table has a caption, labelled columns and a row header per attempt', () => {
-  expect(html).toContain('<table class="data-table" aria-label="Attempts of this run">');
-  expect(html).toContain('<caption>Attempts of this run in ordinal order.');
-  expect(html).toContain('<th scope="col">Attempt</th>');
-  expect(html).toContain('<th scope="row">');
+  expect(html).toContain('aria-label="Attempts of this run"');
+  expect(html).toContain('Attempts of this run in ordinal order.');
+  expect(html).toMatch(/<th scope="col"[^>]*>Attempt<\/th>/);
+  expect(html).toContain('scope="row"');
   expect(html).toContain(`Occurrence <code>s.new</code>`);
  });
  test('a view without a run renders nothing', () => { expect(runHtml(jobView())).toBe(''); });
@@ -300,7 +300,7 @@ describe('a run lists every attempt with its original result', () => {
 
 describe('text from the server is only ever text', () => {
  test('the job list escapes an ID, a health word and a counter that carry a canary', () => {
-  const html = render(React.createElement(JobTable, { jobs: [summary('failed', { job: CANARY })], selected: CANARY, open: () => undefined }));
+  const html = jobTable([summary('failed', { job: CANARY })]);
   noElementsFromText(html);
  });
  test('the job panel escapes cron, time zone, overlap policy, loss reasons, occurrence keys, superseded keys, skipped times and unknown reasons', () => {
@@ -325,8 +325,7 @@ describe('text from the server is only ever text', () => {
 
 describe('the pages as the user first meets them', () => {
  test('the jobs page has a Jobs heading, a labelled project selector over the scope and a state in words while it loads', () => {
-  const html = render(React.createElement(JobsPage, { context }));
-  expect(html).toContain('<h2 id="jobs-heading">Jobs</h2>');
+  const html = render(React.createElement(JobsList, { context, href: () => '#jobs' }));
   expect(html).toMatch(/<select aria-label="Project"[^>]*>/);
   expect(html).toContain(`<option value="${P1}" selected="">${P1}</option>`);
   expect(html).toContain(`<option value="${P2}">${P2}</option>`);
@@ -338,7 +337,7 @@ describe('the pages as the user first meets them', () => {
  test('the run page has a heading with the run ID and says it is loading', () => {
   const html = render(React.createElement(RunPage, { jobId: JOB, runId: RUN, context }));
   expect(html).toContain(`Run <code>${RUN}</code>`);
-  expect(html).toContain('<h3 id="run-heading">');
+  expect(html).toContain('<h2 id="run-heading">');
   expect(html).toContain('data-state="loading"');
   expect(html).not.toContain('data-testid="attempt-row"');
  });
@@ -381,6 +380,6 @@ describe('a job without a definition renders', () => {
   const html = detail(view);
   expect(block(html, 'job-definition')).toBe('No job definition has been reported: this job has only attempt evidence, so it has no calendar schedule (it can fail or succeed but can never be missed) and no grace, maximum runtime or overlap policy is configured.');
   expect(block(html, 'job-health')).toContain('Current job health: Unknown');
-  expect(render(React.createElement(JobTable, { jobs: [summary('unknown', { definition: undefined })], selected: '', open: () => undefined }))).toContain('<td>Unknown</td>');
+  expect(jobTable([summary('unknown', { definition: undefined })])).toContain('>Unknown</span>');
  });
 });

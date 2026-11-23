@@ -1,10 +1,14 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import type { EvaluationWire, Label, NativeHistogram, ProjectResult, Sample, Series, VectorElement } from '../api/types';
+import { DataTable } from '../ui/primitives';
+import { LineChart, type SeriesTone } from '../ui/chart/Chart';
+import { MAX_CHART_POINTS, MAX_DRAWN, chartSamples, chartWindow, downsample, formatNumber, markCounts, markSentence, seriesStats } from './chartModel';
 import { emptyWords, histogramView, labelsText, nsToIso, planSeries, sampleText, type FloatKind, type Gap, type SeriesPlan } from './model';
 
 const PAGE = 200;
 const MAX_SERIES = 50;
+const TONES: readonly SeriesTone[] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
 const NOTE: Record<Exclude<FloatKind, 'finite'>, string> = {
  nan: 'not a number: a real value, not a missing one',
  pos_inf: 'positive infinity',
@@ -14,74 +18,74 @@ const NOTE: Record<Exclude<FloatKind, 'finite'>, string> = {
 
 /** A nanosecond instant, exact: the canonical decimal string is shown next to its UTC form, never rounded. */
 export function TimeText(props: { ns: string }): React.JSX.Element {
- return <span className="time"><code>{props.ns}</code> <small>{nsToIso(props.ns)}</small></span>;
+ return <span className="exp-time"><code>{props.ns}</code> <small>{nsToIso(props.ns)}</small></span>;
 }
 
 export function LabelText(props: { labels: Label[] }): React.JSX.Element {
- return <code className="labels">{labelsText(props.labels)}</code>;
+ return <code className="exp-labels">{labelsText(props.labels)}</code>;
 }
 
-function Histogram(props: { h: NativeHistogram }): React.JSX.Element {
+function Histogram(props: { h: NativeHistogram; where: string }): React.JSX.Element {
  const v = histogramView(props.h);
  const [shown, setShown] = React.useState(PAGE);
  const table = (name: string, buckets: { index: number; count: string }[]): React.JSX.Element | null => buckets.length === 0 ? null : (
-  <table className="data-table">
-   <caption>{name} buckets (index of the bucket, count)</caption>
-   <thead><tr><th scope="col">Bucket index</th><th scope="col">Count</th></tr></thead>
-   <tbody>{buckets.slice(0, shown).map((b) => <tr key={b.index}><td><code>{b.index}</code></td><td><code>{b.count}</code></td></tr>)}</tbody>
-  </table>
+  <div className="table-region" tabIndex={0} role="region" aria-label={`${name} buckets of a native histogram, ${props.where}`}>
+   <table className="table tight">
+    <caption className="sr-only">{name} buckets (index of the bucket, count)</caption>
+    <thead><tr><th scope="col">Bucket index</th><th scope="col">Count</th></tr></thead>
+    <tbody>{buckets.slice(0, shown).map((b) => <tr key={b.index}><td><code>{b.index}</code></td><td><code>{b.count}</code></td></tr>)}</tbody>
+   </table>
+  </div>
  );
  const total = v.positive.length + v.negative.length;
  return (
-  <details className="histogram" data-kind="histogram">
+  <details className="exp-histogram" data-kind="histogram">
    <summary>Native histogram ({v.variant} variant): count {v.count}, sum {v.sum.text}, schema {v.schema}</summary>
-   <dl>
+   <dl className="props">
     <dt>Zero bucket</dt><dd>count {v.zeroCount}, threshold {v.zeroThreshold.text}</dd>
     <dt>Flavor</dt><dd>{v.flavor}, reset hint {v.resetHint}</dd>
     {v.customBounds.length > 0 && <><dt>Custom bounds</dt><dd>{v.customBounds.map((b) => b.text).join(', ')}</dd></>}
    </dl>
    {table('Positive', v.positive)}
    {table('Negative', v.negative)}
-   {total > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show more buckets ({Math.min(shown, Math.max(v.positive.length, v.negative.length))} shown of {Math.max(v.positive.length, v.negative.length)})</button>}
+   {total > shown && <button type="button" className="btn btn-sm" onClick={() => setShown(shown + PAGE)}>Show more buckets ({Math.min(shown, Math.max(v.positive.length, v.negative.length))} shown of {Math.max(v.positive.length, v.negative.length)})</button>}
    {total === 0 && <p>This histogram has no non-zero buckets.</p>}
   </details>
  );
 }
 
 /** One sample's value in words: a number, NaN, an infinity, a stale marker or a native histogram. The IEEE bits are shown for anything that is not a plain number. */
-export function SampleValue(props: { sample: Sample }): React.JSX.Element {
+export function SampleValue(props: { sample: Sample; where?: string }): React.JSX.Element {
  const s = props.sample;
- if (s.histogram !== undefined) return <Histogram h={s.histogram} />;
+ if (s.histogram !== undefined) return <Histogram h={s.histogram} where={props.where ?? 'this result'} />;
  const t = sampleText(s);
  const bits = s.float ?? '';
  return (
-  <span className={`value value-${t.kind}`} data-kind={t.kind} data-bits={bits} title={`IEEE-754 bits ${bits}`}>
+  <span className={`exp-val exp-val-${t.kind}`} data-kind={t.kind} data-bits={bits} title={`IEEE-754 bits ${bits}`}>
    {t.text}
    {t.kind !== 'finite' && t.kind !== 'histogram' && <small> ({NOTE[t.kind]}; bits <code>{bits}</code>)</small>}
   </span>
  );
 }
 
-function VectorTable(props: { vector: VectorElement[]; result: ProjectResult }): React.JSX.Element {
+interface VectorRow { e: VectorElement; i: number }
+
+function VectorTable(props: { vector: VectorElement[]; result: ProjectResult; where: string }): React.JSX.Element {
  const [shown, setShown] = React.useState(PAGE);
  if (props.vector.length === 0) return <p data-result="vector-empty">{emptyWords(props.result, 'The query matched no series')}</p>;
+ const rows: VectorRow[] = props.vector.slice(0, shown).map((e, i) => ({ e, i }));
  return (
-  <>
-   <table className="data-table" data-result="vector">
-    <caption>Instant vector: one row per series ({props.vector.length} series)</caption>
-    <thead><tr><th scope="col">Series</th><th scope="col">Value</th><th scope="col">Sample time (nanoseconds)</th></tr></thead>
-    <tbody>
-     {props.vector.slice(0, shown).map((e, i) => (
-      <tr key={i} data-series>
-       <th scope="row"><LabelText labels={e.labels} /></th>
-       <td><SampleValue sample={e.sample} /></td>
-       <td><TimeText ns={e.sample.time} /></td>
-      </tr>
-     ))}
-    </tbody>
-   </table>
-   {props.vector.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show more series ({shown} shown of {props.vector.length})</button>}
-  </>
+  <div data-result="vector">
+   <DataTable
+    label={`Instant vector of ${props.where}`} caption={`Instant vector: one row per series (${props.vector.length} series)`} tight rows={rows} rowKey={(r) => String(r.i)} rowAttrs={() => ({ 'data-series': '' })}
+    columns={[
+     { key: 'series', header: 'Series', cell: (r) => <LabelText labels={r.e.labels} /> },
+     { key: 'value', header: 'Value', cell: (r) => <SampleValue sample={r.e.sample} where={`${props.where}, series ${r.i + 1}`} /> },
+     { key: 'time', header: 'Sample time (nanoseconds)', label: 'Sample time', cell: (r) => <TimeText ns={r.e.sample.time} /> },
+    ]}
+   />
+   {props.vector.length > shown && <button type="button" className="btn btn-sm" onClick={() => setShown(shown + PAGE)}>Show more series ({shown} shown of {props.vector.length})</button>}
+  </div>
  );
 }
 
@@ -95,54 +99,14 @@ function GapText(props: { gap: Gap }): React.JSX.Element {
  return <li data-gap data-after={gap.after ?? ''} data-before={gap.before ?? ''}><strong>Gap:</strong> no sample for {STEP_WORD(gap.missing)} {where}. A missing sample is absent, not zero.</li>;
 }
 
-const W = 640, H = 150, PAD = 10, STRIP = 18;
-
-function SeriesChart(props: { plan: SeriesPlan; samples: Sample[]; evaluation: EvaluationWire | null; labels: Label[] }): React.JSX.Element {
- const { plan, samples, evaluation } = props;
- const times = samples.map((s) => BigInt(s.time));
- const range = evaluation !== null && !evaluation.instant && BigInt(evaluation.end) > BigInt(evaluation.start);
- const x0 = range ? BigInt(evaluation.start) : times.reduce((a, b) => (b < a ? b : a), times[0] ?? 0n);
- const x1 = range ? BigInt(evaluation.end) : times.reduce((a, b) => (b > a ? b : a), times[0] ?? 0n);
- const span = Number(x1 - x0);
- const xOf = (ns: string): number => (span === 0 ? W / 2 : PAD + (Number(BigInt(ns) - x0) / span) * (W - 2 * PAD));
- const values = plan.segments.flat().map((p) => p.value);
- // A loop, not Math.min(...values): spreading more samples than the engine's argument limit throws a RangeError and blanks the chart.
- let lo = 0, hi = 0;
- for (let i = 0; i < values.length; i++) { const v = values[i] ?? 0; if (i === 0 || v < lo) lo = v; if (i === 0 || v > hi) hi = v; }
- const plotH = H - 2 * PAD - STRIP;
- const yOf = (v: number): number => (hi === lo ? PAD + plotH / 2 : PAD + plotH - ((v - lo) / (hi - lo)) * plotH);
- const stripY = H - PAD - STRIP / 2 + 4;
- const counts = { nan: 0, inf: 0, stale: 0, histogram: 0 };
- for (const m of plan.marks) { if (m.kind === 'nan') counts.nan++; else if (m.kind === 'stale') counts.stale++; else if (m.kind === 'histogram') counts.histogram++; else counts.inf++; }
- const label = `Chart of ${labelsText(props.labels)}: ${plan.points} samples, ${plan.gaps.length} gaps, ${plan.marks.length} values that are not plotted. Gaps are dashed boxes and are not zero.`;
- return (
-  <svg className="series-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} data-segments={plan.segments.length} data-gap-count={plan.gaps.length} data-nan-count={counts.nan} data-inf-count={counts.inf} data-stale-count={counts.stale} data-histogram-count={counts.histogram}>
-   <rect x={PAD} y={PAD} width={W - 2 * PAD} height={plotH} fill="none" stroke="currentColor" strokeOpacity="0.35" />
-   {plan.gaps.map((g, i) => {
-    const from = g.after === null ? x0 : BigInt(g.after), to = g.before === null ? x1 : BigInt(g.before);
-    const a = xOf(String(from)), b = xOf(String(to));
-    return <rect key={`g${i}`} data-gap data-after={g.after ?? ''} data-before={g.before ?? ''} x={Math.min(a, b)} y={PAD} width={Math.max(Math.abs(b - a), 2)} height={plotH} fill="none" stroke="currentColor" strokeDasharray="5 4" strokeWidth="1.5"><title>{`Gap: no sample for ${STEP_WORD(g.missing)}`}</title></rect>;
-   })}
-   {plan.segments.map((seg, i) => seg.length === 1
-    ? <circle key={`s${i}`} data-segment cx={xOf(seg[0]?.time ?? '0')} cy={yOf(seg[0]?.value ?? 0)} r="3" fill="currentColor" />
-    : <polyline key={`s${i}`} data-segment points={seg.map((p) => `${xOf(p.time).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="2" />)}
-   {plan.marks.map((m, i) => {
-    const x = xOf(m.time);
-    switch (m.kind) {
-     case 'nan': return <path key={`m${i}`} data-mark="nan" d={`M${x - 4},${stripY - 4} L${x + 4},${stripY + 4} M${x + 4},${stripY - 4} L${x - 4},${stripY + 4}`} stroke="currentColor" strokeWidth="2" fill="none"><title>NaN (a value, not a gap)</title></path>;
-     case 'pos_inf': return <polygon key={`m${i}`} data-mark="pos_inf" points={`${x},${stripY - 5} ${x - 5},${stripY + 4} ${x + 5},${stripY + 4}`} fill="currentColor"><title>+Inf</title></polygon>;
-     case 'neg_inf': return <polygon key={`m${i}`} data-mark="neg_inf" points={`${x},${stripY + 5} ${x - 5},${stripY - 4} ${x + 5},${stripY - 4}`} fill="currentColor"><title>-Inf</title></polygon>;
-     case 'stale': return <rect key={`m${i}`} data-mark="stale" x={x - 4} y={stripY - 4} width="8" height="8" fill="none" stroke="currentColor" strokeWidth="2" transform={`rotate(45 ${x} ${stripY})`}><title>stale marker</title></rect>;
-     default: return <rect key={`m${i}`} data-mark="histogram" x={x - 4} y={stripY - 4} width="8" height="8" fill="currentColor"><title>native histogram</title></rect>;
-    }
-   })}
-  </svg>
- );
+function statsWords(plan: SeriesPlan): string {
+ const st = seriesStats(plan);
+ if (st === null) return `${plan.points} ${plan.points === 1 ? 'sample' : 'samples'}, none of them a plottable number.`;
+ return `${plan.points} ${plan.points === 1 ? 'sample' : 'samples'}: minimum ${formatNumber(st.min)}, maximum ${formatNumber(st.max)}, mean ${formatNumber(st.avg)}, last ${formatNumber(st.last)}.`;
 }
 
-function SeriesBlock(props: { series: Series; evaluation: EvaluationWire | null }): React.JSX.Element {
- const { series, evaluation } = props;
- const plan = React.useMemo(() => planSeries(series.samples, evaluation), [series, evaluation]);
+function SeriesBlock(props: { series: Series; plan: SeriesPlan; tone: SeriesTone | null; where: string }): React.JSX.Element {
+ const { series, plan } = props;
  const [shown, setShown] = React.useState(PAGE);
  const gapAt = new Map<string, Gap>();
  for (const g of plan.gaps) gapAt.set(`${g.after ?? ''}|${g.before ?? ''}`, g);
@@ -153,48 +117,78 @@ function SeriesBlock(props: { series: Series; evaluation: EvaluationWire | null 
  for (const [i, s] of series.samples.slice(0, shown).entries()) {
   const g = previous === null ? undefined : gapAt.get(`${previous}|${s.time}`);
   if (g) rows.push(<tr key={`g${i}`} data-gap><td colSpan={2}><strong>Gap:</strong> no sample for {STEP_WORD(g.missing)} (absent, not zero)</td></tr>);
-  rows.push(<tr key={i} data-sample><td><TimeText ns={s.time} /></td><td><SampleValue sample={s} /></td></tr>);
+  rows.push(<tr key={i} data-sample><td><TimeText ns={s.time} /></td><td><SampleValue sample={s} where={`${props.where}, sample ${i + 1}`} /></td></tr>);
   previous = s.time;
  }
  const last = series.samples[series.samples.length - 1];
  const trail = last === undefined ? undefined : gapAt.get(`${last.time}|`);
  if (trail && shown >= series.samples.length) rows.push(<tr key="trail" data-gap><td colSpan={2}><strong>Gap:</strong> no sample for {STEP_WORD(trail.missing)} until the end of the range</td></tr>);
+ const label = labelsText(series.labels);
  return (
-  <section className="series" data-series data-samples={series.samples.length} data-gaps={plan.gaps.length}>
-   <h4><LabelText labels={series.labels} /></h4>
-   <SeriesChart plan={plan} samples={series.samples} evaluation={evaluation} labels={series.labels} />
-   <p className="legend">{plan.points} samples, {plan.gaps.length} {plan.gaps.length === 1 ? 'gap' : 'gaps'}. Marks under the line: × NaN, ▲ +Inf, ▼ −Inf, ◇ stale marker, ■ native histogram. Dashed boxes are gaps.</p>
-   {plan.gaps.length > 0 && <ul className="gap-list">{plan.gaps.map((g, i) => <GapText key={i} gap={g} />)}</ul>}
-   <details>
+  <section className="exp-series" data-series data-samples={series.samples.length} data-gaps={plan.gaps.length}>
+   <h4 className="exp-series-head">{props.tone !== null ? <i className={`exp-sw exp-sw-${props.tone}`} aria-hidden="true" /> : null}<LabelText labels={series.labels} />{props.tone === null && <small className="t3"> not drawn on the chart</small>}</h4>
+   <p className="small t2">{statsWords(plan)}</p>
+   {plan.gaps.length > 0 && <ul className="exp-gap-list">{plan.gaps.map((g, i) => <GapText key={i} gap={g} />)}</ul>}
+   <details className="exp-details">
     <summary>Data table ({series.samples.length} samples)</summary>
-    <table className="data-table">
-     <thead><tr><th scope="col">Time (nanoseconds)</th><th scope="col">Value</th></tr></thead>
-     <tbody>{rows}</tbody>
-    </table>
-    {series.samples.length > shown && <button type="button" onClick={() => setShown(shown + PAGE)}>Show more samples ({shown} shown of {series.samples.length})</button>}
+    <div className="table-region" tabIndex={0} role="region" aria-label={`Samples of ${label} in ${props.where}`}>
+     <table className="table tight">
+      <caption className="sr-only">Samples of {label}, oldest first, with the gaps between them</caption>
+      <thead><tr><th scope="col">Time (nanoseconds)</th><th scope="col">Value</th></tr></thead>
+      <tbody>{rows}</tbody>
+     </table>
+    </div>
+    {series.samples.length > shown && <button type="button" className="btn btn-sm" onClick={() => setShown(shown + PAGE)}>Show more samples ({shown} shown of {series.samples.length})</button>}
    </details>
   </section>
  );
 }
 
+function MatrixView(props: { matrix: Series[]; evaluation: EvaluationWire | null; timeZone: string; where: string }): React.JSX.Element {
+ const { matrix, evaluation } = props;
+ const plans = React.useMemo(() => matrix.map((s) => planSeries(s.samples, evaluation)), [matrix, evaluation]);
+ const win = chartWindow(evaluation);
+ const drawn = win === null ? 0 : Math.min(MAX_DRAWN, matrix.length);
+ const chart = React.useMemo(() => {
+  let thinned = false;
+  const series = matrix.slice(0, drawn).map((s, i) => { const d = downsample(chartSamples(s.samples, evaluation)); if (d.thinned) thinned = true; return { id: String(i), name: labelsText(s.labels), tone: TONES[i] ?? 'c1', samples: d.samples }; });
+  return { series, thinned };
+ }, [matrix, evaluation, drawn]);
+ const shownPlans = plans.slice(0, drawn);
+ const marks = markCounts(shownPlans);
+ const segments = shownPlans.reduce((n, p) => n + p.segments.length, 0);
+ const gaps = shownPlans.reduce((n, p) => n + p.gaps.length, 0);
+ return (
+  <div data-result="matrix" className="exp-matrix">
+   <p className="small t2">Range matrix: {matrix.length} series{matrix.length > MAX_SERIES ? `, the first ${MAX_SERIES} are listed` : ''}.</p>
+   {win !== null && drawn > 0 && (
+    <div className="exp-chart" data-series-chart data-segments={segments} data-gap-count={gaps} data-nan-count={marks.nan} data-inf-count={marks.inf} data-stale-count={marks.stale} data-histogram-count={marks.histogram}>
+     <LineChart label={`Chart of ${drawn} series of ${props.where}. A missing sample is a break or a no-samples band, never zero.`} series={chart.series} start={win.start} end={win.end} timeZone={props.timeZone} format={formatNumber} height={220} />
+     {markSentence(marks) !== '' && <p className="small t2" data-testid="chart-marks">{markSentence(marks)}</p>}
+     {matrix.length > drawn && <p className="small t2" role="status">The chart draws the first {drawn} of {matrix.length} series on one axis; the others are listed below without a chart.</p>}
+     {chart.thinned && <p className="small t2" role="status" data-testid="chart-thinned">The chart draws at most {MAX_CHART_POINTS} points per series (the lowest and highest of each group, so peaks stay); the figures and the data tables use every sample.</p>}
+    </div>
+   )}
+   {win === null && <p className="small t2" role="status">An instant evaluation has one moment, so the series are listed as tables. Choose Range over the selected window to chart them over time.</p>}
+   {matrix.slice(0, MAX_SERIES).map((s, i) => <SeriesBlock key={i} series={s} plan={plans[i] ?? planSeries(s.samples, evaluation)} tone={i < drawn ? TONES[i] ?? null : null} where={props.where} />)}
+  </div>
+ );
+}
+
 /** A project's scalar, string, instant vector or range matrix. Numbers keep their exact text, NaN, infinities and stale markers
  * are named, a native histogram is shown bucket by bucket, and a missing sample is a gap in the line, never a zero. */
-export function MetricResult(props: { result: ProjectResult; evaluation?: EvaluationWire }): React.JSX.Element {
+export function MetricResult(props: { result: ProjectResult; evaluation?: EvaluationWire; timeZone?: string }): React.JSX.Element {
  const v = props.result.value;
  const evaluation = props.evaluation ?? null;
+ const where = `project ${props.result.project_id.slice(0, 8)}`;
  if (v === null) return <p role="status" data-result="none">No value: this project returned no result.</p>;
  switch (v.type) {
-  case 'scalar': return <p data-result="scalar">Scalar <SampleValue sample={v.scalar} /> at <TimeText ns={v.scalar.time} /></p>;
+  case 'scalar': return <p data-result="scalar">Scalar <SampleValue sample={v.scalar} where={where} /> at <TimeText ns={v.scalar.time} /></p>;
   case 'string': return <p data-result="string">String: <code data-testid="string-value">{v.string}</code></p>;
-  case 'vector': return <VectorTable vector={v.vector} result={props.result} />;
+  case 'vector': return <VectorTable vector={v.vector} result={props.result} where={where} />;
   case 'matrix': return v.matrix.length === 0
    ? <p data-result="matrix-empty">{emptyWords(props.result, 'The query matched no series')}</p>
-   : (
-    <div data-result="matrix">
-     <p>Range matrix: {v.matrix.length} {v.matrix.length === 1 ? 'series' : 'series'}{v.matrix.length > MAX_SERIES ? `, the first ${MAX_SERIES} are drawn` : ''}.</p>
-     {v.matrix.slice(0, MAX_SERIES).map((s, i) => <SeriesBlock key={i} series={s} evaluation={evaluation} />)}
-    </div>
-   );
+   : <MatrixView matrix={v.matrix} evaluation={evaluation} timeZone={props.timeZone ?? 'UTC'} where={where} />;
   case 'streams': return <p role="status" data-result="streams">This result is log lines; it is shown as a log result.</p>;
  }
 }

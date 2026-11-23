@@ -53,9 +53,20 @@ async function keyboardSignIn(page:Page,landed:Stop[],email:string,password:stri
  if(code){await tabTo(page,page.getByLabel('Authenticator or recovery code'),landed);await page.keyboard.type(code);}
  await tabTo(page,page.getByRole('button',{name:'Sign in',exact:true}),landed);await page.keyboard.press('Enter');
 }
+/** Signing in lands on Home (no scope yet); the account page (authenticator enrollment) is one sidebar link away. */
+async function openAccount(page:Page):Promise<void>{
+ await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();
+ await page.getByRole('link',{name:/^Account/}).click();
+ await expect(page.getByRole('heading',{level:1,name:'Account access',exact:true})).toBeVisible();
+}
+async function openAccountByKeyboard(page:Page,landed:Stop[]):Promise<void>{
+ await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();
+ await tabTo(page,page.getByRole('link',{name:/^Account/}),landed,true);await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:1,name:'Account access',exact:true})).toBeVisible();
+}
 test('real local password, rotation, TOTP, one-use recovery and logout',async({page,context,browserName})=>{
  test.setTimeout(60_000);
- await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await openAccount(page);
  const before=(await context.cookies()).find(cookie=>cookie.name==='__Host-soundpost');expect(before?.httpOnly).toBe(true);expect(before?.secure).toBe(true);
  // Playwright's WebKit on Windows reports sameSite 'None' for every cookie: a control cookie added through context.addCookies as Strict, Lax and None all
  // read back None (control experiment run in task 10.21). That is a driver/platform reporting gap, not the server, so only that
@@ -65,7 +76,9 @@ test('real local password, rotation, TOTP, one-use recovery and logout',async({p
  const code=await currentTotp(page,secret??'');
  await page.getByLabel('Authenticator code',{exact:true}).fill(code);await page.getByRole('button',{name:'Confirm authenticator',exact:true}).click();await expect(page.getByRole('heading',{name:'Save these one-use recovery codes now'})).toBeVisible();const recovery=await page.locator('section').filter({has:page.getByRole('heading',{name:'Save these one-use recovery codes now'})}).last().locator('li code').first().textContent();expect(recovery).toBeTruthy();
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();
- await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByLabel('Authenticator or recovery code').fill(recovery!);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByLabel('Authenticator or recovery code').fill(recovery!);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ // Signing out leaves the address alone, so the same sign-in returns to the page the person left (the account page), exactly as before the console redesign.
+ await expect(page.getByRole('heading',{level:1,name:'Account access',exact:true})).toBeVisible();
  const rotated=(await context.cookies()).find(cookie=>cookie.name==='__Host-soundpost');expect(rotated?.value).not.toBe(before?.value);
  expect(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage)}))).toEqual({local:[],session:[]});
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();expect((await page.request.get('/api/v1/session')).status()).toBe(401);
@@ -73,7 +86,7 @@ test('real local password, rotation, TOTP, one-use recovery and logout',async({p
 });
 for(const identity of ['mapped','unmapped','wrong-issuer'] as const)test(`real OIDC Code+PKCE ${identity}`,async({page})=>{
  await page.goto('/');await page.getByRole('button',{name:'Single sign-on',exact:true}).click();await page.getByLabel('Organization ID',{exact:true}).fill(org);await page.getByLabel('Provider ID',{exact:true}).fill(provider);await page.getByRole('button',{name:'Continue to provider'}).click();await expect(page.getByRole('heading',{name:'Local identity provider'})).toBeVisible();const authorization=new URL(page.url());expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');expect(authorization.searchParams.get('nonce')).toBeTruthy();await page.getByLabel('Fixture identity').selectOption(identity);await page.getByRole('button',{name:'Authorize fixture account'}).click();
- if(identity==='mapped'){await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();expect(new URL(page.url()).search).toBe('');await page.getByRole('button',{name:'Sign out',exact:true}).click();}else{expect((await page.request.get('/api/v1/session')).status()).toBe(401);}
+ if(identity==='mapped'){await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();expect(new URL(page.url()).search).toBe('');await page.getByRole('button',{name:'Sign out',exact:true}).click();}else{expect((await page.request.get('/api/v1/session')).status()).toBe(401);}
 });
 const keyboardEmail=process.env.SOUNDPOST_KEYBOARD_EMAIL;
 const keyboardPassword=process.env.SOUNDPOST_KEYBOARD_PASSWORD;
@@ -88,7 +101,7 @@ test('keyboard only: local password, TOTP enrollment, one-use recovery sign-in a
  const landed:Stop[]=[];const ids=requestIds(page);
  await page.goto('/');
  await keyboardSignIn(page,landed,keyboardEmail,keyboardPassword);
- await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await openAccountByKeyboard(page,landed);
  await tabTo(page,page.getByRole('button',{name:'Start authenticator enrollment'}),landed,true);await page.keyboard.press('Enter');
  const secret=await page.locator('output.secret').textContent();expect(secret).toBeTruthy();
  const code=await currentTotp(page,secret??'');
@@ -101,7 +114,7 @@ test('keyboard only: local password, TOTP enrollment, one-use recovery sign-in a
  await tabTo(page,page.getByRole('button',{name:'Sign out',exact:true}),landed,true);await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();
  await keyboardSignIn(page,landed,keyboardEmail,keyboardPassword,recovery!);
- await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Account access',exact:true})).toBeVisible();
  await attachEvidence(info,page,'keyboard-local-signed-in',[page.locator('code')]);
  const cookie=(await context.cookies()).find(c=>c.name==='__Host-soundpost');expect(cookie?.httpOnly).toBe(true);expect(cookie?.secure).toBe(true);
  await tabTo(page,page.getByRole('button',{name:'Sign out',exact:true}),landed,true);await page.keyboard.press('Enter');
@@ -127,7 +140,7 @@ test('keyboard only: single sign-on redirect to the provider and back with an ex
  await tabTo(page,page.getByLabel('Fixture identity'),providerStops,true);await page.keyboard.type('Explicitly');
  await expect(page.getByLabel('Fixture identity')).toHaveValue('mapped');
  await tabTo(page,page.getByRole('button',{name:'Authorize fixture account'}),providerStops);await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();expect(new URL(page.url()).search).toBe('');
+ await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();expect(new URL(page.url()).search).toBe('');
  await attachEvidence(info,page,'keyboard-oidc-signed-in',[page.locator('code')]);
  await tabTo(page,page.getByRole('button',{name:'Sign out',exact:true}),landed,true);await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();

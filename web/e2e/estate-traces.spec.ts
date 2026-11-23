@@ -102,7 +102,7 @@ test('the same page in front of an API that produced no telemetry (an unavailabl
  await expect(rows(p)).toHaveCount(4);
 });
 
-test('a span is linked to the Explore window of its own recorded time, from the real trace read',async()=>{
+test('a span is linked to the Logs window of its own recorded time, from the real trace read',async()=>{
  const p=await open(estate.priced.trace);
  const view=await postJson(page,'/api/v1/traces/view',{org:estate.org,project:estate.project,trace:estate.priced.trace,window:ESTATE_WINDOW});
  expect(view.status).toBe(200);
@@ -112,9 +112,9 @@ test('a span is linked to the Explore window of its own recorded time, from the 
  expect(gatewayCall,'the gateway call to the API').toBeDefined();
  const call=gatewayCall as {span_id:string;start_wall_ns:string;end_wall_ns:string};
  await path(p).getByRole('button',{name:'Show details of span http.call, client, level 4'}).click();
- const link=p.getByTestId('span-details').getByRole('link',{name:'Explore metrics and logs in the window of this span'});
+ const link=p.getByTestId('span-details').getByRole('link',{name:'Logs in the window of this span'});
  const q=new URLSearchParams((await link.getAttribute('href')??'').replace(/^#/,''));
- expect(q.get('view')).toBe('explore');
+ expect(q.get('view')).toBe('logs');
  expect(q.get('org')).toBe(estate.org);
  expect(q.get('projects')).toBe(estate.project);
  expect(BigInt(q.get('start')??'0')).toBe(BigInt(call.start_wall_ns)-1_000_000_000n);

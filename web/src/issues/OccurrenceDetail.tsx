@@ -41,7 +41,7 @@ export function OccurrenceFacts(props: { context: ViewContext; project: Id; view
  const chain = d.exception_graph;
  return (
   <>
-   <dl className="scope-bar">
+   <dl className="iss-facts">
     <dt>Exception class</dt><dd data-testid="occ-class"><code>{d.exception_class}</code></dd>
     <dt>Mechanism</dt><dd data-testid="occ-mechanism"><code>{d.mechanism}</code>. {mechanismWords(d.mechanism)}</dd>
     <dt>Handled and fatal</dt><dd data-testid="occ-handled-fatal" data-handled={d.handled ? 'yes' : 'no'} data-fatal={d.fatal ? 'yes' : 'no'}>{handledFatalWords(d.handled, d.fatal)}</dd>
@@ -54,7 +54,7 @@ export function OccurrenceFacts(props: { context: ViewContext; project: Id; view
     {d.profile_id !== undefined && <><dt>Profile</dt><dd><code>{d.profile_id}</code></dd></>}
     {d.run_id !== undefined && <><dt>Job run</dt><dd><code>{d.run_id}</code></dd></>}
    </dl>
-   <h4>Exception chain</h4>
+   <h3 className="iss-sub">Exception chain</h3>
    {chain === undefined
     ? <p data-testid="occ-chain-none">The record stores no exception chain: only the error itself was captured.</p>
     : (
@@ -79,7 +79,7 @@ export function OccurrenceFacts(props: { context: ViewContext; project: Id; view
       )}
      </div>
     )}
-   <h4>Stored frames</h4>
+   <h3 className="iss-sub">Stored frames</h3>
    <StoredFrames context={context} project={project} detail={d} />
   </>
  );
@@ -92,10 +92,12 @@ export function OccurrenceDetail(props: { context: ViewContext; project: Id; iss
  const evidence = useEvidence<ErrorOccurrenceView>(key, (signal) => getErrorOccurrence(context.org, project, issue, occurrence.occurrence_id, signal));
  const view = dataOf(evidence.state);
  return (
-  <section className="panel" aria-labelledby="occ-detail-heading" data-section="occurrence-detail" data-occurrence={occurrence.occurrence_id}>
-   <h3 id="occ-detail-heading">Stored occurrence <code>{occurrence.occurrence_id}</code></h3>
-   <StatusPanel state={evidence.state} />
-   {view && <OccurrenceFacts context={context} project={project} view={view} />}
+  <section className="card" aria-labelledby="occ-detail-heading" data-section="occurrence-detail" data-occurrence={occurrence.occurrence_id}>
+   <div className="card-head"><h2 id="occ-detail-heading">Stored occurrence <code>{occurrence.occurrence_id}</code></h2></div>
+   <div className="card-body">
+    <StatusPanel state={evidence.state} />
+    {view && <OccurrenceFacts context={context} project={project} view={view} />}
+   </div>
   </section>
  );
 }

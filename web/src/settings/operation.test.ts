@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import type { LifecycleOperation } from '../api/types';
-import { keepPolling, operationWords } from './ProjectSettings';
+import { keepPolling, operationWords } from './OperationsPage';
 
 const op = (over: Partial<LifecycleOperation>): LifecycleOperation => ({ id: 'a'.repeat(32), state: 'ready', phase: 'fencing', physical: 'pending', generation: '9', pending_groups: 1, applied_barriers: 63, holds: 0, physical_deadline: '1800000000000000000', backup_deadline: '1800086400000000000', ...over });
 

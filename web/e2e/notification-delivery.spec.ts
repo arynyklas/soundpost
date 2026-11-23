@@ -102,7 +102,7 @@ test('failed, uncertain and accepted delivery are each named in the queue and on
    await expect(page.getByTestId('delivery')).toHaveText(headline);
    const entries=await page.getByTestId('delivery-entries').innerText();
    for(const re of entry)expect(entries).toMatch(re);
-   expect(await page.locator('.investigation').innerText()).not.toMatch(/\b0\s*%/);
+   expect(await page.locator('main').innerText()).not.toMatch(/\b0\s*%/);
   };
   await check(failed,'failed',/^Delivery failed/,[/open \(immediate\): failed/,/last attempt terminal \(egress_blocked\)/,/1 attempt/],[/accepted by the provider/,/uncertain/]);
   await check(uncertain,'uncertain',/^Delivery uncertain: the provider may have accepted a message the product could not confirm/,[/open \(immediate\): uncertain: the provider may have accepted/,/last attempt unknown \(timeout\)/],[/accepted by the provider/,/failed/]);

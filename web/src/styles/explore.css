@@ -1,0 +1,140 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Explore: Traces, Logs, Metrics, Replays, Profiles. State is carried by words; colour, dashes and borders only reinforce them. No inline styles anywhere (the CSP forbids them). */
+
+/* Query workbench (Logs and Metrics) */
+.exp-bench{min-width:0}
+.exp-bench>*{min-width:0}
+.exp-bar{display:flex;gap:12px;align-items:flex-start}
+.exp-expr-label{flex:1;min-width:0;margin:0}
+.exp-expr-input{font-family:"Cascadia Mono",ui-monospace,Consolas,monospace;font-size:13px;line-height:1.5;min-height:84px;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--code-bg)}
+.exp-bar-actions{display:flex;flex-direction:column;gap:8px;padding-top:21px}
+.exp-bar-actions .btn{min-height:34px}
+.exp-toolbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end}
+.exp-toolbar>label{margin:0;font-weight:500;font-size:12.5px;color:var(--text-2)}
+.exp-toolbar>label>input,.exp-toolbar>label>select{display:block;margin-top:4px}
+.exp-toolbar>label.check{min-height:32px;font-size:13px;color:var(--text)}
+.exp-num{width:96px}
+.exp-seg{display:inline-flex;gap:2px;margin:0;padding:3px;border:1px solid var(--border-2);border-radius:8px;background:var(--raised)}
+.exp-seg .check{gap:6px;margin:0;min-height:26px;padding:0 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.exp-seg .check input{accent-color:var(--accent);margin:0}
+.exp-seg .check:has(input:checked){background:var(--accent-bg);color:var(--text)}
+.exp-projects{padding:6px 12px}
+.exp-projects legend{font-weight:500;font-size:12.5px}
+.exp-advanced{font-size:13px}
+.exp-advanced>summary{cursor:pointer;color:var(--text-2);list-style:none;display:inline-flex;align-items:center;gap:6px}
+.exp-advanced>summary::-webkit-details-marker{display:none}
+.exp-advanced>summary::before{content:"▸";font-size:10px}
+.exp-advanced[open]>summary::before{content:"▾"}
+.exp-advanced>div{margin-top:10px}
+.exp-fs{margin:0;min-width:0}
+.exp-fs>legend{max-width:100%}
+.exp-fields{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end}
+.exp-fields>label{margin:0;min-width:180px;flex:1 1 180px}
+.exp-fields>label.check{min-width:0;flex:0 1 auto}
+.exp-features{margin:8px 0 0}
+.exp-expr{margin:4px 0;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--code-bg);font:12.5px/1.6 "Cascadia Mono",ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
+.exp-expr:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.exp-expr mark,.exp-diagnostics mark{background:var(--mark);color:var(--text);padding:0 2px;border-radius:2px;text-decoration:underline wavy var(--crit);text-underline-offset:3px;outline:1px solid var(--crit)}
+.exp-diagnostics{margin:0;padding-left:20px}
+.exp-diagnostics li{margin:4px 0;overflow-wrap:anywhere}
+.exp-results>h2{font-size:15px}
+.exp-project .card-head code{font-size:12px;color:var(--text-2)}
+.exp-stats{margin-top:4px;font-size:12.5px}
+.exp-cursors{max-height:12em;overflow:auto;margin:6px 0 0;padding-left:20px}
+.exp-time small{display:block;color:var(--text-3)}
+.exp-labels{overflow-wrap:anywhere}
+.exp-line{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12.5px}
+.exp-val{font-variant-numeric:tabular-nums}
+.exp-val-nan,.exp-val-pos_inf,.exp-val-neg_inf,.exp-val-stale{display:inline-block;padding:1px 6px;border:2px solid var(--text);border-radius:5px;font-weight:700}
+.exp-val-stale{border-style:dashed}
+.exp-val-nan{border-style:double}
+.exp-val small{font-weight:400}
+.exp-histogram{margin:0}
+.exp-histogram>summary{cursor:pointer}
+.exp-matrix{display:flex;flex-direction:column;gap:12px}
+.exp-chart{min-width:0}
+.exp-series{padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.exp-series-head{display:flex;align-items:center;gap:8px;font-size:13px;overflow-wrap:anywhere}
+.exp-sw{display:inline-block;width:10px;height:10px;border-radius:2px;flex:none}
+.exp-sw-c1{background:var(--c1)}.exp-sw-c2{background:var(--c2)}.exp-sw-c3{background:var(--c3)}.exp-sw-c4{background:var(--c4)}.exp-sw-c5{background:var(--c5)}.exp-sw-c6{background:var(--c6)}
+.exp-gap-list{margin:0;padding-left:20px}
+.exp-gap-list li{margin:2px 0;overflow-wrap:anywhere}
+.exp-details>summary{cursor:pointer;color:var(--text-2);font-size:13px}
+.exp-details[open]>summary{margin-bottom:8px}
+.exp-hist h4{font-size:13px;margin-bottom:2px}
+.exp-logs{display:flex;flex-direction:column;gap:12px}
+.exp-items{list-style:none;margin:0;padding:0;max-height:20em;overflow:auto;border:1px solid var(--border);border-radius:8px}
+.exp-items li{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--border)}
+.exp-items li:last-child{border-bottom:0}
+.exp-items code{flex:1;min-width:0}
+.exp-saved-project{padding-top:8px;border-top:1px solid var(--border)}
+.exp-saved-project pre{margin:6px 0 0}
+
+/* Live tail */
+.exp-live-items{list-style:none;margin:0;padding:0;max-height:28em;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+.exp-live-row{display:grid;gap:2px;padding:6px 10px;border-bottom:1px solid var(--border)}
+.exp-live-gap{padding:8px 10px;border-bottom:1px solid var(--border);border-left:4px dashed var(--high);background:var(--high-bg);overflow-wrap:anywhere}
+.exp-live-meta,.exp-live-labels{color:var(--text-2);overflow-wrap:anywhere}
+
+/* Trace: waterfall, span details, critical path */
+.exp-trace-grid{align-items:start}
+.exp-span-details{position:sticky;top:72px}
+.table tbody th.exp-ind-0{padding-left:12px}.table tbody th.exp-ind-1{padding-left:28px}.table tbody th.exp-ind-2{padding-left:44px}.table tbody th.exp-ind-3{padding-left:60px}.table tbody th.exp-ind-4{padding-left:76px}.table tbody th.exp-ind-5{padding-left:92px}.table tbody th.exp-ind-6{padding-left:108px}.table tbody th.exp-ind-7{padding-left:124px}.table tbody th.exp-ind-8{padding-left:140px}
+.exp-wf{min-width:620px}
+.exp-wf td,.exp-wf tbody th{height:34px;padding-top:3px;padding-bottom:3px}
+.exp-wf tbody th{width:38%}
+.exp-wf-name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-left:0}
+.exp-wf tbody th.exp-ind-0,.exp-wf tbody th{padding-left:12px}
+.exp-wf-name.exp-ind-1{padding-left:16px}.exp-wf-name.exp-ind-2{padding-left:32px}.exp-wf-name.exp-ind-3{padding-left:48px}.exp-wf-name.exp-ind-4{padding-left:64px}.exp-wf-name.exp-ind-5{padding-left:80px}.exp-wf-name.exp-ind-6{padding-left:96px}.exp-wf-name.exp-ind-7{padding-left:112px}.exp-wf-name.exp-ind-8{padding-left:128px}
+.exp-wf-name.exp-ind-0{padding-left:0}
+.exp-wf-btn{justify-content:flex-start;white-space:normal;text-align:left;font-weight:600;color:var(--text)}
+.exp-wf-ticks{display:flex;justify-content:space-between;text-transform:none;letter-spacing:0;font-weight:400}
+.exp-wf-cell{width:42%;min-width:240px}
+.exp-wf-bar{display:block;width:100%;height:16px;overflow:visible}
+.exp-wf-more{fill-opacity:.35}
+.exp-wf-amb{fill:none;stroke:var(--high);stroke-width:1.5;stroke-dasharray:3 2;vector-effect:non-scaling-stroke}
+.exp-wf-none{fill:none;stroke:var(--text-2);stroke-width:1.5;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
+.exp-wf-cp{fill:var(--text)}
+.exp-wf tr.selected td,.exp-wf tr.selected th{background:var(--accent-bg)}
+.exp-wf tbody tr{cursor:pointer}
+.exp-limits h3,.exp-span-details h3{font-size:13px}
+.exp-limits ul,[data-testid=producer-gaps] ul,[data-testid=late-spans] ul,[data-testid=off-path] ul{margin:6px 0 0;padding-left:20px}
+.exp-limits li,[data-testid=producer-gaps] li,[data-testid=late-spans] li,[data-testid=off-path] li{margin:4px 0;overflow-wrap:anywhere}
+.exp-span-links{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:13px;overflow-wrap:anywhere}
+.exp-span-props dd{overflow-wrap:anywhere}
+table.path-table caption{padding:8px 12px;font-size:12.5px;font-weight:400;color:var(--text-2);caption-side:top}
+.path-table th[scope=row]{font-weight:400;white-space:normal}
+.path-table tr[aria-selected=true] td,.path-table tr[aria-selected=true] th{background:var(--accent-bg)}
+.path-table tr[data-ambiguous=yes]>:first-child{box-shadow:inset 3px 0 0 var(--high)}
+.path-table[data-orphan=yes] caption{border-left:3px dashed var(--high)}
+.exp-path-btn{white-space:normal;text-align:left;justify-content:flex-start;min-height:28px}
+.exp-caption{padding:8px 12px;text-align:left;font-size:12.5px;font-weight:400;color:var(--text-2)}
+
+/* Replay */
+.exp-replay-frame{display:block;width:100%;height:28em;border:1px solid var(--border-2);border-radius:8px;background:#fff}
+.exp-viewer-log{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0}
+.exp-viewer-log li{padding:2px 8px;border:1px solid var(--border-2);border-radius:6px;background:var(--raised);font-size:12px}
+.exp-viewer-log li[data-status=gap]{border-style:dashed;border-color:var(--high);font-weight:700}
+.exp-gaps{margin:0;padding-left:20px}
+.exp-gaps li{margin:4px 0;overflow-wrap:anywhere}
+.exp-replay-labels dt{align-self:start}
+
+/* Profile */
+.exp-facts{grid-template-columns:200px 1fr}
+.profile-table th[scope=row]{font-weight:600;white-space:normal}
+.profile-table td{vertical-align:top}
+.profile-table tr[data-kind=gap]>*{border-bottom-style:dashed;font-style:italic}
+.profile-table tr[data-kind=loss]>*{border-bottom-style:double;border-bottom-width:3px}
+.profile-table tr[data-state=unsupported] td:nth-child(2),.profile-table tr[data-state=denied] td:nth-child(2),.profile-table tr[data-state=error] td:nth-child(2){font-weight:600}
+.exp-correlation{padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--raised)}
+.exp-correlation h3{font-size:13px;margin-bottom:4px}
+
+@media (max-width:820px){
+ .exp-bar{flex-direction:column}
+ .exp-expr-label{width:100%}
+ .exp-bar-actions{flex-direction:row;flex-wrap:wrap;padding-top:0}
+ .exp-span-details{position:static}
+ .exp-facts{grid-template-columns:1fr}
+ .exp-replay-frame{height:22em}
+}
+@media (forced-colors:active){.exp-val-nan,.exp-val-pos_inf,.exp-val-neg_inf,.exp-val-stale{border-color:CanvasText}.exp-wf-amb,.exp-wf-none{stroke:CanvasText}.exp-wf-cp{fill:CanvasText}}

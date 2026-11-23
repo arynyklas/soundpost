@@ -4,6 +4,8 @@ import { isAbort, probeReplay, stateOfFault, streamReplay } from '../api/client'
 import { ApiFault, type Id, type LoadState } from '../api/types';
 import { scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
+import { Content, Hero } from '../shell/Frames';
+import { Callout, Card, CopyButton, Pill, shortId } from '../ui/primitives';
 import { emptySummary, gapSentence, lossText, summarize, toItem, type ReplaySummary } from './model';
 import { ReplayHost } from './ReplayHost';
 import { ItemQueue } from './queue';
@@ -87,30 +89,43 @@ export function ReplayPage(props: { id: Id; project: Id; context: ViewContext })
  const h = held.key === key ? held : initial(key);
  const s = h.summary;
  const ended = h.phase === 'ended';
+ const phaseWord = ended ? 'Ended' : h.phase === 'failed' ? 'Failed' : h.phase === 'not_available' ? 'Not available' : h.phase === 'loading' ? 'Loading' : s.terminal === 'truncated' ? 'Bounded' : 'Streaming';
  return (
-  <section className="panel" aria-labelledby="replay-heading">
-   <h2 id="replay-heading">Replay <code>{id}</code></h2>
-   <p>This is a masked reconstruction, not a video. The recorder never captures page text, form values, attributes, URLs, styles or canvas content; the viewer below draws only structure and shows masked text and opaque regions as labels.</p>
-   <StatusPanel state={stateOf(h)} />
-   {ended && <p role="alert" data-testid="replay-ended" className="banner banner-warning">Playback ended: access to this replay ended or it was deleted. Its content was cleared from this page and nothing further was requested.</p>}
-   {h.phase === 'failed' && <p role="alert" data-testid="replay-failed" className="banner banner-warning">The replay stream ended with an error{s.code ? ` (${s.code})` : ''}. Its content was cleared from this page.</p>}
-   {s.terminal === 'truncated' && <p data-testid="replay-truncated" className="banner">This response is bounded: only the events before sequence {s.next} were delivered. The rest of the replay was not sent and is not shown.</p>}
-   {!ended && h.phase !== 'failed' && (
-    <dl className="replay-labels" data-testid="replay-labels" aria-label="What this replay contains">
-     <dt>Text</dt><dd data-testid="label-masked">Masked. Text, input values and attributes are never recorded; any text node appears as <code>[masked]</code>.</dd>
-     <dt>Opaque regions</dt><dd data-testid="label-opaque">Closed shadow roots, cross-origin frames and unsupported widgets appear as <code>[opaque]</code> blocks. Nothing inside them exists in this replay.</dd>
-     <dt>Capture policy revision</dt><dd data-testid="label-policy">{s.policies.length === 0 ? 'unknown (no chunk delivered yet)' : s.policies.join(', ')}</dd>
-     <dt>Recording loss</dt><dd data-testid="label-loss">{lossText(s)}</dd>
-     <dt>Chunks received</dt><dd data-testid="label-chunks">{s.chunks} ({s.checkpoints} checkpoints)</dd>
-    </dl>
-   )}
-   {!ended && h.phase !== 'failed' && (
-    <div data-testid="replay-gaps" aria-label="History gaps">
-     <h3>History gaps</h3>
-     {s.gaps.length === 0 ? <p>No gap observed in the events received so far. A recorder that lost a chunk would show it here.</p> : <ul>{s.gaps.map((g) => <li key={`${g.from}-${g.through}`} data-gap={`${g.from}-${g.through}`}>{gapSentence(g)}</li>)}</ul>}
+  <>
+   <Hero>
+    <div className="col g4">
+     <h1 tabIndex={-1}>Replay <code title={id}>{shortId(id)}</code></h1>
+     <div className="row wrap g4">
+      <Pill tone="acc" icon="lock">Masked reconstruction</Pill>
+      <Pill tone={h.phase === 'failed' || ended ? 'high' : h.phase === 'streaming' ? 'ok' : 'unk'}>{phaseWord}</Pill>
+     </div>
+     <div className="row small t3"><span>Replay ID <code>{id}</code></span><CopyButton text={id} label="Copy replay ID" /></div>
     </div>
-   )}
-   {live && h.queue !== null && <ReplayHost key={key} stream={h.queue} />}
-  </section>
+   </Hero>
+   <Content>
+    <p className="small t2">This is a masked reconstruction, not a video. The recorder never captures page text, form values, attributes, URLs, styles or canvas content; the viewer below draws only structure and shows masked text and opaque regions as labels.</p>
+    <StatusPanel state={stateOf(h)} />
+    {ended && <Callout tone="high" role="alert" testId="replay-ended">Playback ended: access to this replay ended or it was deleted. Its content was cleared from this page and nothing further was requested.</Callout>}
+    {h.phase === 'failed' && <Callout tone="high" role="alert" testId="replay-failed">The replay stream ended with an error{s.code ? ` (${s.code})` : ''}. Its content was cleared from this page.</Callout>}
+    {s.terminal === 'truncated' && <Callout tone="warn" role="status" testId="replay-truncated">This response is bounded: only the events before sequence {s.next} were delivered. The rest of the replay was not sent and is not shown.</Callout>}
+    {!ended && h.phase !== 'failed' && (
+     <div className="grid-2">
+      <Card title="What this replay contains" titleId="replay-contains-heading">
+       <dl className="props exp-replay-labels" data-testid="replay-labels" aria-label="What this replay contains">
+        <dt>Text</dt><dd data-testid="label-masked">Masked. Text, input values and attributes are never recorded; any text node appears as <code>[masked]</code>.</dd>
+        <dt>Opaque regions</dt><dd data-testid="label-opaque">Closed shadow roots, cross-origin frames and unsupported widgets appear as <code>[opaque]</code> blocks. Nothing inside them exists in this replay.</dd>
+        <dt>Capture policy revision</dt><dd data-testid="label-policy">{s.policies.length === 0 ? 'unknown (no chunk delivered yet)' : s.policies.join(', ')}</dd>
+        <dt>Recording loss</dt><dd data-testid="label-loss">{lossText(s)}</dd>
+        <dt>Chunks received</dt><dd data-testid="label-chunks">{s.chunks} ({s.checkpoints} checkpoints)</dd>
+       </dl>
+      </Card>
+      <Card title="History gaps" titleId="replay-gaps-heading" testId="replay-gaps">
+       {s.gaps.length === 0 ? <p>No gap observed in the events received so far. A recorder that lost a chunk would show it here.</p> : <ul className="exp-gaps">{s.gaps.map((g) => <li key={`${g.from}-${g.through}`} data-gap={`${g.from}-${g.through}`}>{gapSentence(g)}</li>)}</ul>}
+      </Card>
+     </div>
+    )}
+    {live && h.queue !== null && <Card title="Masked replay viewer" titleId="replay-viewer-heading"><ReplayHost key={key} stream={h.queue} /></Card>}
+   </Content>
+  </>
  );
 }

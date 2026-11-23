@@ -29,11 +29,15 @@ async function settled(page:Page):Promise<void>{
 }
 async function visit(page:Page,view:string,extra:Record<string,string>={}):Promise<void>{
  await page.goto(deepLink(seed,view,extra));
- await expect(page.getByRole('heading',{level:2,name:/^Investigation/})).toBeVisible();
+ await expect(page.locator('main h1')).toBeVisible();
  await settled(page);
  await page.waitForTimeout(400); // the investigate read of a freshly opened view is issued by an effect; let it publish
  await settled(page);
 }
+const THEMES=['dark','light'] as const;
+type Theme=typeof THEMES[number];
+/** The theme a person chose is stored in the browser: every page of a context opens in it (dark is the default when nothing is stored). */
+async function chooseTheme(page:Page,theme:Theme):Promise<void>{await page.addInitScript((t)=>{try{window.localStorage.setItem('soundpost.theme',t);}catch{/* storage refused */}},theme);}
 const target=(id:string):Record<string,string>=>({target:`${seed.explore.p1}:${id}`});
 
 test.beforeAll(async({browser})=>{
@@ -52,33 +56,97 @@ test.beforeAll(async({browser})=>{
 test.afterEach(async()=>{for(const p of ctx.pages())await p.close();});
 
 // ---- the pages the app renders ---------------------------------------------------------------------------------------------
-const PAGES:{name:string;view:string;extra:()=>Record<string,string>}[]=[
- {name:'queue (empty)',view:'queue',extra:()=>({})},
- {name:'incident (not found)',view:'incidents',extra:()=>({incident:`${seed.explore.p1}:${NONE}`})},
- {name:'issue (not available)',view:'issues',extra:()=>target(NONE)},
- {name:'release (not available)',view:'releases',extra:()=>target(NONE)},
- {name:'trace (critical path)',view:'traces',extra:()=>target(seed.traces.clean.trace)},
- {name:'trace (gateway to dependency)',view:'traces',extra:()=>target(seed.traces.gateway.trace)},
- {name:'explore',view:'explore',extra:()=>({})},
- {name:'services (partial)',view:'services',extra:()=>({})},
- {name:'jobs (empty)',view:'jobs',extra:()=>({})},
- {name:'replay',view:'replays',extra:()=>target(seed.replays.clean.replay)},
- {name:'profile',view:'profiles',extra:()=>target(seed.profile)},
- {name:'project settings',view:'settings',extra:()=>({})},
+const PAGES:{name:string;shot:string;view:string;extra:()=>Record<string,string>}[]=[
+ {name:'home',shot:'home',view:'home',extra:()=>({})},
+ {name:'incidents (empty)',shot:'incidents',view:'incidents',extra:()=>({})},
+ {name:'incident (not found)',shot:'incident-not-found',view:'incidents',extra:()=>({incident:`${seed.explore.p1}:${NONE}`})},
+ {name:'alert rules',shot:'alert-rules',view:'rules',extra:()=>({})},
+ {name:'notification routes',shot:'notification-routes',view:'routing',extra:()=>({})},
+ {name:'issues',shot:'issues',view:'issues',extra:()=>({})},
+ {name:'issue (not available)',shot:'issue-not-available',view:'issues',extra:()=>target(NONE)},
+ {name:'releases',shot:'releases',view:'releases',extra:()=>({})},
+ {name:'release (not available)',shot:'release-not-available',view:'releases',extra:()=>target(NONE)},
+ {name:'traces',shot:'traces',view:'traces',extra:()=>({})},
+ {name:'trace (critical path)',shot:'trace-critical-path',view:'traces',extra:()=>target(seed.traces.clean.trace)},
+ {name:'trace (gateway to dependency)',shot:'trace-gateway-dependency',view:'traces',extra:()=>target(seed.traces.gateway.trace)},
+ {name:'logs',shot:'logs',view:'logs',extra:()=>({})},
+ {name:'metrics',shot:'metrics',view:'metrics',extra:()=>({})},
+ {name:'services (partial)',shot:'services',view:'services',extra:()=>({})},
+ {name:'jobs (empty)',shot:'jobs',view:'jobs',extra:()=>({})},
+ {name:'replays',shot:'replays',view:'replays',extra:()=>({})},
+ {name:'replay',shot:'replay',view:'replays',extra:()=>target(seed.replays.clean.replay)},
+ {name:'profiles',shot:'profiles',view:'profiles',extra:()=>({})},
+ {name:'profile',shot:'profile',view:'profiles',extra:()=>target(seed.profile)},
+ {name:'dashboards (planned)',shot:'dashboards',view:'dashboards',extra:()=>({})},
+ {name:'add data source',shot:'add-data-source',view:'onboarding',extra:()=>({})},
+ {name:'settings',shot:'settings',view:'settings',extra:()=>({})},
+ {name:'GitLab settings',shot:'gitlab-settings',view:'gitlab',extra:()=>({})},
+ {name:'event webhooks',shot:'event-webhooks',view:'events',extra:()=>({})},
+ {name:'migration and cutover',shot:'migration-cutover',view:'cutover',extra:()=>({})},
+ {name:'account access',shot:'account-access',view:'account',extra:()=>({})},
 ];
-for(const p of PAGES){
- test(`DOM audit: ${p.name} has names, labels, landmarks, heading order, status text and contrast`,async()=>{
+for(const theme of THEMES){
+ for(const p of PAGES){
+  test(`DOM audit (${theme}): ${p.name} has names, labels, landmarks, heading order, status text and contrast`,async()=>{
+   const page=await ctx.newPage();
+   await chooseTheme(page,theme);
+   await visit(page,p.view,p.extra());
+   await expect(page.locator('html')).toHaveAttribute('data-theme',theme);
+   if(shots)await page.screenshot({path:join(shots,`${p.shot}-${theme}.png`),fullPage:true});
+   const found:Violation[]=await auditDom(page);
+   expect(found,JSON.stringify(found,null,1)).toEqual([]);
+  });
+ }
+ test(`DOM audit (${theme}): the scope picker and the search palette are named modal dialogs that pass the audit`,async()=>{
   const page=await ctx.newPage();
-  await visit(page,p.view,p.extra());
-  if(shots)await page.screenshot({path:join(shots,`audit-${p.view}-${p.name.replace(/[^a-z]+/gi,'-')}.png`),fullPage:true});
-  const found:Violation[]=await auditDom(page);
-  expect(found,JSON.stringify(found,null,1)).toEqual([]);
+  await chooseTheme(page,theme);
+  await visit(page,'home');
+  await page.locator('.scope-btn').click();
+  const picker=page.getByRole('dialog',{name:'Organization and projects'});
+  await expect(picker).toBeVisible();
+  if(shots)await page.screenshot({path:join(shots,`scope-picker-${theme}.png`)});
+  const a=await auditDom(page);
+  expect(a,JSON.stringify(a,null,1)).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+  await page.keyboard.press('Control+k');
+  const palette=page.getByRole('dialog',{name:'Search or jump'});
+  await expect(palette).toBeVisible();
+  await page.getByRole('combobox').fill('metr');
+  await expect(page.getByRole('option',{name:/Metrics/})).toBeVisible();
+  if(shots)await page.screenshot({path:join(shots,`search-palette-${theme}.png`)});
+  const b=await auditDom(page);
+  expect(b,JSON.stringify(b,null,1)).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
  });
 }
-test('DOM audit: the account page without a scope, and the signed-out sign-in page',async()=>{
+test('the theme switch is persisted, dark is the default and the browser preference only applies while nothing is stored',async()=>{
+ const fresh=await br.newContext({colorScheme:'light'});
+ const page=await fresh.newPage();
+ await page.goto('/');
+ await expect(page.locator('html')).toHaveAttribute('data-theme','light'); // nothing stored: the browser's light preference applies
+ await login(page,seed.explore.reader.email,seed.explore.reader.password);
+ await page.goto(deepLink(seed,'home'));
+ await page.getByRole('switch',{name:/theme/i}).click();
+ await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+ await page.reload();
+ await expect(page.locator('html')).toHaveAttribute('data-theme','dark'); // the stored choice wins over the light preference
+ expect(await page.evaluate(()=>window.localStorage.getItem('soundpost.theme'))).toBe('dark');
+ await fresh.close();
+ // A browser that reports "no preference" reports light (a page cannot tell the two apart), so the dark default is observed with a dark preference.
+ const darkPref=await br.newContext({colorScheme:'dark'});
+ const p2=await darkPref.newPage();
+ await p2.goto('/');
+ await expect(p2.locator('html')).toHaveAttribute('data-theme','dark');
+ expect(await p2.evaluate(()=>window.localStorage.getItem('soundpost.theme'))).toBeNull(); // the fallback is never stored as a choice
+ await darkPref.close();
+});
+test('DOM audit: the home page without a scope, and the signed-out sign-in page',async()=>{
  const page=await ctx.newPage();
  await page.goto('/');
- await expect(page.getByRole('heading',{level:1,name:'Account access'})).toBeVisible();
+ await expect(page.getByRole('heading',{level:1,name:'Home'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Choose scope'})).toBeVisible();
  const account=await auditDom(page);
  expect(account,JSON.stringify(account,null,1)).toEqual([]);
  const fresh=await br.newContext();
@@ -122,7 +190,7 @@ test('keyboard: the first Tab stop is the skip link, every stop shows a focus ri
 });
 test('keyboard: the skip link moves focus to the main landmark and the investigation scope in the address survives',async()=>{
  const page=await ctx.newPage();
- await visit(page,'queue');
+ await visit(page,'incidents');
  const before=page.url();
  await page.locator('body').evaluate((b)=>{b.setAttribute('tabindex','-1');b.focus();b.removeAttribute('tabindex');});
  if(await tabReachesLinks(page))await page.keyboard.press('Tab');
@@ -135,8 +203,8 @@ test('keyboard: the skip link moves focus to the main landmark and the investiga
 });
 test('focus management: a section change announces itself in the page title and moves focus to a heading that names the section',async()=>{
  const page=await ctx.newPage();
- await visit(page,'queue');
- for(const [label,view] of [['Traces','traces'],['Explore','explore'],['Jobs','jobs']] as const){
+ await visit(page,'incidents');
+ for(const [label,view] of [['Traces','traces'],['Logs','logs'],['Jobs','jobs']] as const){
   await page.getByRole('link',{name:label,exact:true}).focus();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`view=${view}`));
@@ -152,7 +220,7 @@ test('focus management: opening an entity from its form with the keyboard moves 
  await visit(page,'traces');
  await page.getByLabel('Trace ID').fill(seed.traces.clean.trace);
  await page.keyboard.press('Enter');
- const heading=page.getByRole('heading',{name:`Trace ${seed.traces.clean.trace}`});
+ const heading=page.getByRole('heading',{level:1,name:new RegExp(`^Trace ${seed.traces.clean.trace.slice(0,8)}`)});
  await expect(heading).toBeVisible();
  await expect(heading).toBeFocused();
  await page.goBack();
@@ -175,8 +243,8 @@ test('reduced motion: under prefers-reduced-motion nothing animates or transitio
  const free=await br.newContext({bypassCSP:true});
  const page=await free.newPage();
  await login(page,seed.explore.reader.email,seed.explore.reader.password);
- await visit(page,'queue');
- const probe=`@keyframes soundpost-probe{from{opacity:.2}to{opacity:1}}.investigation *{animation:soundpost-probe 2s linear infinite;transition:opacity 2s;scroll-behavior:smooth}`;
+ await visit(page,'incidents');
+ const probe=`@keyframes soundpost-probe{from{opacity:.2}to{opacity:1}}main *{animation:soundpost-probe 2s linear infinite;transition:opacity 2s;scroll-behavior:smooth}`;
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.addStyleTag({content:probe});
  expect(await page.evaluate(()=>document.getAnimations().length)).toBeGreaterThan(0); // the control: motion exists when it is allowed
@@ -219,7 +287,7 @@ test('every load state reachable here says what it is in words, is announced thr
  // loading: the REAL answer, held back so the loading state can be observed.
  const slow=await ctx.newPage();
  await slow.route('**/api/v1/queue',async(route)=>{await slow.waitForTimeout(2500);await route.continue();});
- await slow.goto(deepLink(seed,'queue'));
+ await slow.goto(deepLink(seed,'incidents'));
  await check(slow,'loading','polite');
  await check(slow,'empty','polite');
  // ready, unauthorized, unsupported, incomplete: real server answers.
@@ -232,7 +300,7 @@ test('every load state reachable here says what it is in words, is announced thr
  for(const [state,status] of [['error',500],['rate_limited',429]] as const){
   const faulty=await ctx.newPage();
   await faulty.route('**/api/v1/queue',(route)=>route.fulfill({status,contentType:'application/json',headers:{'x-request-id':'a'.repeat(32)},body:JSON.stringify({code:status===429?'rate_limited':'internal'})}));
-  await faulty.goto(deepLink(seed,'queue'));
+  await faulty.goto(deepLink(seed,'incidents'));
   await check(faulty,state,'assertive');
  }
  // Distinct words for distinct states: no two states share a label.
@@ -246,7 +314,7 @@ test('the audits have teeth: each defect injected into the real rendered page is
  expect(await auditDom(page)).toEqual([]);
  const injected:[string,string][]=[
   ['interactive-name',`document.querySelector('nav a').textContent=''`],
-  ['form-label',`Array.from(document.querySelectorAll('form[aria-label="Open a trace"] label')).find((l)=>l.textContent.startsWith('Trace')).childNodes.forEach((n)=>{if(n.nodeType===3)n.textContent=''})`],
+  ['form-label',`document.querySelector('main').insertAdjacentHTML('beforeend','<input type="text">')`],
   ['heading-order',`document.querySelector('main').insertAdjacentHTML('beforeend','<h2>Section</h2><h6>Skipped levels</h6>')`],
   ['coverage',`document.querySelector('main').replaceChildren()`],
   ['landmarks',`document.body.insertAdjacentHTML('beforeend','<main>second</main>')`],
@@ -308,13 +376,13 @@ test('conflict dialog: a real conflict is an alert that takes focus, passes the 
   return page;
  };
  const pageA=await open(alpha),pageB=await open(bravo);
- await pageA.getByRole('radio',{name:'Assign owner',exact:true}).check();
+ await pageA.getByRole('button',{name:'Assign owner',exact:true}).click();
  await pageA.getByRole('button',{name:'Use my user ID',exact:true}).click();
- await pageA.getByRole('button',{name:'Submit: Assign owner',exact:true}).click();
+ await pageA.getByRole('dialog').getByRole('button',{name:'Assign owner',exact:true}).click();
  await expect(pageA.locator('[data-outcome="committed"]')).toContainText('revision 2');
  // B still holds revision 1 and loses.
- await pageB.getByRole('radio',{name:'Acknowledge',exact:true}).check();
- await pageB.getByRole('button',{name:'Submit: Acknowledge',exact:true}).click();
+ await pageB.getByRole('button',{name:'Acknowledge',exact:true}).click();
+ await pageB.getByRole('dialog').getByRole('button',{name:'Acknowledge',exact:true}).click();
  const conflict=pageB.locator('[data-outcome="conflict"]');
  await expect(conflict).toBeFocused();
  await expect(conflict.getByRole('alert')).toContainText('Conflict: not applied');

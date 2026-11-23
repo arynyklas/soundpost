@@ -21,7 +21,7 @@ async function command(page:Page,org:string,kind:string,payload:Record<string,un
 const hashFor=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:'1700000000000000000',end:'1700003600000000000',tz:'UTC',view:'services'})}`;
 test('a stale response for the previous scope never paints after navigation',async({page})=>{
  test.setTimeout(90_000);
- await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{level:1,name:'Home',exact:true})).toBeVisible();
  const user=(await (await page.request.get('/api/v1/session')).json() as {user:string}).user;
  const orgA=id(),orgB=id(),projectA=id(),projectB=id();
  for(const [org,project] of [[orgA,projectA],[orgB,projectB]] as const){
@@ -52,7 +52,7 @@ test('a stale response for the previous scope never paints after navigation',asy
  // Now let A's real response complete late.
  release();await servedA;await page.waitForTimeout(500);
  await expect(page.getByTestId('visible-org')).toHaveText(orgB);
- const text=await page.locator('.investigation').innerText();
+ const text=await page.locator('main').innerText();
  expect(text).not.toContain(orgA);
  expect(text).not.toContain(projectA);
  expect(text).toContain(projectB);
@@ -61,7 +61,7 @@ test('a stale response for the previous scope never paints after navigation',asy
  await expect(page.getByTestId('visible-org')).toHaveText(orgA);
  expect(page.url()).toContain(`org=${orgA}`);
  await expect(page.getByText(`Project ${projectA}`)).toBeVisible();
- expect(await page.locator('.investigation').innerText()).not.toContain(projectB);
+ expect(await page.locator('main').innerText()).not.toContain(projectB);
  await page.goForward();
  await expect(page.getByTestId('visible-org')).toHaveText(orgB);
  await expect(page.getByText(`Project ${projectB}`)).toBeVisible();
@@ -76,7 +76,7 @@ test('a stale response for the previous scope never paints after navigation',asy
 // is stuck on "Loading".
 test('a late answer of a superseded read does not replace the newer read when the same scope is read again without a remount',async({page})=>{
  test.setTimeout(90_000);
- await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access'})).toBeVisible();
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{level:1,name:'Home',exact:true})).toBeVisible();
  const user=(await (await page.request.get('/api/v1/session')).json() as {user:string}).user;
  const org=id(),project=id();
  await command(page,org,'create_org',{id:org,name:'guard without remount'});
@@ -88,6 +88,8 @@ test('a late answer of a superseded read does not replace the newer read when th
  let held=0,served=Promise.resolve();
  const sent:number[]=[];
  await page.route('**/api/v1/investigate',async(route)=>{
+  // The list's own read names no target; the health read of each listed service (a row's figures) names one and is not what is counted here.
+  if((route.request().postDataJSON() as {target?:string}).target!==undefined){await route.continue();return;}
   sent.push(Date.now());
   if(held>0){await route.continue();return;}
   held++;
@@ -124,7 +126,7 @@ test('a real answer held on the server side of the wire never paints in a later 
  test.setTimeout(120_000);
  const pki=process.env.E2E_PKI;
  if(!pki)throw new Error('E2E_PKI (the directory of the private leaf certificate the real server uses) is required for the fault barrier');
- await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{level:1,name:'Home',exact:true})).toBeVisible();
  const user=(await (await page.request.get('/api/v1/session')).json() as {user:string}).user;
  const orgA=id(),orgB=id(),projectA=id(),projectB=id();
  for(const [org,project] of [[orgA,projectA],[orgB,projectB]] as const){
@@ -155,7 +157,7 @@ test('a real answer held on the server side of the wire never paints in a later 
   await expect.poll(()=>barrier.held()).toBe(0);
   await page.waitForTimeout(500);
   await expect(page.getByTestId('visible-org')).toHaveText(orgB);
-  const text=await page.locator('.investigation').innerText();
+  const text=await page.locator('main').innerText();
   expect(text).not.toContain(orgA);
   expect(text).not.toContain(projectA);
   expect(text).toContain(projectB);
@@ -164,7 +166,7 @@ test('a real answer held on the server side of the wire never paints in a later 
   await expect(page.getByTestId('visible-org')).toHaveText(orgA);
   expect(page.url()).toContain(`org=${orgA}`);
   await expect(page.getByText(`Project ${projectA}`)).toBeVisible();
-  expect(await page.locator('.investigation').innerText()).not.toContain(projectB);
+  expect(await page.locator('main').innerText()).not.toContain(projectB);
   await page.goForward();
   await expect(page.getByTestId('visible-org')).toHaveText(orgB);
   await expect(page.getByText(`Project ${projectB}`)).toBeVisible();

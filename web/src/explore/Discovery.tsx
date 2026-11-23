@@ -4,6 +4,7 @@ import { discover, stateOfQueryFault } from '../api/client';
 import { DISCOVER_KINDS, type DiscoverKind, type DiscoverSignal, type DiscoveryRequest, type DiscoveryResult, type LoadState, type QueryLanguage } from '../api/types';
 import { latestOnly, scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
+import { Callout, Card } from '../ui/primitives';
 import { runLatest } from './runner';
 
 /** The most names kept in the page at once; more pages stop being offered beyond it, and the page says so. */
@@ -65,26 +66,27 @@ export function Discovery(props: { context: ViewContext; language: QueryLanguage
  const insertText = (item: string): string => (kind === 'label_values' ? JSON.stringify(item) : item);
  const canInsert = kind === 'metric_names' || kind === 'label_names' || kind === 'label_values';
  return (
-  <section className="panel" aria-labelledby="discover-heading" data-section="discovery">
-   <h3 id="discover-heading">Discover names</h3>
-   <p>Names are read through your own scope for the selected projects and window. A page cursor is bound to exactly these parameters: changing any of them starts over.</p>
-   <form aria-label="Discover names" onSubmit={(e) => { e.preventDefault(); load(false); }}>
-    <div className="field-row">
-     <label>Kind <select value={kind} onChange={(e) => setChosen(e.target.value as DiscoverKind)}>{kinds.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select></label>
-     <label>Label name (for label values) <input value={fieldNow} onChange={(e) => setField(e.target.value)} disabled={kind !== 'label_values'} autoComplete="off" spellCheck={false} /></label>
-     <label>Page size (1 to 1000) <input value={limit} onChange={(e) => setLimit(e.target.value)} inputMode="numeric" autoComplete="off" /></label>
-    </div>
-    <button type="submit">List names</button>
-   </form>
-   {problem && <p role="alert" className="error">{problem}</p>}
-   {view !== null && <StatusPanel state={view.status} />}
-   {view !== null && view.items.length > 0 && (
-    <ul className="discovery-items" data-testid="discovery-items" aria-label={`${KIND_LABEL[kind]}, ${view.items.length} loaded`}>
-     {view.items.map((item) => <li key={item}><code>{item}</code>{canInsert && <> <button type="button" onClick={() => props.onInsert(insertText(item))}>Insert into the query</button></>}</li>)}
-    </ul>
-   )}
-   {view !== null && view.capped && <p role="status" className="banner">Only the first {MAX_HELD} names are held here; narrow the window or the projects to see the rest.</p>}
-   {view !== null && view.next !== null && view.status.kind !== 'loading' && <button type="button" onClick={() => load(true)}>Load the next page ({view.items.length} loaded)</button>}
-  </section>
+  <div data-section="discovery">
+   <Card title="Discover names" titleId="discover-heading" bodyClass="col g12">
+    <p className="small t2">Names are read through your own scope for the selected projects and window. A page cursor is bound to exactly these parameters: changing any of them starts over.</p>
+    <form aria-label="Discover names" className="col g12" onSubmit={(e) => { e.preventDefault(); load(false); }}>
+     <div className="exp-fields">
+      <label>Kind <select value={kind} onChange={(e) => setChosen(e.target.value as DiscoverKind)}>{kinds.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select></label>
+      <label>Label name (for label values) <input value={fieldNow} onChange={(e) => setField(e.target.value)} disabled={kind !== 'label_values'} autoComplete="off" spellCheck={false} /></label>
+      <label>Page size (1 to 1000) <input value={limit} onChange={(e) => setLimit(e.target.value)} inputMode="numeric" autoComplete="off" /></label>
+     </div>
+     <div><button type="submit" className="btn">List names</button></div>
+    </form>
+    {problem && <p role="alert" className="error">{problem}</p>}
+    {view !== null && <StatusPanel state={view.status} />}
+    {view !== null && view.items.length > 0 && (
+     <ul className="exp-items" data-testid="discovery-items" aria-label={`${KIND_LABEL[kind]}, ${view.items.length} loaded`} tabIndex={0}>
+      {view.items.map((item) => <li key={item}><code>{item}</code>{canInsert && <button type="button" className="btn btn-sm" onClick={() => props.onInsert(insertText(item))}>Insert into the query</button>}</li>)}
+     </ul>
+    )}
+    {view !== null && view.capped && <Callout tone="warn" role="status">Only the first {MAX_HELD} names are held here; narrow the window or the projects to see the rest.</Callout>}
+    {view !== null && view.next !== null && view.status.kind !== 'loading' && <div><button type="button" className="btn" onClick={() => load(true)}>Load the next page ({view.items.length} loaded)</button></div>}
+   </Card>
+  </div>
  );
 }

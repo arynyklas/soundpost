@@ -1,167 +1,74 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import { capabilities, getOperation, isAbort, stateOfFault } from '../api/client';
-import type { Id, LifecycleOperation, LoadState, VisibleSource } from '../api/types';
-import { formatNs, isId, scopeKey, type ViewContext } from '../app/context';
+import { capabilities, isAbort, stateOfFault } from '../api/client';
+import type { Id, LoadState, VisibleSource } from '../api/types';
+import { scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
-import { describeReason } from '../incidents/model';
-import { OrganizationSettings } from './OrganizationSettings';
 import { RestorePanel } from '../auth/RestorePanel';
 import { SessionContext } from '../auth/ElevationDialog';
-import { PolicySettings } from './PolicySettings';
-import { DestinationSettings } from './DestinationSettings';
-import { CutoverPanel } from './CutoverPanel';
-import { RuleSettings } from './RuleSettings';
-import { SourcePolicies } from './SourcePolicies';
-import { SSOSettings } from './SSOSettings';
-import { TeamSettings } from './TeamSettings';
+import { projectLabel, useShell } from '../shell/ShellContext';
+import { DataTable, EmptyState, Pill } from '../ui/primitives';
+import { RetentionPanel } from './PolicySettings';
+import { Panel } from './SettingsUi';
 
-/** What an operation's phase means, in words. Only a complete operation with physical erasure done
- * is reported as finished; fencing, held and failed are never success, and a logically complete
- * deletion is not physical erasure. */
-export function operationWords(op: LifecycleOperation, tz: string): { label: string; text: string; success: boolean } {
- if (op.state !== 'ready') return { label: 'Not available', success: false, text: describeReason(op.reason ?? 'lifecycle_operation_store_not_wired') };
- const physical = formatNs(op.physical_deadline, tz), backup = formatNs(op.backup_deadline, tz);
- switch (op.phase) {
-  case 'fencing': return { label: 'Pending (fencing)', success: false, text: `Reads of the affected data are already denied, but the fence is not complete: ${op.applied_barriers} confirmed, ${op.pending_groups} group${op.pending_groups === 1 ? '' : 's'} still pending. This is not success, and nothing has been erased yet.` };
-  case 'held': return { label: 'Held', success: false, text: `A legal hold (${op.holds} hold${op.holds === 1 ? '' : 's'}) prevents erasure. The data has not been erased. Backup copies are retained at least until ${backup}.` };
-  case 'failed': return { label: 'Failed', success: false, text: `The operation failed${op.safe_fault ? ` (${op.safe_fault})` : ''}. It is not complete and nothing may be assumed erased.` };
-  case 'complete':
-   if (op.physical === 'done') return { label: 'Complete', success: true, text: `Logical deletion and physical erasure of the primary stores are done. Backup copies remain until ${backup}.` };
-   if (op.physical === 'held') return { label: 'Logically complete, erasure held', success: false, text: `Reads are denied, but a legal hold prevents physical erasure. The bytes are not erased. Backup copies remain until ${backup}.` };
-   return { label: 'Logically complete, erasure pending', success: false, text: `Reads are denied. Physical erasure is still pending and is due by ${physical}; backup copies remain until ${backup}. The bytes are not erased yet.` };
-  default: return { label: 'Not available', success: false, text: describeReason(op.reason ?? 'lifecycle_operation_store_not_wired') };
- }
-}
-
-/** Whether an operation can still change on its own: it is fencing, or logically complete with the
- * physical erasure still pending. Held, failed and a finished erasure do not change by themselves. */
-export function keepPolling(op: LifecycleOperation): boolean {
- return op.state === 'ready' && (op.phase === 'fencing' || (op.phase === 'complete' && op.physical === 'pending'));
-}
-
-const POLL_MS = 2000;
-/** Polls one operation (scoped by the server to this organization's administrators) until it
- * reaches a state that will not change on its own (see keepPolling). */
-function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
+function SourcesPanel(props: { context: ViewContext; project: Id; name: string }): React.JSX.Element {
  const c = props.context;
- const [value, setValue] = React.useState('');
- const [id, setId] = React.useState<Id | ''>('');
- const [error, setError] = React.useState('');
- const [state, setState] = React.useState<{ key: string; load: LoadState<LifecycleOperation> }>({ key: '', load: { kind: 'loading' } });
- const key = `${c.org}|${id}|${c.generation}`;
- React.useEffect(() => {
-  if (!id) return;
-  const ctl = new AbortController();
-  let timer = 0;
-  setState({ key, load: { kind: 'loading' } });
-  const poll = (): void => {
-   getOperation(c.org, id, ctl.signal).then(
-    (op) => {
-     if (ctl.signal.aborted) return;
-     setState({ key, load: op.state === 'ready' ? { kind: 'ready', data: op } : { kind: 'unsupported', reason: op.reason ?? 'lifecycle_operation_store_not_wired', data: op } });
-     if (keepPolling(op)) timer = window.setTimeout(poll, POLL_MS);
-    },
-    (e: unknown) => { if (!ctl.signal.aborted && !isAbort(e)) setState({ key, load: stateOfFault(e) }); },
-   );
-  };
-  poll();
-  return () => { ctl.abort(); clearTimeout(timer); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [key]);
- const load: LoadState<LifecycleOperation> = state.key === key ? state.load : { kind: 'loading' };
- const op = load.kind === 'ready' ? load.data : undefined;
- const words = op ? operationWords(op, c.timezone) : undefined;
- return (
-  <section aria-labelledby="operation-heading" data-section="operations">
-   <h3 id="operation-heading">Restriction, revocation and deletion progress</h3>
-   <form aria-label="Look up an operation" onSubmit={(e) => { e.preventDefault(); const v = value.trim(); if (!isId(v)) return setError('Operation ID must be 32 lowercase hexadecimal characters.'); setError(''); setId(v); }}>
-    <label>Operation ID <input value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} /></label>
-    <button type="submit">Show progress</button>
-    {error && <p role="alert" className="error">{error}</p>}
-   </form>
-   {id && <StatusPanel state={load} />}
-   {op && words && (
-    <div data-testid="operation" data-phase={op.phase}>
-     <p><strong>{words.label}.</strong> {words.text}</p>
-     <p>Operation <code>{op.id}</code>, generation {op.generation}. Physical erasure is due by {formatNs(op.physical_deadline, c.timezone)}; backup copies expire by {formatNs(op.backup_deadline, c.timezone)}.</p>
-     {op.over_erased && op.over_erased.length > 0 && <p>Opaque control states erased without a recorded window: {op.over_erased.map((e) => `${e.book} ${e.count}`).join(', ')}.</p>}
-     {op.residual_stores && op.residual_stores.length > 0 && <p>Local stores that may still hold a copy: {op.residual_stores.join(', ')}.</p>}
-    </div>
-   )}
-  </section>
- );
-}
-
-export type SettingsTab = 'project' | 'organization' | 'teams' | 'sources' | 'sso' | 'destinations';
-export const SETTINGS_TABS: readonly { id: SettingsTab; label: string }[] = [
- { id: 'project', label: 'Project' }, { id: 'organization', label: 'Organization' }, { id: 'teams', label: 'Teams' }, { id: 'sources', label: 'Source policies' }, { id: 'sso', label: 'Single sign-on' }, { id: 'destinations', label: 'Destinations' },
-];
-
-function ProjectTab(props: { context: ViewContext }): React.JSX.Element {
- const c = props.context;
- const session = React.useContext(SessionContext);
- const restored = session?.session.restore?.pending ?? 0;
- const [held, setHeld] = React.useState<{ key: string; byProject: Record<string, LoadState<VisibleSource[]>> }>({ key: '', byProject: {} });
- const key = `${scopeKey(c)}|${c.generation}`;
+ const key = `${scopeKey(c)}|${props.project}|${c.generation}`;
+ const [held, setHeld] = React.useState<{ key: string; load: LoadState<VisibleSource[]> }>({ key: '', load: { kind: 'loading' } });
  React.useEffect(() => {
   const ctl = new AbortController();
-  setHeld({ key, byProject: {} });
-  for (const project of c.projects) {
-   capabilities(c.org, project, ctl.signal).then(
-    (r) => { if (!ctl.signal.aborted) setHeld((h) => h.key === key ? { key, byProject: { ...h.byProject, [project]: r.sources.length ? { kind: 'ready', data: r.sources } : { kind: 'empty', data: [] } } } : h); },
-    (e: unknown) => { if (!ctl.signal.aborted && !isAbort(e)) setHeld((h) => h.key === key ? { key, byProject: { ...h.byProject, [project]: stateOfFault(e) } } : h); },
-   );
-  }
+  capabilities(c.org, props.project, ctl.signal).then(
+   (r) => { if (!ctl.signal.aborted) setHeld({ key, load: r.sources.length ? { kind: 'ready', data: r.sources } : { kind: 'empty', data: [] } }); },
+   (e: unknown) => { if (!ctl.signal.aborted && !isAbort(e)) setHeld({ key, load: stateOfFault(e) }); },
+  );
   return () => ctl.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [key]);
+ const load: LoadState<VisibleSource[]> = held.key === key ? held.load : { kind: 'loading' };
  return (
-  <div data-settings-page="project">
-   {restored > 0 && session && (
-    <RestorePanel csrf={session.session.csrf} pending={restored} label="Restored sources and senders" title="Restored: inactive sources and senders" only={(item) => item.kind === 'source' || (item.kind === 'integration' && (item.key ?? '').startsWith('destination:') && item.org === c.org)}
-     intro="This installation was restored from a backup. Its sources and notification senders are disabled: a source's credential is revoked and a sender's endpoint secret is sealed away, so nothing is ingested or sent through them until an instance administrator reauthorizes each one here, with fresh authentication and an audit record. Reauthorizing a source issues a new credential, shown once." />
-   )}
-   <p>Source capabilities this account may read. A project with no readable source is empty, not unhealthy.</p>
-   {c.projects.map((project) => {
-    const state: LoadState<VisibleSource[]> = held.key === key ? held.byProject[project] ?? { kind: 'loading' } : { kind: 'loading' };
-    return (
-     <div key={project} data-project={project}>
-      <h3>Project <code>{project}</code></h3>
-      <StatusPanel state={state} />
-      {'data' in state && state.data.length > 0 && <ul>{state.data.map((s) => <li key={s.id}><code>{s.id}</code> — class {s.class}, kinds {s.kinds.join(', ')}{s.replay ? ', replay' : ''}</li>)}</ul>}
-      <PolicySettings context={c} project={project} />
-      <CutoverPanel context={c} project={project} />
-      <RuleSettings context={c} project={project} />
-     </div>
-    );
-   })}
-   <OperationPanel context={c} />
-  </div>
+  <Panel title={`Sources of ${props.name}`}>
+   <div className="col g12">
+    <p className="small t2">Source capabilities this account may read. A project with no readable source is empty, not unhealthy.</p>
+    {load.kind === 'ready'
+     ? <DataTable label={`Readable sources of ${props.name}`} rows={load.data} rowKey={(s) => s.id} columns={[
+      { key: 'id', header: 'Source', cell: (s) => <code>{s.id}</code> },
+      { key: 'class', header: 'Class', cell: (s) => s.class },
+      { key: 'kinds', header: 'Kinds', cell: (s) => s.kinds.join(', ') },
+      { key: 'replay', header: 'Replay', cell: (s) => <Pill tone={s.replay ? 'ok' : 'line'}>{s.replay ? 'replay' : 'no replay'}</Pill> },
+     ]} />
+     : load.kind === 'empty' ? <EmptyState icon="plug" title="No readable source">Nothing is ingested for this project through a source this account may read.</EmptyState>
+      : <StatusPanel state={load} />}
+   </div>
+  </Panel>
  );
 }
 
-/** Settings: one project's readable sources, notification policy, destinations and retention (C11 /api/v1/policies), the progress of
- * long-running operations, and the organization's own administration: organization and grants, teams, source policies and single
- * sign-on, over the closed admin routes. Each page is read and written under the caller's own authority: another organization's
- * administrator and an ordinary member see an administration page as not found. */
-export function ProjectSettings(props: { context: ViewContext }): React.JSX.Element {
+/** The project page of Settings: for each project in scope, the sources this account may read and the retention of each signal (C11 /api/v1/policies, under the account's own policy.write
+ * grant or organization administration), and, after a restore, the inactive sources and senders of this organization with their audited reauthorization. */
+export function ProjectPage(props: { context: ViewContext }): React.JSX.Element {
  const c = props.context;
- const [tab, setTab] = React.useState<SettingsTab>('project');
+ const { names } = useShell();
+ const session = React.useContext(SessionContext);
+ const restored = session?.session.restore?.pending ?? 0;
  return (
-  <section className="panel" aria-labelledby="view-heading">
-   <h2 id="view-heading">Project settings</h2>
-   <nav aria-label="Settings pages">
-    <ul className="nav-list">
-     {SETTINGS_TABS.map((t) => <li key={t.id}><button type="button" aria-current={t.id === tab ? 'page' : undefined} data-settings-tab={t.id} onClick={() => setTab(t.id)}>{t.label}</button></li>)}
-    </ul>
-   </nav>
-   {tab === 'project' && <ProjectTab context={c} />}
-   {tab === 'organization' && <OrganizationSettings context={c} />}
-   {tab === 'teams' && <TeamSettings context={c} />}
-   {tab === 'sources' && <SourcePolicies context={c} />}
-   {tab === 'sso' && <SSOSettings context={c} />}
-   {tab === 'destinations' && <DestinationSettings context={c} />}
-  </section>
+  <div data-settings-page="project" className="col g16">
+   {restored > 0 && session && (
+    <Panel title="Restored access">
+     <div className="set-restore">
+      <RestorePanel csrf={session.session.csrf} pending={restored} label="Restored sources and senders" title="Restored: inactive sources and senders" only={(item) => item.kind === 'source' || (item.kind === 'integration' && (item.key ?? '').startsWith('destination:') && item.org === c.org)}
+       intro="This installation was restored from a backup. Its sources and notification senders are disabled: a source's credential is revoked and a sender's endpoint secret is sealed away, so nothing is ingested or sent through them until an instance administrator reauthorizes each one here, with fresh authentication and an audit record. Reauthorizing a source issues a new credential, shown once." />
+     </div>
+    </Panel>
+   )}
+   {c.projects.map((project) => {
+    const name = projectLabel(names, project);
+    return (
+     <div key={project} data-project={project} className="col g16">
+      <SourcesPanel context={c} project={project} name={name} />
+      <RetentionPanel context={c} project={project} name={name} />
+     </div>
+    );
+   })}
+  </div>
  );
 }

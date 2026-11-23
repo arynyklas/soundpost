@@ -28,7 +28,7 @@ describe('D33 path-shaped console links rewrite to the hash route', () => {
   expect([service.section, service.service]).toEqual(['services', S]);
  });
  test('sections without an entity open on the scope; the window parameters are kept', () => {
-  for (const section of ['queue', 'explore', 'settings', 'incidents']) expect(decodeHash(hashForPath(`/${section}`, `?org=${A}&projects=${P}`) ?? '', 0, NOW).section).toBe(section);
+  for (const [section, want] of [['queue', 'incidents'], ['explore', 'logs'], ['settings', 'settings'], ['incidents', 'incidents'], ['logs', 'logs'], ['home', 'home']]) expect(decodeHash(hashForPath(`/${section}`, `?org=${A}&projects=${P}`) ?? '', 0, NOW).section).toBe(want);
   const nav = decodeHash(hashForPath('/queue', `?org=${A}&projects=${P}&start=5&end=9&tz=UTC`) ?? '', 0, NOW);
   expect([nav.context?.start, nav.context?.end, nav.context?.timezone]).toEqual(['5', '9', 'UTC']);
  });

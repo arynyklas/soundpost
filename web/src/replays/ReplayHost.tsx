@@ -89,21 +89,21 @@ export function ReplayHost(props: { stream: ReplayStream }): React.JSX.Element {
  const pause = (): void => { playing.current = false; setMode((m) => (m === 'finished' ? m : 'paused')); };
  const { ready, failedToStart } = viewerReadiness(started, startFailed);
  return (
-  <div className="replay-host" data-testid="replay-host" data-mode={mode}>
-   <div role="group" aria-label="Playback controls" className="replay-controls">
-    <button type="button" disabled={!ready || mode !== 'paused'} onClick={() => { void deliver(); }}>Step to the next event</button>
+  <div className="exp-replay-host col g12" data-testid="replay-host" data-mode={mode}>
+   <div role="group" aria-label="Playback controls" className="row wrap">
+    <button type="button" className="btn" disabled={!ready || mode !== 'paused'} onClick={() => { void deliver(); }}>Step to the next event</button>
     {mode === 'playing'
-     ? <button type="button" onClick={pause}>Pause</button>
-     : <button type="button" className="primary" disabled={!ready || mode === 'finished'} onClick={() => { void play(); }}>Play</button>}
+     ? <button type="button" className="btn" onClick={pause}>Pause</button>
+     : <button type="button" className="btn btn-primary" disabled={!ready || mode === 'finished'} onClick={() => { void play(); }}>Play</button>}
    </div>
-   <p role="status" data-testid="viewer-status" data-status={status ?? 'none'}>
+   <p role="status" data-testid="viewer-status" data-status={status ?? 'none'} className="small">
     Viewer: {failedToStart ? 'the replay viewer did not start; no replay content can be shown' : status === null ? 'starting' : STATUS_TEXT[status]}.
     {' '}Events delivered to the viewer: {delivered}.{mode === 'finished' ? ' All received events were delivered.' : ''}
    </p>
-   <ol className="viewer-status-log" data-testid="viewer-status-log" aria-label="Viewer status in order">
+   <ol className="exp-viewer-log" data-testid="viewer-status-log" aria-label="Viewer status in order">
     {log.map((s, i) => <li key={`${i}:${s}`} data-status={s}>{s}</li>)}
    </ol>
-   <iframe ref={frame} title="Masked replay viewer (sandboxed, no network)" className="replay-frame" data-testid="replay-frame" src={REPLAY_FRAME_SRC} sandbox={REPLAY_FRAME_SANDBOX} referrerPolicy="no-referrer" />
+   <iframe ref={frame} title="Masked replay viewer (sandboxed, no network)" className="exp-replay-frame" data-testid="replay-frame" src={REPLAY_FRAME_SRC} sandbox={REPLAY_FRAME_SANDBOX} referrerPolicy="no-referrer" />
   </div>
  );
 }

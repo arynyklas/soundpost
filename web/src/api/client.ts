@@ -219,7 +219,13 @@ export async function act(req: ActionRequest, signal: AbortSignal): Promise<Acti
    throw new VersionConflict(body.current_version, /^[0-9a-f]{32}$/.test(String(body.request_id ?? '')) ? String(body.request_id) : '', body.detail);
   }
  }
- if (!response.ok && response.status !== 501) throw await apiFault(response);
+ if (response.status === 501) {
+  // Two different 501 answers: the typed not_available action response (a body naming the action), and the typed refusal `{code: "unsupported", detail}` of a write
+  // the installation refuses for what it is (D93: needs_contracted_installation). The refusal is a fault with its own detail, never "not available yet".
+  const copy = response.clone();
+  const body: unknown = await copy.json().catch(() => null);
+  if (!isRecord(body) || body.state !== 'not_available') throw await apiFault(response);
+ } else if (!response.ok) throw await apiFault(response);
  return parseAction(await response.json() as unknown, req);
 }
 

@@ -73,7 +73,7 @@ export const LOAD_STATE_KINDS = ['loading', 'ready', 'empty', 'unauthorized', 'u
 // ---- Human actions, the incident workspace and the queue (internal/httpapi/actions.go) ----
 // Versions and nanosecond timestamps are decimal strings on the wire.
 export type ActionEntity = 'incident' | 'issue';
-export type IncidentActionKind = 'assign' | 'ack' | 'resolve' | 'link' | 'impact' | 'snooze' | 'unsnooze' | 'maintenance' | 'maintenance_end';
+export type IncidentActionKind = 'assign' | 'ack' | 'resolve' | 'link' | 'impact' | 'snooze' | 'unsnooze' | 'maintenance' | 'maintenance_end' | 'title' | 'note';
 export type ActionKind = IncidentActionKind | 'ignore' | 'unignore' | 'reopen' | 'grouping_migration';
 export type Severity = 'minor' | 'major' | 'critical';
 export type ConditionState = 'firing' | 'recovered' | 'unknown';
@@ -82,7 +82,7 @@ export type LinkKind = 'condition' | 'issue' | 'release' | 'service' | 'incident
 export interface ImpactPayload { condition: Id; episode: Id; severity: Severity; state: ConditionState; freshness: ConditionFreshness }
 export interface IncidentLink { kind: LinkKind; id: Id }
 /** Closed payload: there is no actor, origin, organization or timestamp field; the server takes the actor from the session. */
-export interface ActionPayload { reason?: string; owner?: Id; until?: string; impact?: ImpactPayload; link?: IncidentLink; fixed_frontier?: Id[]; resolution_boundary?: string }
+export interface ActionPayload { reason?: string; owner?: Id; until?: string; impact?: ImpactPayload; link?: IncidentLink; fixed_frontier?: Id[]; resolution_boundary?: string; /** Console API sections 1 and 2: the incident title (1..160 bytes) and a timeline note (1..2000 bytes). */ title?: string; note?: string }
 export interface ActionRequest {
  org: Id;
  command_id: Id;
@@ -97,7 +97,7 @@ export interface ConditionView { id: Id; state: ConditionState; freshness: Condi
 export interface AckView { actor: Id; at: string; impact_revision: string; version: string; current: boolean }
 export interface WindowView { actor: Id; reason: string; from: string; until: string; ended?: string; version: string; active: boolean }
 export interface ImpactView { condition: Id; episode: Id; severity: Severity; state: ConditionState; freshness: ConditionFreshness }
-export interface TimelineEntry { version: string; at: string; type: string; origin: 'human' | 'system'; actor: Id; reason?: string; owner?: Id; until?: string; impact?: ImpactView; link?: IncidentLink }
+export interface TimelineEntry { version: string; at: string; type: string; origin: 'human' | 'system'; actor: Id; reason?: string; owner?: Id; until?: string; impact?: ImpactView; link?: IncidentLink; title?: string; note?: string }
 export type DeliveryTier = 'urgent' | 'queue' | 'none';
 export interface UrgencyView { state: ViewState; reason?: string; tier?: DeliveryTier; mode?: 'active' | 'shadow'; episode_open?: boolean }
 export interface DeliveryEntryView {
@@ -135,6 +135,8 @@ export interface IncidentView {
  observed_impacts: number;
  last_activity: string;
  timeline?: TimelineEntry[];
+ /** The incident title (console API section 1): `""` or absent when none was ever set; the console shows its own fallback. */
+ title?: string;
 }
 /** The committed issue exactly as the lifecycle committed it: identity, workflow, the revision the next action must expect, the resolution boundary and any grouping-migration links. It carries no occurrence evidence. */
 export interface IssueActionView { id: Id; workflow: string; revision: string; grouping_version: number; resolution_time_ns?: string; fixed_descendants?: Id[]; migration_links?: Id[] }

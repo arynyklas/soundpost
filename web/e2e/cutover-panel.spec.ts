@@ -7,7 +7,7 @@ import {activate,createOrg,createProject,createReader,field,login,owner,postJson
 // page shows none of it. The panel is rendered from the server's answer for exactly the requested organization and project.
 const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
 const WINDOW={start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000)};
-const settings=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:'settings'})}`;
+const settings=(org:string,project:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view:'cutover'})}`;
 const panelOf=(page:Page,project:string)=>page.locator(`[data-section="cutover"][data-project-cutover="${project}"]`);
 
 test('a project with no cutover says the product is its only owner, in words, with nothing that could advance a cutover',async({page})=>{

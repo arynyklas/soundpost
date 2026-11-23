@@ -55,7 +55,7 @@ suppresses new notification intents: they are still recorded, with the code
 ## Actions
 
 `open`, `ack`, `resolve`, `assign`, `impact`, `snooze`, `unsnooze`,
-`maintenance`, `maintenance_end`, `link`. Every action carries a command ID and
+`maintenance`, `maintenance_end`, `link`, `title`, `note`. Every action carries a command ID and
 the incident version it expects. The actor is the signed-in session, never a
 request field.
 
@@ -67,6 +67,15 @@ request field.
   outside your scope and one that does not exist look the same.
 - The audit holds identifiers (who, which action, which incident), never the
   reason text, evidence or raw error messages.
+
+## Title, notes, copy and GitLab (console API, decision D92)
+
+- **Title.** An incident may carry a title (1 to 160 bytes after trimming, valid UTF-8, no control character): the `title` action, needs `incidents.write`, version-checked like every action, allowed on open and resolved incidents (it names the incident; it does not change the workflow). The same title again is `409 incident_title_unchanged`. Without a title the console names an incident `Incident <8 hex>`. The audit records that a title was set, never its text.
+- **Notes.** The `note` action appends a plain-text note (1 to 2000 bytes, control characters other than a line break refused) to the timeline, on open **and resolved** incidents (post-incident notes). Notes are append-only: there is no edit and no delete. At most 120 of the 128 timeline entries and 64 KiB of note text per incident are used, so a note can never prevent an acknowledge or a resolve (`429 incident_notes_full` / `incident_timeline_full`). Note text lives only in the incident state: a deletion that covers the incident erases it, and it is never copied into an audit record, a notification, an event webhook or a GitLab issue; the Markdown timeline export includes it because the caller can already read it. The console renders note text as text.
+- **Copy.** The Copy menu puts a Markdown text built by the server on the clipboard: the console **link**, a **task description** (identifiers, severity, status, linked entity IDs and the link; no title and no note) or, for an incident, the **timeline** in order. All user text in it is escaped, and GitLab's triggers (mentions, references, quick actions, autolinks, commit SHAs) are defused with U+200B so pasting never pings or cross-links. Without the node's public address the link is `not available` (`public_origin_not_configured`).
+- **GitLab.** **Create GitLab issue** creates one issue in the GitLab project mapped to the Soundpost project and stores only its link (`docs/operations/gitlab.md`). A second create returns the stored link, an answer that may have been lost is shown as **unknown** and is looked up by its marker before anything is created again, and nothing is read back from GitLab. Connection and project mappings are set by an organization administrator on the GitLab settings page; any member reads them but only an administrator can change them.
+- **Event webhooks.** An administrator may subscribe an endpoint to incident and issue events (`incident.opened`, `incident.acknowledged`, `incident.resolved`, `issue.new`, `issue.regressed`, `issue.resolved`, `issue.reopened`, `release.registered`); requests are signed, carry identifiers and links only and are retried through the notification outbox (`docs/operations/event-webhooks.md`).
+- **Contracted installations.** Title, notes and the GitLab link are refused with `501 needs_contracted_installation` until the installation is contracted; fresh installations are contracted from the start. After the first such record a rollback to the previous release loses them silently, which is why this is a one-way step (`docs/operations/upgrade.md`).
 
 ## Correlation
 

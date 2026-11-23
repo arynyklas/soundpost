@@ -242,3 +242,8 @@ export function ssoDraft(config: Record<string, unknown>): SsoDraft {
  const subjects = isRecord(config.Subjects) ? Object.entries(config.Subjects).filter((e): e is [string, string] => typeof e[1] === 'string').map(([s, u]) => `${s} = ${u}`).join('\n') : '';
  return { issuer: typeof config.Issuer === 'string' ? config.Issuer : '', clientId: typeof config.ClientID === 'string' ? config.ClientID : '', redirectUrl: typeof config.RedirectURL === 'string' ? config.RedirectURL : '', subjects };
 }
+
+/** A display name: at most 80 bytes of valid text without control characters; empty clears it. */
+export function validDisplayName(name: string): boolean {
+ return new TextEncoder().encode(name).length <= 80 && !/\p{Cc}/u.test(name);
+}

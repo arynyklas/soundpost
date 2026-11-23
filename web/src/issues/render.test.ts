@@ -105,11 +105,11 @@ describe('regression table markup', () => {
  });
  test('a release lists the issue of each evaluation and does not repeat the release column; an issue does the opposite', () => {
   const byRelease = table([{ ...row(), issue: A }], true);
-  expect(byRelease).toContain('<th scope="col">Issue</th>');
+  expect(byRelease).toMatch(/<th scope="col"[^>]*>Issue<\/th>/);
   expect(byRelease).not.toContain('Release it ran in');
   expect(byRelease).toContain(`view=issues&amp;target=${P}%3A${A}`);
   const byIssue = table([row()]);
   expect(byIssue).toContain('Release it ran in');
-  expect(byIssue).not.toContain('<th scope="col">Issue</th>');
+  expect(byIssue).not.toMatch(/<th scope="col"[^>]*>Issue<\/th>/);
  });
 });

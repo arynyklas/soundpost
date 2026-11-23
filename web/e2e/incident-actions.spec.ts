@@ -2,6 +2,7 @@
 import {test,expect,type APIRequestContext,type Page,type BrowserContext} from '@playwright/test';
 import {randomBytes} from 'node:crypto';
 import {adminCommand,field,ingestError,onboardErrorSource,postJson} from './support/real';
+import {auditDom} from './support/audit';
 // Two real browsers, one real server, one REAL incident produced the product's own way: an error occurrence ingested through
 // POST /ingest/v1/batches with a real source credential -> the leader-only background runner (`soundpost serve`, issue producer, then
 // incident producer, acting as the in-process system principal) -> a system-origin incident, found through the real POST /api/v1/queue.
@@ -10,7 +11,7 @@ import {adminCommand,field,ingestError,onboardErrorSource,postJson} from './supp
 // as committed, and B's typed reason survives until B explicitly reloads and submits again.
 // What the real producer decides (and the spec asserts): an unhandled, non-fatal error opens the incident at severity major (a fatal one would
 // open at critical, leaving nothing worse to report) with one impact observation, source
-// firing with fresh data, no linked issue (the issue-workflow section says it is not available), delivery not available.
+// firing with fresh data, no linked issue (the "What changed" card says so), delivery not available.
 const email=process.env.SOUNDPOST_SCOPE_EMAIL;
 const password=process.env.SOUNDPOST_SCOPE_PASSWORD;
 if(!email||!password)throw new Error('A real provisioned MFA-free instance-admin account (SOUNDPOST_SCOPE_EMAIL, SOUNDPOST_SCOPE_PASSWORD) is required');
@@ -23,7 +24,7 @@ async function command(page:Page,org:string,kind:string,payload:Record<string,un
  await adminCommand(page,org,kind,payload,'Generic incident action acceptance');
 }
 async function login(page:Page,who:string,secret:string):Promise<void>{
- await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(who);await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(who);await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Home',exact:true})).toBeVisible();
 }
 const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
 // The page window brackets "now" (an incident reads by id; the window only scopes the shell).
@@ -52,8 +53,13 @@ async function read(page:Page,org:string,project:string,incident:string):Promise
  return await response.json() as View;
 }
 const outcome=(page:Page,kind:string)=>page.locator(`[data-outcome="${kind}"]`);
-async function choose(page:Page,action:string):Promise<void>{await page.getByRole('radio',{name:action,exact:true}).check();}
-async function submit(page:Page,action:string):Promise<void>{await page.getByRole('button',{name:`Submit: ${action}`,exact:true}).click();}
+// Each action opens its own dialog from the incident's action bar (Report impact is in the More menu); the dialog holds the form and the outcome.
+async function openAction(page:Page,action:string):Promise<void>{
+ if(action==='Report impact'){await page.getByRole('button',{name:/^More actions/}).click();await page.getByRole('menuitem',{name:'Report impact',exact:true}).click();}
+ else await page.getByRole('button',{name:({'Resolve':'Resolve incident','Snooze reminders':'Snooze'} as Record<string,string>)[action]??action,exact:true}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();
+}
+async function submit(page:Page,action:string):Promise<void>{await page.getByRole('dialog').getByRole('button',{name:action==='Resolve'?'Resolve incident':action,exact:true}).click();}
 
 test('two browsers act on one real incident without a silent overwrite',async({page,browser,playwright})=>{
  test.setTimeout(240_000);
@@ -81,19 +87,19 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  for(const p of [pageA,pageB]){
   await expect(p.getByTestId('revision')).toContainText('Revision 1');
   await expect(p.getByTestId('source-badge')).toHaveText('Source firing, fresh data');
-  await expect(p.getByTestId('expected-version')).toHaveText('1');
  }
  // The three concerns are separate sections, each with its own words.
  for(const section of ['alert-condition','issue-workflow','incident-response'])await expect(pageA.locator(`[data-section="${section}"]`)).toBeVisible();
- await expect(pageA.locator('[data-section="issue-workflow"]')).toContainText('Issue workflow: not available');
+ await expect(pageA.locator('[data-section="issue-workflow"]')).toContainText('No error issue is linked');
  await expect(pageA.getByTestId('rate')).toContainText('Rate unknown');
  await expect(pageA.getByTestId('rate')).toContainText('1 impact observation');
- expect(await pageA.locator('.investigation').innerText()).not.toMatch(/\b0\s*%/);
+ expect(await pageA.locator('main').innerText()).not.toMatch(/\b0\s*%/);
 
  // A assigns. While the request is held the page says pending and shows nothing as committed.
  const {promise:gate,resolve:release}=Promise.withResolvers<void>();
  await pageA.route('**/api/v1/actions',async(route)=>{await gate;await route.continue();});
- await choose(pageA,'Assign owner');
+ await openAction(pageA,'Assign owner');
+ await expect(pageA.getByTestId('expected-version')).toHaveText('1');
  await pageA.getByRole('button',{name:'Use my user ID',exact:true}).click();
  await submit(pageA,'Assign owner');
  await expect(outcome(pageA,'pending')).toContainText('Nothing is committed yet');
@@ -108,7 +114,7 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  // B, still looking at revision 1, acknowledges with expected revision 1: it loses.
  const typed='<img src=x onerror="window.__pwn=1"> B is on it & looking';
  await expect(pageB.getByTestId('revision')).toContainText('Revision 1');
- await choose(pageB,'Acknowledge');
+ await openAction(pageB,'Acknowledge');
  await pageB.getByLabel('Reason (optional)').fill(typed);
  await submit(pageB,'Acknowledge');
  await expect(outcome(pageB,'conflict')).toBeFocused();
@@ -139,8 +145,8 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await expect(pageB.getByTestId('urgency')).toContainText('No notification policy has evaluated this incident');
  await expect(pageB.getByTestId('delivery')).toContainText('No delivery has been created');
  // The typed reason is plain text: no element was created and no handler ran.
- await expect(pageB.locator('.timeline li[data-type="ack"]')).toContainText('<img src=x');
- expect(await pageB.locator('.timeline img').count()).toBe(0);
+ await expect(pageB.locator('.inc-timeline li[data-type="ack"]')).toContainText('<img src=x');
+ expect(await pageB.locator('.inc-timeline img').count()).toBe(0);
  expect(await pageB.evaluate(()=>(window as unknown as {__pwn?:number}).__pwn)).toBeUndefined();
  const acked=await read(pageB,org,project,incident);
  expect([acked.version,acked.ack?.actor,acked.ack?.current,acked.timeline.at(-1)?.actor,acked.timeline.at(-1)?.origin]).toEqual(['3',bravo.id,true,bravo.id,'human']);
@@ -149,7 +155,7 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await pageA.getByRole('button',{name:'Reload incident',exact:true}).click();
  await expect(pageA.getByTestId('revision')).toContainText('Revision 3');
  await expect(pageA.locator('[data-section="incident-response"]')).toContainText(`Acknowledged by ${bravo.id}`);
- await choose(pageA,'Report impact');
+ await openAction(pageA,'Report impact');
  await pageA.getByLabel('Severity').selectOption('critical');
  await submit(pageA,'Report impact');
  await expect(outcome(pageA,'committed')).toContainText('revision 4');
@@ -161,7 +167,7 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  // B resolves while the source is firing: a reason is required and the unresolved-source banner is persistent.
  await pageB.getByRole('button',{name:'Reload incident',exact:true}).click();
  await expect(pageB.getByTestId('revision')).toContainText('Revision 4');
- await choose(pageB,'Resolve');
+ await openAction(pageB,'Resolve');
  await expect(pageB.getByRole('note').filter({hasText:'The alert source is still firing'})).toBeVisible();
  let actionPosts=0;
  pageB.on('request',(r)=>{if(r.method()==='POST'&&r.url().endsWith('/api/v1/actions'))actionPosts++;});
@@ -174,7 +180,6 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await expect(pageB.getByTestId('unresolved-source')).toContainText('the alert source is still firing');
  await expect(pageB.getByTestId('status-badge')).toHaveText('Incident: resolved by a person');
  await expect(pageB.getByTestId('source-badge')).toHaveText('Source firing, fresh data');
- await expect(pageB.getByRole('heading',{name:'Respond'})).toBeVisible();
  await expect(pageB.getByText('A resolved incident accepts no further human actions')).toBeVisible();
  await pageB.reload();
  await expect(pageB.getByTestId('unresolved-source')).toBeVisible();
@@ -192,18 +197,12 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await expect(row.locator('[data-cell="unread"]')).toContainText('Unread change: No notification policy');
  await expect(pageA.locator('[data-section="delivery"]')).toHaveCount(0);
  await expect(pageA.getByText('not at a scheduled digest time')).toBeVisible();
- expect(await pageA.locator('.investigation').innerText()).not.toMatch(/\b0\s*%/);
+ expect(await pageA.locator('main').innerText()).not.toMatch(/\b0\s*%/);
 
  // A wrong-scope incident and a missing one are one answer.
  await pageA.goto(`/${hash(org,project,'incidents',id())}`);
  await expect(pageA.locator('[data-state="unauthorized"]')).toContainText('not found or is not available');
 
- // Project settings: real capabilities only; everything without a committed route says so, and an unknown operation is not found.
- await pageA.goto(`/${hash(org,project,'settings')}`);
- await expect(pageA.locator('[data-section="policy-notification"]')).toContainText('approved default policy');
- await pageA.getByLabel('Operation ID',{exact:true}).fill(id());
- await pageA.getByRole('button',{name:'Show progress',exact:true}).click();
- await expect(pageA.locator('[data-section="operations"] [data-state="unauthorized"]')).toBeVisible();
  await ctxA.close();await ctxB.close();
 });
 
@@ -231,7 +230,7 @@ test('a lost response is an unknown outcome and the same command ID returns the 
   if(!dropped){dropped=true;await route.fetch();await route.abort('failed');return;} // the server committed; the browser never hears
   await route.continue();
  });
- await choose(p,'Acknowledge');
+ await openAction(p,'Acknowledge');
  await submit(p,'Acknowledge');
  await expect(outcome(p,'unknown')).toContainText('Outcome unknown');
  await expect(p.getByTestId('revision')).toContainText('Revision 1');
@@ -248,13 +247,13 @@ test('a lost response is an unknown outcome and the same command ID returns the 
  await p.unroute('**/api/v1/actions');
 
  // A snooze hides neither the source nor the timeline, and its expiry refreshes the page exactly once.
- await choose(p,'Snooze reminders');
+ await openAction(p,'Snooze reminders');
  await p.getByLabel('Reason (required)').fill('known flapping dependency');
  await submit(p,'Snooze reminders');
  await expect(outcome(p,'committed')).toContainText('revision 3');
  await expect(p.getByTestId('snooze')).toContainText('active');
  await expect(p.getByTestId('source-badge')).toHaveText('Source firing, fresh data');
- await expect(p.locator('.timeline li[data-type="snooze"]')).toContainText('known flapping dependency');
+ await expect(p.locator('.inc-timeline li[data-type="snooze"]')).toContainText('known flapping dependency');
  const clocked=await browser.newContext();
  const c=await clocked.newPage();
  await login(c,who.email,who.password);
@@ -270,4 +269,78 @@ test('a lost response is an unknown outcome and the same command ID returns the 
  await c.waitForTimeout(1500);
  expect(reads).toBe(2);
  await clocked.close();await ctx.close();
+});
+
+// Console API sections 1, 2 and 10 are all served by this installation: the page is audited (names, labels, contrast in both themes, narrow width) with the real answers. An organization that has
+// not connected GitLab says why a GitLab issue cannot be created; a copy and a note really work. Nothing is conditional on what the server serves.
+test('the incident page with the real notes, copy and GitLab answers of an installation with no GitLab connection passes the audit',async({page,playwright})=>{
+ test.setTimeout(240_000);
+ await login(page,email,password);
+ const org=id(),project=id();
+ await command(page,org,'create_org',{id:org,name:'incident not built'});
+ await command(page,org,'create_project',{id:project,name:'project'});
+ const api=await playwright.request.newContext();
+ const incident=await seed(page,api,org,project);
+ const token=await csrf(page);
+ const status=async(path:string,data:Record<string,unknown>):Promise<number>=>(await page.request.post(path,{headers:{'X-CSRF-Token':token,Origin:origin},data})).status();
+ expect(await status('/api/v1/gitlab/issues',{op:'preview',org,project_id:project,entity:{kind:'incident',id:incident}})).toBe(200);
+ expect(await status('/api/v1/incidents/markdown',{org,project_id:project,id:incident,format:'link'})).toBe(200);
+
+ // The list: the open-by-ID form, the figures and the real row.
+ await page.goto(`/${hash(org,project,'incidents')}`);
+ await expect(page.getByRole('form',{name:'Open an incident'})).toBeVisible();
+ await expect(page.getByTestId('incident-stats')).toContainText('Needs action');
+ await expect(page.locator(`tr[data-incident="${incident}"]`)).toBeVisible();
+ const listFound=await auditDom(page);
+ expect(listFound,JSON.stringify(listFound,null,1)).toEqual([]);
+ if(process.env.SOUNDPOST_SHOT_DIR)await page.screenshot({path:`${process.env.SOUNDPOST_SHOT_DIR}/incidents-list.png`,fullPage:true});
+
+ await page.goto(`/${hash(org,project,'incidents',incident)}`);
+ await expect(page.getByTestId('revision')).toContainText('Revision 1');
+ // Lineage: every kind is there; what the incident does not link is shown as not linked.
+ await expect(page.getByTestId('lineage')).toContainText('Issue');
+ await expect(page.getByTestId('lineage')).toContainText('none linked');
+ const pageFound=await auditDom(page);
+ expect(pageFound,JSON.stringify(pageFound,null,1)).toEqual([]);
+ // Both themes pass the contrast audit (the theme is an attribute of the document).
+ await page.evaluate(()=>document.documentElement.setAttribute('data-theme','light'));
+ const lightFound=await auditDom(page);
+ expect(lightFound,JSON.stringify(lightFound,null,1)).toEqual([]);
+ await page.evaluate(()=>document.documentElement.setAttribute('data-theme','dark'));
+ if(process.env.SOUNDPOST_SHOT_DIR)await page.screenshot({path:`${process.env.SOUNDPOST_SHOT_DIR}/incident-page.png`,fullPage:true});
+ // The resolve dialog (what it does to the other entities) passes the same audit.
+ await openAction(page,'Resolve');
+ await expect(page.getByRole('dialog')).toContainText('never reopened');
+ const resolveFound=await auditDom(page);
+ expect(resolveFound,JSON.stringify(resolveFound,null,1)).toEqual([]);
+ if(process.env.SOUNDPOST_SHOT_DIR)await page.screenshot({path:`${process.env.SOUNDPOST_SHOT_DIR}/incident-resolve.png`});
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('dialog')).toHaveCount(0);
+ await page.getByRole('button',{name:'Create GitLab issue',exact:true}).click();
+ await expect(page.getByTestId('gitlab-unavailable')).toContainText('GitLab is not connected for this organization');
+ await expect(page.getByRole('dialog')).not.toContainText('not available yet');
+ const gitlabFound=await auditDom(page);
+ expect(gitlabFound,JSON.stringify(gitlabFound,null,1)).toEqual([]);
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('dialog')).toHaveCount(0);
+ await page.getByTestId('copy-menu').getByRole('button',{name:'Copy'}).click();
+ await page.getByRole('menuitem',{name:'Link',exact:true}).click();
+ await expect(page.locator('.gl-copy-note')).toContainText(/Link copied\.|did not allow copying/);
+ await expect(page.locator('.gl-copy-note')).not.toContainText('not available yet');
+ const composer=page.getByTestId('note-composer');
+ await composer.getByLabel('Add a note to the timeline').fill('Canary rolled back');
+ await composer.getByRole('button',{name:'Post note',exact:true}).click();
+ await expect(page.locator('[data-note-outcome="committed"]')).toBeVisible();
+ await expect(composer.getByLabel('Add a note to the timeline')).toBeEnabled();
+ expect((await read(page,org,project,incident)).version).toBe('2');
+ // At 390 px the list stacks and the page has no horizontal overflow.
+ await page.setViewportSize({width:390,height:844});
+ const narrowPage=await auditDom(page);
+ expect(narrowPage,JSON.stringify(narrowPage,null,1)).toEqual([]);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+ if(process.env.SOUNDPOST_SHOT_DIR)await page.screenshot({path:`${process.env.SOUNDPOST_SHOT_DIR}/incident-narrow.png`,fullPage:true});
+ await page.goto(`/${hash(org,project,'incidents')}`);
+ await expect(page.locator(`tr[data-incident="${incident}"]`)).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+ if(process.env.SOUNDPOST_SHOT_DIR)await page.screenshot({path:`${process.env.SOUNDPOST_SHOT_DIR}/incidents-narrow.png`,fullPage:true});
 });
