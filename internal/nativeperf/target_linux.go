@@ -163,6 +163,9 @@ func cgroupIdentity(b []byte) (uint64, error) {
 	if path == "" {
 		return 0, ErrAuthorization
 	}
+	if path == "/.." || strings.HasPrefix(path, "/../") {
+		return privateNamespaceCgroupIdentity(path)
+	}
 	fd, e := openCgroup2Root()
 	if e != nil {
 		return 0, e

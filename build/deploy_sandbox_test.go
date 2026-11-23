@@ -69,3 +69,33 @@ func TestChartDataDirIsNotTheVolumeRoot(t *testing.T) {
 		t.Fatalf("--data-dir=%s must be a subdirectory of the data mount %s", flag[1], mount[1])
 	}
 }
+
+// The helper opens /etc/soundpost/perf-policy.json with O_NOFOLLOW and refuses anything but a regular
+// root-owned file. A Secret volume's file is a symlink into ..data, so mounting the whole Secret
+// directory makes every request "local operator authorization denied" (measured under k3s). The policy
+// must be mounted as a single file with subPath, which binds the resolved regular file.
+func TestChartHelperPolicyIsMountedAsARegularFile(t *testing.T) {
+	text := deployFile(t, "deploy/helm/soundpost/templates/perf-helper.yaml")
+	mount := regexp.MustCompile(`name: policy, mountPath: (\S+?),(.*)\}`).FindStringSubmatch(text)
+	if mount == nil {
+		t.Fatal("policy mount not found")
+	}
+	if mount[1] != "/etc/soundpost/perf-policy.json" || !strings.Contains(mount[2], "subPath: perf-policy.json") {
+		t.Fatalf("policy must be mounted at /etc/soundpost/perf-policy.json with subPath perf-policy.json, got %s,%s", mount[1], mount[2])
+	}
+}
+
+// A pod's cgroup namespace is private, so the helper resolves the target's cgroup from the node's cgroup v2 root:
+// a read-only hostPath, with no privileged mode and no custom runtime class (decision D98).
+func TestChartHelperGetsTheCgroupRootReadOnlyAndNoRuntimeClass(t *testing.T) {
+	text := deployFile(t, "deploy/helm/soundpost/templates/perf-helper.yaml")
+	if !regexp.MustCompile(`name: cgroup-root, mountPath: /host/sys/fs/cgroup, readOnly: true\}`).MatchString(text) ||
+		!regexp.MustCompile(`name: cgroup-root\s+hostPath: \{path: /sys/fs/cgroup, type: Directory\}`).MatchString(text) {
+		t.Fatal("the helper must mount the node's /sys/fs/cgroup read-only")
+	}
+	for _, banned := range []string{"runtimeClassName", "privileged: true", "hostNetwork: true"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("helper template contains %s", banned)
+		}
+	}
+}

@@ -32,9 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -100,25 +98,12 @@ func target(pid int, binary string) (nativeperf.Target, error) {
 	if err != nil {
 		return t, err
 	}
-	cg, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	// the same resolution the helper applies (host namespace, or a private one with an ancestor mount)
+	cgroupID, err := nativeperf.ResolveCgroupID(pid)
 	if err != nil {
-		return t, err
+		return t, fmt.Errorf("cgroup of the target is not resolvable from this container: %w", err)
 	}
-	group := ""
-	for _, line := range strings.Split(string(cg), "\n") {
-		if p, ok := strings.CutPrefix(line, "0::"); ok && strings.HasPrefix(p, "/") {
-			group = p
-			break
-		}
-	}
-	if group == "" || strings.Contains(group, "..") {
-		return t, fmt.Errorf("cgroup path %q is not visible from this cgroup namespace (the helper must run with the host cgroup namespace)", group)
-	}
-	st, err := os.Stat(filepath.Join("/sys/fs/cgroup", group))
-	if err != nil {
-		return t, err
-	}
-	t.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
+	t.CgroupID = model.Uint64(cgroupID)
 	build, err := buildID(binary)
 	if err != nil {
 		return t, err

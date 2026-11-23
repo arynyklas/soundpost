@@ -67,8 +67,9 @@ spec:
             limits: {memory: 64Mi}
           volumeMounts:
             - {name: socket, mountPath: /run/soundpost-perf}
-            - {name: policy, mountPath: /etc/soundpost, readOnly: true}
+            - {name: policy, mountPath: /etc/soundpost/perf-policy.json, subPath: perf-policy.json, readOnly: true}
             - {name: machine-id, mountPath: /etc/machine-id, readOnly: true}
+            - {name: cgroup-root, mountPath: /host/sys/fs/cgroup, readOnly: true}
       volumes:
         - name: socket
           hostPath: {path: /run/soundpost-perf, type: Directory}
@@ -82,4 +83,9 @@ spec:
         # refused as an invalid target identity).
         - name: machine-id
           hostPath: {path: /etc/machine-id, type: File}
+        # Read-only cgroup v2 root of the node. A pod's cgroup namespace is private, so a target's cgroup reads
+        # "0::/../../..<tail>"; the helper finds its own cgroup below this mount by inode and resolves the target's
+        # cgroup to its kernel id from it (internal/nativeperf, no host cgroup namespace, no privileged mode).
+        - name: cgroup-root
+          hostPath: {path: /sys/fs/cgroup, type: Directory}
 {{- end }}

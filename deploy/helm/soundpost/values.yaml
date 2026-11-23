@@ -89,6 +89,9 @@ resources:
 # (deploy/seccomp/soundpost-perf.json, installed on every node by you at
 # <kubelet root>/seccomp/soundpost/soundpost-perf.json). Target visibility needs hostPID:
 # leave it false and the helper cannot see workloads (capability denied, never zero data).
+# A pod's cgroup namespace is private, so the target's cgroup reads "0::/../../..<tail>": the helper gets the
+# node's cgroup v2 root as a read-only hostPath and resolves the target's cgroup id from it, verified by inode
+# (docs/support/native-linux.md, "Under a kubelet"). No privileged mode, no custom runtime.
 perfHelper:
   enabled: false
   image: {repository: "", tag: "", digest: ""}
