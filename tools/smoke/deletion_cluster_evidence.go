@@ -24,6 +24,7 @@ import (
 	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
@@ -316,22 +317,63 @@ func dcRunArtifactName(s dcPlanStep) string {
 
 // ---- the restore authority, the backup CLI and the membership CLI ----
 
-// dcAuthority names the files of the restore authority a run configures: a directory of its own,
-// outside every node's data directory, with its own signing keys.
+// dcAuthority names the files of the restore authority a run configures: a journal outside every
+// node's data directory (a directory of its own, or an S3-compatible bucket), with its own signing keys.
 type dcAuthority struct {
 	Keys       string // full authority keys (a private file): every serve process checkpoints deletions with them
 	Restricted string // the restricted keys a restore operator holds: read and verify, never write
-	Dir        string // the authority's directory
+	Dir        string // the authority's directory (empty when the journal is an S3 bucket)
 	KeyDir     string // the backup key-encryption keys
 	BackupDir  string // the backup destination
+	S3         *dcS3  // the journal is this bucket; its credentials come only from the environment (SOUNDPOST_AUTHORITY_S3_*)
+}
+
+// dcS3 names an S3-compatible journal location (HTTPS endpoint, path style).
+type dcS3 struct{ Endpoint, Region, Bucket, Prefix string }
+
+// flags is the destination part of every authority command line.
+func (a *dcAuthority) flags() []string {
+	if a.S3 != nil {
+		out := []string{"--authority-s3-endpoint", a.S3.Endpoint, "--authority-s3-region", a.S3.Region, "--authority-s3-bucket", a.S3.Bucket}
+		if a.S3.Prefix != "" {
+			out = append(out, "--authority-s3-prefix", a.S3.Prefix)
+		}
+		return out
+	}
+	return []string{"--authority-dir", a.Dir}
+}
+
+// env is what a command that talks to the journal needs besides its flags: the S3 credentials and the CA bundle
+// this process was given, passed on as the environment of the child only.
+func (a *dcAuthority) env() []string {
+	if a.S3 == nil {
+		return nil
+	}
+	var out []string
+	for _, name := range []string{"SOUNDPOST_AUTHORITY_S3_ACCESS_KEY", "SOUNDPOST_AUTHORITY_S3_SECRET_KEY", "SSL_CERT_FILE"} {
+		if v := os.Getenv(name); v != "" {
+			out = append(out, name+"="+v)
+		}
+	}
+	return out
+}
+
+// destination opens the journal location for a direct read.
+func (a *dcAuthority) destination() (backup.Destination, error) {
+	if a.S3 == nil {
+		return backup.NewLocalDestination(a.Dir)
+	}
+	return backup.NewS3Destination(backup.S3Config{Endpoint: a.S3.Endpoint, Region: a.S3.Region, Bucket: a.S3.Bucket, Prefix: a.S3.Prefix, AccessKey: os.Getenv("SOUNDPOST_AUTHORITY_S3_ACCESS_KEY"), SecretKey: os.Getenv("SOUNDPOST_AUTHORITY_S3_SECRET_KEY")})
 }
 
 // dcServeArgs is the command line of one voter. With an authority every voter gets the same
-// --authority-keys and --authority-dir, so each deletion it begins is checkpointed there.
+// --authority-keys and the same authority destination (--authority-dir, or the --authority-s3-* flags),
+// so each deletion it begins is checkpointed there.
 func dcServeArgs(id uint64, nodeFile, data, listen string, a *dcAuthority) []string {
 	args := []string{"serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", nodeFile, "--data-dir", data, "--listen", listen}
 	if a != nil {
-		args = append(args, "--authority-keys", a.Keys, "--authority-dir", a.Dir)
+		args = append(args, "--authority-keys", a.Keys)
+		args = append(args, a.flags()...)
 	}
 	return args
 }

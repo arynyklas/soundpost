@@ -139,16 +139,23 @@ func (r *dcRun) createSibling(id uint64) error {
 	return r.check("sibling_project_onboarded", issued.Credential != "", "project, reader grant and source created through node "+dcKey(id))
 }
 
+// dcSiblingBatch is one acknowledged-or-not sample of the sibling project: the metric the
+// sibling's source policy admits, one record observed at `at`.
+func dcSiblingBatch(fx *installFixture, sib dcSibling, value float64, at time.Time) (model.Batch, error) {
+	bits := model.FloatBits(math.Float64bits(value))
+	record := model.Record{ID: model.NewID(), Kind: model.Metric, ObservedAt: model.UnixNano(at.UnixNano()), Resource: model.Resource{Service: fx.service, Environment: fx.environment, Build: fx.build, Instance: "instance", Labels: model.Labels{}},
+		Payload: model.Payload{Metric: &model.MetricPoint{Name: sib.marker, Labels: model.Labels{}, SampleKind: "float", Value: &bits, Unit: "1", Type: "gauge"}}}
+	batch := model.Batch{Version: 1, Project: sib.project, Source: sib.source, Producer: model.NewID(), ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{record}}
+	var err error
+	batch.RouteSlot, err = model.OwnerSlot(fx.org, sib.project, sib.source, batch.Producer, record)
+	return batch, err
+}
+
 // siblingIngest acknowledges one sample of the sibling project through a node and moves the
 // evaluation time of the sibling's query to just after it.
 func (r *dcRun) siblingIngest(id uint64, value float64) error {
-	fx := r.fx
-	bits := model.FloatBits(math.Float64bits(value))
-	record := model.Record{ID: model.NewID(), Kind: model.Metric, ObservedAt: model.UnixNano(time.Now().UnixNano()), Resource: model.Resource{Service: fx.service, Environment: fx.environment, Build: fx.build, Instance: "instance", Labels: model.Labels{}},
-		Payload: model.Payload{Metric: &model.MetricPoint{Name: r.sib.marker, Labels: model.Labels{}, SampleKind: "float", Value: &bits, Unit: "1", Type: "gauge"}}}
-	batch := model.Batch{Version: 1, Project: r.sib.project, Source: r.sib.source, Producer: model.NewID(), ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{record}}
-	var err error
-	if batch.RouteSlot, err = model.OwnerSlot(fx.org, r.sib.project, r.sib.source, batch.Producer, record); err != nil {
+	batch, err := dcSiblingBatch(r.fx, r.sib, value, time.Now())
+	if err != nil {
 		return r.wrap(err)
 	}
 	status, raw, _, err := retryIngest(r.sites[id], batch, r.sib.credential, 120*time.Second)
@@ -250,13 +257,7 @@ func (r *dcRun) checkSibling(label string, ids ...uint64) error {
 }
 
 // scanMarker scans one node's data directory for a name other than the canary.
-func (r *dcRun) scanMarker(id uint64, marker string) (dcScan, error) {
-	s, err := dcScanDir(r.dir(id), marker)
-	if err != nil {
-		return s, r.wrap(err)
-	}
-	return s, nil
-}
+func (r *dcRun) scanMarker(id uint64, marker string) (dcScan, error) { return r.scanFor(id, marker) }
 
 // ---- journals, receipts sampled while the lagging voter comes back ----
 
@@ -557,6 +558,9 @@ func dcScanIfPresent(dir, canary string) (dcScan, error) {
 // scanWatch scans the directory of the voter whose directory must hold no canary whenever a
 // receipt reads clean.
 func (r *dcRun) scanWatch() (dcScan, error) {
+	if r.scanner != nil {
+		return r.scanFor(r.watch, r.canary) // the remote scan counts a directory that is not there as holding nothing
+	}
 	s, err := dcScanIfPresent(r.dir(r.watch), r.canary)
 	if err != nil {
 		return s, r.wrap(err)
@@ -598,28 +602,40 @@ func (r *dcRun) setupAuthority(work string) error {
 		return r.wrap(errors.New("bootstrap host"))
 	}
 	a := &dcAuthority{Keys: filepath.Join(work, "authority.keys"), Restricted: filepath.Join(work, "authority.restricted.keys"), Dir: filepath.Join(work, "authority"), KeyDir: filepath.Join(work, "backup-keys"), BackupDir: filepath.Join(work, "backups")}
+	if r.authSpot != nil { // the journal is somewhere the operator named (a bucket, or a directory every voter reaches), not a directory of this host
+		a.Dir, a.S3 = r.authSpot.Dir, r.authSpot.S3
+	}
 	if err := os.MkdirAll(a.KeyDir, 0o700); err != nil {
 		return r.wrap(err)
 	}
 	for _, step := range [][]string{
 		{"backup", "authority-keygen", "--out", a.Keys, "--restricted-out", a.Restricted, "--id", "dc-authority-1"},
-		{"backup", "authority-init", "--data-dir", host.dir, "--authority-keys", a.Keys, "--authority-dir", a.Dir},
+		append([]string{"backup", "authority-init", "--data-dir", host.dir, "--authority-keys", a.Keys}, a.flags()...),
 		{"backup", "keygen", "--key-dir", a.KeyDir, "--id", dcDataKEK},
 		{"backup", "keygen", "--key-dir", a.KeyDir, "--id", dcSecretKEK},
 	} {
-		if _, line, err := dcCLI(r.cluster.binary, nil, 2*time.Minute, step...); err != nil {
+		if _, line, err := dcCLI(r.cluster.binary, a.env(), 2*time.Minute, step...); err != nil {
 			r.detail = line
 			return r.wrap(err)
 		}
 	}
-	paths := []string{a.Keys, a.Restricted, a.Dir, a.KeyDir, a.BackupDir}
+	paths := []string{a.Keys, a.Restricted, a.KeyDir, a.BackupDir}
+	if a.S3 == nil {
+		paths = append(paths, a.Dir)
+	}
 	dirs := make([]string, 0, len(dcNodes))
 	for _, id := range dcNodes {
 		dirs = append(dirs, r.cluster.data[id])
 	}
 	outside := dcOutsideAll(paths, dirs)
 	r.auth = a
-	r.art.Evidence["authority"] = map[string]any{"kind": "the product's local directory destination on this host, own signing keys", "configured_on_every_serve_process": "--authority-keys (full keys) and --authority-dir", "restore_operator_holds": "restricted keys only (read and verify, never write)"}
+	kind := "the product's local directory destination on this host, own signing keys"
+	if a.S3 != nil {
+		kind = "an S3-compatible bucket (HTTPS), own signing keys"
+	} else if r.authSpot != nil {
+		kind = "a directory every voter reaches (named by the operator), own signing keys"
+	}
+	r.art.Evidence["authority"] = map[string]any{"kind": kind, "configured_on_every_serve_process": "--authority-keys (full keys) and the journal destination flags", "restore_operator_holds": "restricted keys only (read and verify, never write)"}
 	return r.check("authority_directory_outside_every_node_data_directory", outside, "the authority, its keys and the backup destination are not inside any node's data directory; every serve process is started with the authority")
 }
 
@@ -680,7 +696,7 @@ func (r *dcRun) readAuthority() (backup.CurrentDeletion, error) {
 	if err != nil {
 		return backup.CurrentDeletion{}, r.wrap(err)
 	}
-	dest, err := backup.NewLocalDestination(r.auth.Dir)
+	dest, err := r.auth.destination()
 	if err != nil {
 		return backup.CurrentDeletion{}, r.wrap(err)
 	}
@@ -707,7 +723,7 @@ func (r *dcRun) restoreOlderBackup() error {
 	a, c := r.auth, r.cluster
 	root := filepath.Join(c.root, "restored-root")
 	r.enter("dc_restore_older_backup")
-	out, line, err := dcCLI(c.binary, nil, 10*time.Minute, "backup", "restore", "--backup-id", r.backup.ID, "--root", root, "--key-dir", a.KeyDir, "--authority-keys", a.Restricted, "--authority-dir", a.Dir, "--dest-dir", a.BackupDir)
+	out, line, err := dcCLI(c.binary, a.env(), 10*time.Minute, append([]string{"backup", "restore", "--backup-id", r.backup.ID, "--root", root, "--key-dir", a.KeyDir, "--authority-keys", a.Restricted, "--dest-dir", a.BackupDir}, a.flags()...)...)
 	if err != nil {
 		r.detail = line
 		return r.wrap(err)
@@ -730,7 +746,7 @@ func (r *dcRun) restoreOlderBackup() error {
 		return err
 	}
 	r.enter("dc_activate_restored_root")
-	out, line, err = dcCLI(c.binary, nil, 10*time.Minute, "backup", "activate", "--root", root, "--authority-keys", a.Restricted, "--authority-dir", a.Dir)
+	out, line, err = dcCLI(c.binary, a.env(), 10*time.Minute, append([]string{"backup", "activate", "--root", root, "--authority-keys", a.Restricted}, a.flags()...)...)
 	if err != nil {
 		r.detail = line
 		return r.wrap(err)

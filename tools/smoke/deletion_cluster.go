@@ -137,8 +137,24 @@ func RunDeletionCluster(args []string) error {
 	replaceNodes := f.String("replace-nodes", "3", "comma-separated voters to hold back and replace by a fresh identity, one full run each; none: no such run")
 	authority := f.Bool("authority", true, "give every serve process a real restore authority (own directory and keys), take an older backup before the deletion and restore it after")
 	replaceEarlyNodes := f.String("replace-early-nodes", "none", "comma-separated voters to hold back and replace by a fresh identity that joined as a learner BEFORE the deletion and holds the canary, one full run each; none: no such run")
+	hostsMode := dcHostsFlags(f)
 	if err := f.Parse(args); err != nil {
 		return rec.finish(rec.wrap(err))
+	}
+	if *artifact != "" {
+		if err := os.MkdirAll(*artifact, 0o700); err != nil {
+			return rec.finish(rec.wrap(err))
+		}
+	}
+	hosts, err := hostsMode(*artifact)
+	if err != nil {
+		return rec.finish(rec.wrap(err))
+	}
+	if hosts != nil {
+		if *binary == "" || *artifact == "" || *wait <= 0 || *hold < 0 {
+			return rec.finish(rec.wrap(errors.New("--artifact-dir and --binary are required, --wait must be positive")))
+		}
+		return runDeletionClusterHosts(hosts, *artifact, *binary, *release, *wait, *hold)
 	}
 	plan, err := dcPlan(*lagNodes, *replaceNodes, *replaceEarlyNodes)
 	if err != nil {
@@ -506,6 +522,8 @@ type dcRun struct {
 	track          *dcCleanTrack
 
 	cluster   *processCluster
+	scanner   func(id uint64, needle string) (dcScan, error) // when the voters run on other hosts: the scan of a voter's own directory on its host
+	authSpot  *dcAuthority                                   // when set, where the restore authority's journal is (Dir or S3) instead of a directory of this host
 	fx        *installFixture
 	sites     map[uint64]*installSite // reader-side client per node (its own cookie jar)
 	ownerSite map[uint64]*installSite // organization-owner client per node (its own cookie jar)
@@ -593,12 +611,76 @@ func (r *dcRun) poll(id uint64) (httpapi.LifecycleOperation, error) {
 	return op, nil
 }
 
-func (r *dcRun) scan(id uint64) (dcScan, error) {
-	s, err := dcScanDir(r.dir(id), r.canary)
+func (r *dcRun) scan(id uint64) (dcScan, error) { return r.scanFor(id, r.canary) }
+
+// scanFor scans one node's data directory for a name: the local directory, or, when the run
+// spreads its voters over hosts (scanner set), the directory on the voter's own host.
+func (r *dcRun) scanFor(id uint64, needle string) (dcScan, error) {
+	if r.scanner != nil {
+		s, err := r.scanner(id, needle)
+		if err != nil {
+			return s, r.wrap(err)
+		}
+		return s, nil
+	}
+	s, err := dcScanDir(r.dir(id), needle)
 	if err != nil {
 		return s, r.wrap(err)
 	}
 	return s, nil
+}
+
+// beginDeletion begins retire_project of the canary project through one node with its freshly
+// authenticated organization-admin session (POST /api/v1/admin/deletions), asserts the 202 answer
+// is the fencing phase and that a read of the project through that node is already denied.
+func (r *dcRun) beginDeletion(via uint64) error {
+	fx := r.fx
+	var receipt httpapi.DeletionReceipt
+	command := model.NewID()
+	err := r.until("begin_deletion", 90*time.Second, time.Second, func() (bool, string, error) {
+		status, raw, err := r.ownerSite[via].post("/api/v1/admin/read", struct {
+			Kind string `json:"kind"`
+		}{"organizations"}, r.owner[via].CSRF, "")
+		if err != nil || status != 200 {
+			return false, "admin_read_" + strconv.Itoa(status), nil
+		}
+		var view auth.AdminView
+		if err = json.Unmarshal(raw, &view); err != nil {
+			return false, "", err
+		}
+		status, raw, err = r.ownerSite[via].post("/api/v1/admin/deletions", httpapi.DeletionRequest{CommandID: command, ExpectedRevision: model.Uint64(view.Revision), Mode: model.DeleteRetireProject,
+			OrgID: fx.org, ProjectIDs: []model.ID{fx.project}, Reason: "deletion-cluster smoke"}, r.owner[via].CSRF, "")
+		if err != nil {
+			return false, "transport", nil
+		}
+		switch status {
+		case http.StatusAccepted:
+			return true, "accepted", json.Unmarshal(raw, &receipt)
+		case http.StatusConflict:
+			var refused httpapi.DeletionRefused
+			if json.Unmarshal(raw, &refused) == nil && refused.Detail != "" {
+				return false, "", httpSmokeFailure("begin_deletion", status, http.StatusAccepted, raw)
+			}
+			return false, "stale_revision", nil // the revision moved between the read and the commit: read again
+		case http.StatusServiceUnavailable:
+			return false, "status_503", nil
+		default:
+			return false, "", httpSmokeFailure("begin_deletion", status, http.StatusAccepted, raw)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	r.op = receipt.OperationID
+	r.mark("deletion_begun_ms")
+	if err = r.check("begin_answers_fencing_202", receipt.Phase == model.DeletePhaseFencing && receipt.Mode == model.DeleteRetireProject, "phase "+safeToken(receipt.Phase)+" mode "+safeToken(receipt.Mode)); err != nil {
+		return err
+	}
+	status, raw, qerr := r.query(via)
+	if qerr != nil {
+		return r.wrap(qerr)
+	}
+	return r.check("reads_denied_at_begin_node_"+dcKey(via), dcDenied(status, raw) && !bytes.Contains(raw, []byte(r.canary)), fmt.Sprintf("status %d code %s", status, dcFaultCode(raw)))
 }
 
 func (r *dcRun) scenario(binary, release string) (result error) {
@@ -786,52 +868,7 @@ func (r *dcRun) scenario(binary, release string) (result error) {
 		return err
 	}
 	r.enter("dc_begin_deletion_lagging_voter_down")
-	var receipt httpapi.DeletionReceipt
-	command := model.NewID()
-	err = r.until("begin_deletion", 90*time.Second, time.Second, func() (bool, string, error) {
-		status, raw, err := r.ownerSite[via].post("/api/v1/admin/read", struct {
-			Kind string `json:"kind"`
-		}{"organizations"}, r.owner[via].CSRF, "")
-		if err != nil || status != 200 {
-			return false, "admin_read_" + strconv.Itoa(status), nil
-		}
-		var view auth.AdminView
-		if err = json.Unmarshal(raw, &view); err != nil {
-			return false, "", err
-		}
-		status, raw, err = r.ownerSite[via].post("/api/v1/admin/deletions", httpapi.DeletionRequest{CommandID: command, ExpectedRevision: model.Uint64(view.Revision), Mode: model.DeleteRetireProject,
-			OrgID: fx.org, ProjectIDs: []model.ID{fx.project}, Reason: "deletion-cluster smoke"}, r.owner[via].CSRF, "")
-		if err != nil {
-			return false, "transport", nil
-		}
-		switch status {
-		case http.StatusAccepted:
-			return true, "accepted", json.Unmarshal(raw, &receipt)
-		case http.StatusConflict:
-			var refused httpapi.DeletionRefused
-			if json.Unmarshal(raw, &refused) == nil && refused.Detail != "" {
-				return false, "", httpSmokeFailure("begin_deletion", status, http.StatusAccepted, raw)
-			}
-			return false, "stale_revision", nil // the revision moved between the read and the commit: read again
-		case http.StatusServiceUnavailable:
-			return false, "status_503", nil
-		default:
-			return false, "", httpSmokeFailure("begin_deletion", status, http.StatusAccepted, raw)
-		}
-	})
-	if err != nil {
-		return err
-	}
-	r.op = receipt.OperationID
-	r.mark("deletion_begun_ms")
-	if err = r.check("begin_answers_fencing_202", receipt.Phase == model.DeletePhaseFencing && receipt.Mode == model.DeleteRetireProject, "phase "+safeToken(receipt.Phase)+" mode "+safeToken(receipt.Mode)); err != nil {
-		return err
-	}
-	status, raw, qerr := r.query(via)
-	if qerr != nil {
-		return r.wrap(qerr)
-	}
-	if err = r.check("reads_denied_at_begin_node_"+dcKey(via), dcDenied(status, raw) && !bytes.Contains(raw, []byte(r.canary)), fmt.Sprintf("status %d code %s", status, dcFaultCode(raw))); err != nil {
+	if err = r.beginDeletion(via); err != nil {
 		return err
 	}
 	if r.replace {

@@ -96,6 +96,9 @@ func run() (err error) {
 		case "deletion-cluster":
 			smoke, stage = "deletion_cluster", "deletion_cluster_dispatch"
 			return RunDeletionCluster(os.Args[2:])
+		case "deletion-cluster-scan":
+			smoke, stage = "deletion_cluster", "deletion_cluster_remote_scan"
+			return RunDeletionClusterScan(os.Args[2:])
 		case "host-collection":
 			smoke, stage = "host_collection", "host_collection_dispatch"
 			return RunHostCollection(os.Args[2:])
