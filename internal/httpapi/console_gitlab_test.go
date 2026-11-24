@@ -48,23 +48,43 @@ type gitlabEnv struct {
 	otherAdmin                    person
 }
 
+// glSeed is what building the gitlab environment's organizations makes: identifiers and the people with their sessions.
+type glSeed struct {
+	org, other, p1, p2, q1                model.ID
+	alice, writer, reader, nobody, otherA person
+}
+
+// glSnapshot is the installation they are made on, seeded once (five users: eleven password KDFs, about five
+// CPU-seconds under -race, which every test of this file used to pay) and copied by every test.
+var glSnapshot isoSnapshot[glSeed]
+
 func newGitLabEnv(t *testing.T) *gitlabEnv {
 	t.Helper()
 	stub := gitlabtest.New(t)
 	e := &gitlabEnv{stub: stubView{stub}, baseURL: stub.URL}
-	e.actEnv = newConsoleEnv(t, appcore.ConsoleConfig{PublicOrigin: "https://console.example.test", EgressAllow: []netip.Prefix{stub.Allow}, RootCAs: stub.Pool})
-	e.p1, e.p2, e.q1 = model.NewID(), model.NewID(), model.NewID()
-	e.org = e.actEnv.org("gitlab org", e.p1, e.p2)
-	e.other = e.actEnv.org("gitlab other org", e.q1)
-	e.alice = e.user(e.org, "alice-gl@example.test")
-	e.admin(e.org, e.alice)
-	e.writer = e.user(e.org, "writer-gl@example.test")
-	e.grant(e.org, e.writer, e.p1, true, auth.IncidentsWrite)
-	e.reader = e.user(e.org, "reader-gl@example.test")
-	e.grant(e.org, e.reader, e.p1, true, auth.Read)
-	e.nobody = e.user(e.org, "nobody-gl@example.test")
-	e.otherAdmin = e.user(e.other, "alice-other-gl@example.test")
-	e.admin(e.other, e.otherAdmin)
+	dir, session, s := glSnapshot.get(t, func(iso *isoEnv) glSeed {
+		var s glSeed
+		s.p1, s.p2, s.q1 = model.NewID(), model.NewID(), model.NewID()
+		s.org = iso.org("gitlab org", s.p1, s.p2)
+		s.other = iso.org("gitlab other org", s.q1)
+		admin := func(org model.ID, who person) {
+			iso.cmd(org, "org_admin", auth.AdminPayload{UserID: who.ID, Enabled: true})
+		}
+		s.alice = iso.user(s.org, "alice-gl@example.test")
+		admin(s.org, s.alice)
+		s.writer = iso.user(s.org, "writer-gl@example.test")
+		iso.grant(s.org, s.writer, s.p1, true, auth.IncidentsWrite)
+		s.reader = iso.user(s.org, "reader-gl@example.test")
+		iso.grant(s.org, s.reader, s.p1, true, auth.Read)
+		s.nobody = iso.user(s.org, "nobody-gl@example.test")
+		s.otherA = iso.user(s.other, "alice-other-gl@example.test")
+		admin(s.other, s.otherA)
+		return s
+	})
+	iso := newIsoEnvAt(t, dir, session)
+	e.actEnv = newConsoleEnvOn(t, iso, appcore.ConsoleConfig{PublicOrigin: "https://console.example.test", EgressAllow: []netip.Prefix{stub.Allow}, RootCAs: stub.Pool})
+	e.p1, e.p2, e.q1, e.org, e.other = s.p1, s.p2, s.q1, s.org, s.other
+	e.alice, e.writer, e.reader, e.nobody, e.otherAdmin = iso.rebind(s.alice), iso.rebind(s.writer), iso.rebind(s.reader), iso.rebind(s.nobody), iso.rebind(s.otherA)
 	return e
 }
 

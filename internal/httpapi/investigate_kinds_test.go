@@ -31,8 +31,7 @@ type kindsWorld struct {
 
 func newKindsWorld(t *testing.T) *kindsWorld {
 	t.Helper()
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	k := &kindsWorld{jobEnv: e, w: w, p3: model.NewID()}
 	e.cmd(w.org, "create_project", auth.AdminPayload{ID: k.p3, Name: "project"})
 	k.admin = e.user(w.org, "kinds-admin@example.test")

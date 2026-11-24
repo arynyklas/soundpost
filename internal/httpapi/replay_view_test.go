@@ -389,8 +389,16 @@ func TestReplayStreamGapUnsupportedAndErrorLines(t *testing.T) {
 // its kind (a made-up code, one of another kind, a reason on a chunk) is never forwarded: the stream ends with the closed corrupt error line.
 func TestReplayStreamReasonsAreThePinnedClosedSet(t *testing.T) {
 	gapReasons := []string{replays.ReasonMissingChunk, replays.ReasonHashMismatch, replays.ReasonDependencyMismatch, replays.ReasonRecorderGap, replays.ReasonConflictingChunk, replays.ReasonInvalidChunk, replays.ReasonIndexMismatch, replays.ReasonNoCheckpoint}
+	// One environment (one organization, one reader) serves every case: only the scripted stream differs, and the stream
+	// is answered through a variable the cases replace. A fresh environment per case paid a bootstrap, a user and a login
+	// (three password KDFs) for nothing the cases look at.
+	src := &fakeReplays{}
+	e := newRpEnv(t, src)
+	p := model.NewID()
+	org := e.org("replay reasons", p)
+	reader := e.user(org, "replay-reasons@example.test")
+	e.grant(org, reader, p, true, auth.Read, httpapi.ReplayRead)
 	run := func(t *testing.T, ev replays.Event, rest func(i int) (replays.Event, error)) []httpapi.ReplayLine {
-		src := &fakeReplays{}
 		src.answer = func() (replays.ReplayStream, error) {
 			return &scriptedStream{events: func(i int) (replays.Event, error) {
 				if i == 0 {
@@ -399,11 +407,6 @@ func TestReplayStreamReasonsAreThePinnedClosedSet(t *testing.T) {
 				return rest(i)
 			}}, nil
 		}
-		e := newRpEnv(t, src)
-		p := model.NewID()
-		org := e.org("replay reasons", p)
-		reader := e.user(org, "replay-reasons@example.test")
-		e.grant(org, reader, p, true, auth.Read, httpapi.ReplayRead)
 		return newLines(t, e.open(reader, replayBody(org, p, model.NewID()), nil)).all()
 	}
 	ended := func(int) (replays.Event, error) { return replays.Event{}, io.EOF }

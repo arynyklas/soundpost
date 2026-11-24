@@ -86,7 +86,13 @@ type evEnv struct {
 
 func newEvEnv(t *testing.T, resolver httpapi.FrameResolver, issues httpapi.IssueEvidenceReader, withReleases bool) *evEnv {
 	t.Helper()
-	e := &evEnv{isoEnv: newIsoEnv(t)}
+	return newEvEnvOn(t, newIsoEnv(t), resolver, issues, withReleases)
+}
+
+// newEvEnvOn serves the evidence routes over iso.
+func newEvEnvOn(t *testing.T, iso *isoEnv, resolver httpapi.FrameResolver, issues httpapi.IssueEvidenceReader, withReleases bool) *evEnv {
+	t.Helper()
+	e := &evEnv{isoEnv: iso}
 	var rel httpapi.ReleaseReader
 	if withReleases {
 		rel = e.app.Releases

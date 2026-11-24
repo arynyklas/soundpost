@@ -32,7 +32,13 @@ type jobEnv struct {
 
 func newJobEnv(t *testing.T, reader httpapi.JobReader, useApp bool) *jobEnv {
 	t.Helper()
-	e := &jobEnv{isoEnv: newIsoEnv(t)}
+	return newJobEnvOn(t, newIsoEnv(t), reader, useApp)
+}
+
+// newJobEnvOn serves the job routes over iso.
+func newJobEnvOn(t *testing.T, iso *isoEnv, reader httpapi.JobReader, useApp bool) *jobEnv {
+	t.Helper()
+	e := &jobEnv{isoEnv: iso}
 	if useApp {
 		reader = e.app.Jobs
 	}
@@ -103,23 +109,42 @@ type jobWorld struct {
 	base                                     time.Time
 }
 
-// newJobWorld is one org with two projects: a reader and a writer on `project`,
-// a user granted nothing on `sibling`, and an outsider in another org.
-func newJobWorld(e *jobEnv) *jobWorld {
-	w := &jobWorld{project: model.NewID(), sibling: model.NewID(), base: time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second)}
-	w.org = e.org("jobs org", w.project, w.sibling)
-	w.reader = e.user(w.org, "jobs-reader@example.test")
-	e.grant(w.org, w.reader, w.project, true, auth.Read)
-	w.writer = e.user(w.org, "jobs-writer@example.test")
-	e.grant(w.org, w.writer, w.project, true, auth.PolicyWrite)
+// jobSeed is what building the job world makes: identifiers and the people with their sessions.
+type jobSeed struct {
+	org, project, sibling               model.ID
+	reader, writer, outsider, ungranted person
+}
+
+// jobSnapshot is the installation the world is built on, seeded once (four users: nine password KDFs, about four
+// CPU-seconds under -race, which every test of the job and investigation families used to pay) and copied by every test.
+var jobSnapshot isoSnapshot[jobSeed]
+
+// newJobEnvWorld is a job environment over the real application and one org with two projects: a reader and a writer on
+// `project`, a user granted nothing on `sibling`, and an outsider in another org.
+func newJobEnvWorld(t *testing.T) (*jobEnv, *jobWorld) {
+	t.Helper()
+	dir, session, s := jobSnapshot.get(t, func(iso *isoEnv) jobSeed {
+		var s jobSeed
+		s.project, s.sibling = model.NewID(), model.NewID()
+		s.org = iso.org("jobs org", s.project, s.sibling)
+		s.reader = iso.user(s.org, "jobs-reader@example.test")
+		iso.grant(s.org, s.reader, s.project, true, auth.Read)
+		s.writer = iso.user(s.org, "jobs-writer@example.test")
+		iso.grant(s.org, s.writer, s.project, true, auth.PolicyWrite)
+		s.ungranted = iso.user(s.org, "jobs-ungranted@example.test")
+		s.outsider = iso.user(iso.org("jobs other org", model.NewID()), "jobs-outsider@example.test")
+		return s
+	})
+	iso := newIsoEnvAt(t, dir, session)
+	e := newJobEnvOn(t, iso, nil, true)
+	w := &jobWorld{org: s.org, project: s.project, sibling: s.sibling, base: time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second),
+		reader: iso.rebind(s.reader), writer: iso.rebind(s.writer), ung: iso.rebind(s.ungranted), outsider: iso.rebind(s.outsider)}
 	w.writeOnly = w.writer
-	w.ung = e.user(w.org, "jobs-ungranted@example.test")
-	w.outsider = e.user(e.org("jobs other org", model.NewID()), "jobs-outsider@example.test")
 	var err error
 	if w.write, err = e.scope(w.writer, w.org, w.project, auth.PolicyWrite); err != nil {
-		e.t.Fatal(err)
+		t.Fatal(err)
 	}
-	return w
+	return e, w
 }
 
 var (
@@ -155,8 +180,7 @@ func (e *jobEnv) seedJourney(w *jobWorld) (occ1, occ2 string, last model.Cursor)
 }
 
 func TestJobViewReportsTheJourneyTruthfully(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	occ1, occ2, last := e.seedJourney(w)
 
 	status, raw := e.view(w.reader, viewBody(w.org, w.project, jobJourney))
@@ -236,19 +260,57 @@ func TestJobViewReportsTheJourneyTruthfully(t *testing.T) {
 	}
 }
 
+// hourlyDefinition is an hourly UTC cron effective for the day before now.
+func hourlyDefinition(now time.Time) jobs.Definition {
+	return jobs.Definition{Revision: 1, EffectiveFrom: at(now, -24*time.Hour), Schedule: &jobs.Schedule{Cron: "0 * * * *", Timezone: "UTC"}}
+}
+
+// observeHourOld commits job as seen at `now` by an observer whose last word is an hour old (healthy, complete through
+// that very instant) and which reported one incomplete interval.
+func (e *jobEnv) observeHourOld(w *jobWorld, job model.ID, now time.Time) {
+	e.t.Helper()
+	def := hourlyDefinition(now)
+	old := at(now, -time.Hour)
+	// The verdict concerns the closed window of the occurrence before the observer's latest one, (c, p]; the loss
+	// lies before that window, so it is reported but does not make the absence in it unprovable. (Placed relative
+	// to `now` instead, it entered the window whenever now fell within a minute of an hour boundary.)
+	p := now.Add(-time.Hour).UTC().Truncate(time.Hour)
+	c := p.Add(-time.Hour)
+	loss := jobs.Interval{ID: model.ID{0x44, job[1]}, Start: at(c, -10*time.Minute), End: at(c, -9*time.Minute), Reason: "exporter_disconnected"}
+	if _, err := e.app.Jobs.ObserveSchedule(context.Background(), w.write, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: w.project, Job: job, Observer: model.ID{7}, ObservedAt: old, CompleteThrough: old, Healthy: true, Definition: &def, Incomplete: []jobs.Interval{loss}}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// The verdict of a stale observer must not depend on the time of day: the same evidence shape, anchored at instants
+// around an hour boundary (the cron's own boundary), always reads as a missed occurrence with a stale, incomplete
+// observer, and the reported loss stays reported.
+func TestJobViewStaleObserverVerdictAcrossHourBoundaries(t *testing.T) {
+	e, w := newJobEnvWorld(t)
+	boundary := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	offsets := []time.Duration{-2 * time.Minute, -61 * time.Second, -60 * time.Second, -59 * time.Second, -30 * time.Second, -time.Second, 0, time.Second, 30 * time.Second, time.Minute, 4*time.Minute + 59*time.Second, 5 * time.Minute, 30 * time.Minute, 59*time.Minute + 59*time.Second}
+	for i, off := range offsets {
+		job := model.ID{0x13, byte(i)}
+		e.observeHourOld(w, job, boundary.Add(off))
+		status, raw := e.view(w.reader, viewBody(w.org, w.project, job))
+		if status != 200 {
+			t.Fatalf("anchor %v: %d %s", off, status, raw)
+		}
+		v := decodeJobView(t, raw)
+		if v.Health.Status != jobs.StatusMissed || v.Health.Complete || v.Observer.State != "stale" || v.Loss == nil || v.Loss.Total != 1 {
+			t.Errorf("anchor %v from the hour boundary: status %q complete %v observer %q loss %+v reasons %v", off, v.Health.Status, v.Health.Complete, v.Observer.State, v.Loss, v.Health.Reasons)
+		}
+	}
+}
+
 func TestJobViewCancellationOutageOverlapAndFold(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	p := w.project
 	// Explicit cancellation.
 	e.apply(w.write, p, jobCancelled, run1, att(1), "manual.c", 1, 1, "cancelled", at(w.base, 0), new(at(w.base, time.Second)))
 	// An observer that stopped reporting (outage): its last word is an hour old.
-	def := jobs.Definition{Revision: 1, EffectiveFrom: at(w.base, -24*time.Hour), Schedule: &jobs.Schedule{Cron: "0 * * * *", Timezone: "UTC"}}
-	old := at(time.Now(), -time.Hour)
-	loss := jobs.Interval{ID: model.ID{0x44}, Start: at(w.base, 0), End: at(w.base, time.Minute), Reason: "exporter_disconnected"}
-	if _, err := e.app.Jobs.ObserveSchedule(context.Background(), w.write, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: p, Job: jobStale, Observer: model.ID{7}, ObservedAt: old, CompleteThrough: old, Healthy: true, Definition: &def, Incomplete: []jobs.Interval{loss}}); err != nil {
-		t.Fatal(err)
-	}
+	def := hourlyDefinition(time.Now())
+	e.observeHourOld(w, jobStale, time.Now())
 	recent := at(time.Now(), -time.Minute)
 	if _, err := e.app.Jobs.ObserveSchedule(context.Background(), w.write, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: p, Job: jobOutage, Observer: model.ID{7}, ObservedAt: recent, CompleteThrough: at(time.Now(), -3*time.Hour), Healthy: true, Definition: &def}); err != nil {
 		t.Fatal(err)
@@ -332,8 +394,7 @@ func TestJobViewCancellationOutageOverlapAndFold(t *testing.T) {
 }
 
 func TestJobListIsScopedBoundedAndPaged(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	e.seedJourney(w)
 	e.apply(w.write, w.project, jobCancelled, run1, att(1), "manual.c", 1, 1, "cancelled", at(w.base, 0), new(at(w.base, time.Second)))
 	e.apply(w.write, w.project, jobOverlap, rA, att(1), "manual.a", 1, 1, "started", at(w.base, 0), nil)
@@ -414,8 +475,7 @@ func TestJobListIsScopedBoundedAndPaged(t *testing.T) {
 // Scope first: every wrong-scope variant is one indistinguishable not-found, and
 // a body cannot widen what the credential grants.
 func TestJobReadsAreScopeFirstIndistinguishableAndNeverWidened(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	e.seedJourney(w)
 	other := e.user(w.org, "jobs-other-reader@example.test")
 	e.grant(w.org, other, w.sibling, true, auth.Read)
@@ -568,8 +628,7 @@ func TestJobViewsAreTypedNotAvailableAfterScope(t *testing.T) {
 // The wire carries only closed, structural keys: nothing that could hold raw
 // exception, message or telemetry text, and cause links are IDs only.
 func TestJobViewsCarryNoRawTextOnlyClosedStructure(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	e.seedJourney(w)
 	cause, errID := model.NewID(), model.NewID()
 	e.index++

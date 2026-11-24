@@ -189,6 +189,14 @@ func TestTraceViewSourceStatesAreExplicit(t *testing.T) {
 		t.Fatalf("unwired source must not weaken scope: %d", status)
 	}
 
+	// One environment serves every case: the span source answers whatever the case names, and each case has its own
+	// organization, project and reader. An environment per case paid a bootstrap, a user and a login for nothing the
+	// cases look at.
+	var served struct {
+		set httpapi.SpanSet
+		err error
+	}
+	e := newTrEnv(t, &fakeSpans{answer: func() (httpapi.SpanSet, error) { return served.set, served.err }})
 	for name, c := range map[string]struct {
 		set    httpapi.SpanSet
 		err    error
@@ -204,9 +212,7 @@ func TestTraceViewSourceStatesAreExplicit(t *testing.T) {
 		"too deep":   {httpapi.SpanSet{Spans: deepChain(trace, traces.MaxDepth+1)}, nil, 413, "", "", false},
 		"source err": {httpapi.SpanSet{}, model.Fail(model.Timeout), 504, "", "", false},
 	} {
-		src := &fakeSpans{answer: func() (httpapi.SpanSet, error) { return c.set, c.err }}
-		e := newTrEnv(t, src)
-		// Reuse e's own org/user (each env has its own app).
+		served.set, served.err = c.set, c.err
 		p2 := model.NewID()
 		o2 := e.org("trace states "+name, p2)
 		u2 := e.user(o2, "trace-"+name+"@example.test")

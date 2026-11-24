@@ -19,7 +19,13 @@ import (
 // has a real release registry). The release list reads releases through source.
 func consoleEnv(t *testing.T, source httpapi.ReleaseListSource) *evEnv {
 	t.Helper()
-	e := newEvEnv(t, nil, nil, true)
+	return consoleEnvOn(t, newIsoEnv(t), source)
+}
+
+// consoleEnvOn is consoleEnv over iso.
+func consoleEnvOn(t *testing.T, iso *isoEnv, source httpapi.ReleaseListSource) *evEnv {
+	t.Helper()
+	e := newEvEnvOn(t, iso, nil, nil, true)
 	e.srv.Close()
 	e.srv = httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) {
 		httpapi.RegisterDirectoryRoutes(mux, e.app.Auth)

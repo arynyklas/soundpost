@@ -59,7 +59,13 @@ func featureSetOf(t *testing.T, id string) string {
 
 func newQueryEnv(t *testing.T, limits query.Limits) *queryEnv {
 	t.Helper()
-	e := &queryEnv{isoEnv: newIsoEnv(t)}
+	return newQueryEnvOn(t, newIsoEnv(t), limits)
+}
+
+// newQueryEnvOn serves the query routes over iso.
+func newQueryEnvOn(t *testing.T, iso *isoEnv, limits query.Limits) *queryEnv {
+	t.Helper()
+	e := &queryEnv{isoEnv: iso}
 	var err error
 	if e.registry, err = profile.Load(os.DirFS("../../profiles/query")); err != nil {
 		t.Fatal(err)

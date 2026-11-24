@@ -95,41 +95,70 @@ type releaseWorld struct {
 	readerB, readerSame person
 }
 
+// relSeed is what building the release world makes: identifiers, the people with their sessions, and the releases.
+type relSeed struct {
+	org, p, q, env, orgB                    model.ID
+	r1, r2, r3                              model.ID
+	admin, reader, qr, stranger, readerSame person
+	rec                                     map[model.ID]model.Release
+}
+
+// relSnapshot is the installation the world is built on, seeded once (five users: eleven password KDFs, about five
+// CPU-seconds under -race, which every test of the release family used to pay) and copied by every test.
+var relSnapshot isoSnapshot[relSeed]
+
 func newReleaseWorld(t *testing.T) *releaseWorld {
 	t.Helper()
+	dir, session, s := relSnapshot.get(t, func(iso *isoEnv) relSeed {
+		e := &evEnv{isoEnv: iso}
+		var s relSeed
+		s.p, s.q = model.NewID(), model.NewID()
+		s.org = e.org("release list", s.p, s.q)
+		s.orgB = e.org("release list B", model.NewID())
+		s.admin = e.user(s.org, "rl-admin@example.test")
+		e.cmd(s.org, "org_admin", auth.AdminPayload{UserID: s.admin.ID, Enabled: true})
+		s.reader = e.user(s.org, "rl-reader@example.test")
+		e.grant(s.org, s.reader, s.p, true, auth.Read)
+		s.readerSame = e.user(s.org, "rl-reader2@example.test")
+		e.grant(s.org, s.readerSame, s.p, true, auth.Read)
+		s.qr = e.user(s.org, "rl-q@example.test")
+		e.grant(s.org, s.qr, s.q, true, auth.Read)
+		s.stranger = e.user(s.orgB, "rl-stranger@example.test")
+		src := e.source(s.org, s.p, sharedIDs{model.NewID(), model.NewID(), model.NewID()}, []model.Kind{model.Metric})
+		s.env = src.Environment
+		adminScope, err := e.app.Auth.Authorize(e.ctx, s.admin.Cred, s.org, []model.ID{s.p}, auth.OrgAdmin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.rec = map[model.ID]model.Release{}
+		mk := func(label string, at int64, parents ...model.ID) model.ID {
+			id := model.NewID()
+			r := model.Release{ID: id, Org: s.org, Project: s.p, BuildID: model.NewID(), Parents: parents, BuildTime: model.UnixNano(at), DisplayLabel: label,
+				DebugArtifacts: []model.ReleaseDebugArtifact{{ArtifactID: model.NewID(), DebugID: "debug-" + label, SHA256: model.HashCanonical([]byte(label))}}}
+			e.register(adminScope, r)
+			s.rec[id] = r
+			return id
+		}
+		s.r1 = mk("v1.0", 100)
+		s.r2 = mk("v2.0-Beta", 200, s.r1)
+		s.r3 = mk("v3.0", 300, s.r2)
+		return s
+	})
 	w := &releaseWorld{source: &fakeReleaseSource{data: map[model.ID]httpapi.ReleaseListProject{}}}
-	w.e = consoleEnv(t, w.source)
+	iso := newIsoEnvAt(t, dir, session)
+	w.e = consoleEnvOn(t, iso, w.source)
 	e := w.e
-	w.p, w.q = model.NewID(), model.NewID()
-	w.org = e.org("release list", w.p, w.q)
-	w.orgB = e.org("release list B", model.NewID())
-	w.admin = e.user(w.org, "rl-admin@example.test")
-	e.cmd(w.org, "org_admin", auth.AdminPayload{UserID: w.admin.ID, Enabled: true})
-	w.reader = e.user(w.org, "rl-reader@example.test")
-	e.grant(w.org, w.reader, w.p, true, auth.Read)
-	w.readerSame = e.user(w.org, "rl-reader2@example.test")
-	e.grant(w.org, w.readerSame, w.p, true, auth.Read)
-	w.qr = e.user(w.org, "rl-q@example.test")
-	e.grant(w.org, w.qr, w.q, true, auth.Read)
-	w.stranger = e.user(w.orgB, "rl-stranger@example.test")
-	src := e.source(w.org, w.p, sharedIDs{model.NewID(), model.NewID(), model.NewID()}, []model.Kind{model.Metric})
-	w.env = src.Environment
+	w.org, w.p, w.q, w.env, w.orgB = s.org, s.p, s.q, s.env, s.orgB
+	w.r1, w.r2, w.r3 = s.r1, s.r2, s.r3
+	w.admin, w.reader, w.qr, w.stranger, w.readerSame = iso.rebind(s.admin), iso.rebind(s.reader), iso.rebind(s.qr), iso.rebind(s.stranger), iso.rebind(s.readerSame)
 	var err error
 	if w.adminScope, err = e.app.Auth.Authorize(e.ctx, w.admin.Cred, w.org, []model.ID{w.p}, auth.OrgAdmin); err != nil {
 		t.Fatal(err)
 	}
-	w.rec = map[model.ID]model.Release{}
-	mk := func(label string, at int64, parents ...model.ID) model.ID {
-		id := model.NewID()
-		r := model.Release{ID: id, Org: w.org, Project: w.p, BuildID: model.NewID(), Parents: parents, BuildTime: model.UnixNano(at), DisplayLabel: label,
-			DebugArtifacts: []model.ReleaseDebugArtifact{{ArtifactID: model.NewID(), DebugID: "debug-" + label, SHA256: model.HashCanonical([]byte(label))}}}
-		e.register(w.adminScope, r)
+	w.rec = make(map[model.ID]model.Release, len(s.rec))
+	for id, r := range s.rec {
 		w.rec[id] = r
-		return id
 	}
-	w.r1 = mk("v1.0", 100)
-	w.r2 = mk("v2.0-Beta", 200, w.r1)
-	w.r3 = mk("v3.0", 300, w.r2)
 	return w
 }
 

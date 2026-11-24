@@ -100,31 +100,47 @@ type isoEnv struct {
 	records  *countingRecords
 	resolver *link.Resolver
 	tick     atomic.Int64
+	shutdown func() // closes the server, the export service and the application; once, however often it is called
 }
 
 func newIsoEnv(t *testing.T) *isoEnv {
 	t.Helper()
+	// A copy of one installation bootstrapped through the real Bootstrap path (iso_template_test.go), not a bootstrap
+	// of its own: the owner and the session are the template's.
+	dir, session := isoBootstrapped(t)
+	return newIsoEnvAt(t, dir, session)
+}
+
+// newIsoEnvAt opens the installation in dir, whose owner holds session, and serves it.
+func newIsoEnvAt(t *testing.T, dir string, session auth.Session) *isoEnv {
+	t.Helper()
 	ctx := context.Background()
-	app, err := appcore.Open(t.TempDir())
+	app, err := appcore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := &isoEnv{t: t, ctx: ctx, app: app}
-	t.Cleanup(func() { app.Close() })
-	boot, err := app.Control.BootstrapToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := app.Auth.Bootstrap(ctx, boot, "isolation-owner@example.test", "isolation owner password 2026")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cred, err := app.Auth.Authenticate(ctx, session.Token)
 	if err != nil {
+		app.Close()
 		t.Fatal(err)
 	}
 	e.actor = person{ID: session.User, Session: session, Cred: cred}
 	e.deletes = &isoDeletes{base: app.Auth.SourceLifecycleGenerations()}
+	var serving bool
+	var once sync.Once
+	e.shutdown = func() {
+		once.Do(func() {
+			if serving {
+				e.server.Close()
+			}
+			if e.exports != nil {
+				e.exports.Close()
+			}
+			app.Close()
+		})
+	}
+	t.Cleanup(e.shutdown)
 	if e.cache, err = auth.NewCache(app.Auth, e.deletes, 256, time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +148,6 @@ func newIsoEnv(t *testing.T) *isoEnv {
 	if e.exports, err = exports.New(app.Auth, e.cache, e.deletes, e.gate); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(e.exports.Close)
 	e.records = &countingRecords{inner: app.Storage}
 	if e.resolver, err = link.New(app.Auth, e.records, nil); err != nil {
 		t.Fatal(err)
@@ -146,7 +161,7 @@ func newIsoEnv(t *testing.T) *isoEnv {
 		httpapi.RegisterCapabilityRoutes(mux, app.Auth)
 		httpapi.RegisterExportRoutes(mux, app.Auth, e.exports)
 	}).Handler)
-	t.Cleanup(e.server.Close)
+	serving = true
 	e.client = e.server.Client()
 	return e
 }

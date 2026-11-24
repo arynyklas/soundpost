@@ -22,7 +22,13 @@ import (
 // incidents service.
 func newConsoleEnv(t *testing.T, cfg appcore.ConsoleConfig) *actEnv {
 	t.Helper()
-	e := &actEnv{isoEnv: newIsoEnv(t), poller: &fakePoller{}}
+	return newConsoleEnvOn(t, newIsoEnv(t), cfg)
+}
+
+// newConsoleEnvOn is newConsoleEnv over iso.
+func newConsoleEnvOn(t *testing.T, iso *isoEnv, cfg appcore.ConsoleConfig) *actEnv {
+	t.Helper()
+	e := &actEnv{isoEnv: iso, poller: &fakePoller{}}
 	e.actions = e.app.Actions
 	e.srv = httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) {
 		httpapi.RegisterActionRoutes(mux, e.app.Auth, e.app.Actions)

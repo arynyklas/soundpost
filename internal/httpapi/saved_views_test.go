@@ -50,24 +50,42 @@ type svFx struct {
 	frank           person
 }
 
+// svSeed is what building the saved-view fixture makes: the identifiers and the sessions of the people in it.
+type svSeed struct {
+	org, p1, p2, p3 model.ID
+	orgB, pb        model.ID
+	alice, bob      person
+	carol, erin     person
+	frank           person
+}
+
+// svSnapshot is the installation the fixture is built on, seeded once (five users: eleven password KDFs, about five
+// CPU-seconds under -race, which every test of this file used to pay) and copied by every test.
+var svSnapshot isoSnapshot[svSeed]
+
 func newSVFx(t *testing.T) *svFx {
 	t.Helper()
-	e := newQueryEnv(t, queryLimits())
-	f := &svFx{queryEnv: e, p1: model.NewID(), p2: model.NewID(), p3: model.NewID(), pb: model.NewID()}
-	f.org = e.org("saved views A", f.p1, f.p2, f.p3)
-	f.orgB = e.org("saved views B", f.pb)
-	f.alice = e.user(f.org, "sv-alice@example.test")
-	f.bob = e.user(f.org, "sv-bob@example.test")
-	f.carol = e.user(f.org, "sv-carol@example.test")
-	f.erin = e.user(f.org, "sv-erin@example.test")
-	f.frank = e.user(f.orgB, "sv-frank@example.test")
-	e.grant(f.org, f.alice, f.p1, true, auth.Read)
-	e.grant(f.org, f.alice, f.p2, true, auth.Read)
-	e.grant(f.org, f.bob, f.p1, true, auth.Read)
-	e.grant(f.org, f.erin, f.p1, true, auth.Read)
-	e.grant(f.orgB, f.frank, f.pb, true, auth.Read)
-	e.cmd(f.org, "org_admin", auth.AdminPayload{UserID: f.erin.ID, Enabled: true})
-	return f
+	dir, session, s := svSnapshot.get(t, func(e *isoEnv) svSeed {
+		s := svSeed{p1: model.NewID(), p2: model.NewID(), p3: model.NewID(), pb: model.NewID()}
+		s.org = e.org("saved views A", s.p1, s.p2, s.p3)
+		s.orgB = e.org("saved views B", s.pb)
+		s.alice = e.user(s.org, "sv-alice@example.test")
+		s.bob = e.user(s.org, "sv-bob@example.test")
+		s.carol = e.user(s.org, "sv-carol@example.test")
+		s.erin = e.user(s.org, "sv-erin@example.test")
+		s.frank = e.user(s.orgB, "sv-frank@example.test")
+		e.grant(s.org, s.alice, s.p1, true, auth.Read)
+		e.grant(s.org, s.alice, s.p2, true, auth.Read)
+		e.grant(s.org, s.bob, s.p1, true, auth.Read)
+		e.grant(s.org, s.erin, s.p1, true, auth.Read)
+		e.grant(s.orgB, s.frank, s.pb, true, auth.Read)
+		e.cmd(s.org, "org_admin", auth.AdminPayload{UserID: s.erin.ID, Enabled: true})
+		return s
+	})
+	iso := newIsoEnvAt(t, dir, session)
+	e := newQueryEnvOn(t, iso, queryLimits())
+	return &svFx{queryEnv: e, org: s.org, p1: s.p1, p2: s.p2, p3: s.p3, orgB: s.orgB, pb: s.pb,
+		alice: iso.rebind(s.alice), bob: iso.rebind(s.bob), carol: iso.rebind(s.carol), erin: iso.rebind(s.erin), frank: iso.rebind(s.frank)}
 }
 
 func svIDs(ids ...model.ID) []string {
@@ -1028,13 +1046,24 @@ func TestSavedViewsRoutePosture(t *testing.T) {
 // `<profile>/semantic-sha256-<64 hex>` (it carries a slash), a loki one is
 // `features-<64 hex>`. The identifiers are read from the pinned profile
 // manifests, not typed here.
+//
+// Every commit decodes the whole control state, whose audit list grows with each
+// commit, so one environment saving and deleting all of them costs time that grows
+// with the square of their number (about 70 s under -race on two CPUs). The
+// identifiers are therefore saved in shards of at most svShardMax, each in an
+// environment of its own, the shards in parallel; every identifier is still saved,
+// checked against the committed reply and deleted exactly as before.
 func TestSavedViewsAcceptEveryRealProfileAndFeatureSetID(t *testing.T) {
-	f := newSVFx(t)
+	const svShardMax = 50
 	files, err := filepath.Glob("../../profiles/query/*.json")
 	if err != nil || len(files) < 3 {
 		t.Fatalf("profile manifests: %v %v", files, err)
 	}
-	saved, slashed, longest := 0, 0, 0
+	type shard struct {
+		profile, language string
+		featureSets       []string
+	}
+	var shards []shard
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
 		if err != nil {
@@ -1053,25 +1082,47 @@ func TestSavedViewsAcceptEveryRealProfileAndFeatureSetID(t *testing.T) {
 		if strings.HasPrefix(p.ID, "logql-") {
 			language = "logql"
 		}
-		for _, fs := range p.FeatureSets {
-			body := f.saveBody(f.org, f.p1, "real "+p.ID, "up")
-			body["language"], body["profile"], body["feature_set"] = language, p.ID, fs.ID
-			status, out := f.call(f.alice, body)
-			var c httpapi.SavedViewCommitted
-			if status != 200 || model.StrictJSON(out, &c) != nil || c.View == nil || c.View.Profile != p.ID || c.View.FeatureSet != fs.ID {
-				t.Errorf("%s %s: %d %.300s", p.ID, fs.ID, status, out)
-				continue
-			}
-			// A view is removed again so the project stays far below its cap.
-			if status, out = f.call(f.alice, f.deleteBody(f.org, f.p1, c.View.ID, 1)); status != 200 {
-				t.Fatalf("delete: %d %s", status, out)
-			}
-			saved++
-			if strings.Contains(fs.ID, "/") {
-				slashed++
-			}
-			longest = max(longest, len(fs.ID))
+		ids := make([]string, len(p.FeatureSets))
+		for i, fs := range p.FeatureSets {
+			ids[i] = fs.ID
 		}
+		parts := (len(ids) + svShardMax - 1) / svShardMax
+		for part := range parts { // equal parts, in manifest order
+			shards = append(shards, shard{p.ID, language, ids[part*len(ids)/parts : (part+1)*len(ids)/parts]})
+		}
+	}
+	type shape struct{ saved, slashed, longest int }
+	shapes := make([]shape, len(shards))
+	t.Run("shards", func(t *testing.T) {
+		for i, sh := range shards {
+			t.Run(fmt.Sprintf("%s/%d", sh.profile, i), func(t *testing.T) {
+				t.Parallel()
+				f := newSVFx(t)
+				for _, id := range sh.featureSets {
+					body := f.saveBody(f.org, f.p1, "real "+sh.profile, "up")
+					body["language"], body["profile"], body["feature_set"] = sh.language, sh.profile, id
+					status, out := f.call(f.alice, body)
+					var c httpapi.SavedViewCommitted
+					if status != 200 || model.StrictJSON(out, &c) != nil || c.View == nil || c.View.Profile != sh.profile || c.View.FeatureSet != id {
+						t.Errorf("%s %s: %d %.300s", sh.profile, id, status, out)
+						continue
+					}
+					// A view is removed again so the project stays far below its cap.
+					if status, out = f.call(f.alice, f.deleteBody(f.org, f.p1, c.View.ID, 1)); status != 200 {
+						t.Fatalf("delete: %d %s", status, out)
+					}
+					shapes[i].saved++
+					if strings.Contains(id, "/") {
+						shapes[i].slashed++
+					}
+					shapes[i].longest = max(shapes[i].longest, len(id))
+				}
+			})
+		}
+	})
+	saved, slashed, longest := 0, 0, 0
+	for _, s := range shapes {
+		saved, slashed, longest = saved+s.saved, slashed+s.slashed, max(longest, s.longest)
 	}
 	if saved < 100 || slashed == 0 || longest < 100 {
 		t.Fatalf("the manifests no longer cover the real shapes: %d saved, %d with a slash, longest %d", saved, slashed, longest)

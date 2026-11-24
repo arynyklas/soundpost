@@ -33,8 +33,7 @@ func observation(w *jobWorld, job model.ID, observed, complete time.Time, health
 // reports it: missed WITH the observer's evidence, an outage of the data path as unknown (never missed), a silent
 // observer as stale. The route needs policy.write on the project and is not a way to read.
 func TestJobScheduleEvidenceFeedDrivesMissedUnknownAndStale(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	every := &jobs.Definition{Revision: 1, EffectiveFrom: at(time.Now(), -24*time.Hour), Schedule: &jobs.Schedule{Cron: "* * * * *", Timezone: "UTC"}}
 	now := time.Now()
 	jobMissed, jobOutage, jobStale := model.ID{0x61, 1}, model.ID{0x61, 2}, model.ID{0x61, 3}
@@ -109,8 +108,7 @@ func TestJobScheduleEvidenceFeedDrivesMissedUnknownAndStale(t *testing.T) {
 // is the caller's own principal whatever the body says; a stale expected version is a conflict and a retry of the same
 // command is idempotent.
 func TestJobCorrectionRouteIsAuditedScopedAndIdempotent(t *testing.T) {
-	e := newJobEnv(t, nil, true)
-	w := newJobWorld(e)
+	e, w := newJobEnvWorld(t)
 	p := w.project
 	e.apply(w.write, p, jobJourney, run1, att(1), "manual.fix", 1, 1, "started", at(w.base, 0), nil)
 	e.apply(w.write, p, jobJourney, run1, att(1), "manual.fix", 1, 2, "failed", at(w.base, 0), new(at(w.base, time.Second)))

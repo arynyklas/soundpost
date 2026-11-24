@@ -117,10 +117,12 @@ func TestTraceViewBoundsEdgesAtTheClientLimitAndFlagsTruncation(t *testing.T) {
 	}
 	few := tSpan(trace, 1, 0, 0, 100)
 	few.Links = []model.SpanLink{{Trace: foreign, Span: spanID(9)}}
-	serve := func(s model.Span) *trEnv { // a fresh environment per trace
-		return newTrEnv(t, &fakeSpans{answer: func() (httpapi.SpanSet, error) { return httpapi.SpanSet{Spans: []model.Span{s}}, nil }})
-	}
-	run := func(e *trEnv, name string) httpapi.TraceView {
+	// One environment serves both traces; the span source answers whichever span the run names. A fresh environment per
+	// trace paid a bootstrap, a user and a login (three password KDFs) for nothing the two reads look at.
+	var served model.Span
+	e := newTrEnv(t, &fakeSpans{answer: func() (httpapi.SpanSet, error) { return httpapi.SpanSet{Spans: []model.Span{served}}, nil }})
+	run := func(s model.Span, name string) httpapi.TraceView {
+		served = s
 		p := model.NewID()
 		org := e.org(name, p)
 		reader := e.user(org, name+"@example.test")
@@ -131,11 +133,11 @@ func TestTraceViewBoundsEdgesAtTheClientLimitAndFlagsTruncation(t *testing.T) {
 		}
 		return decodeTrace(t, raw)
 	}
-	v := run(serve(few), "edges-few")
+	v := run(few, "edges-few")
 	if v.EdgesTruncated || v.Path == nil || len(v.Path.Edges) != 1 {
 		t.Fatalf("a short edge list was reported truncated or changed: truncated %v edges %d", v.EdgesTruncated, len(v.Path.Edges))
 	}
-	v = run(serve(over), "edges-over")
+	v = run(over, "edges-over")
 	if v.Path == nil || len(v.Path.Edges) != httpapi.MaxPathEdges || !v.EdgesTruncated {
 		t.Fatalf("an oversized edge list: truncated %v, edges %d, want %d and truncated", v.EdgesTruncated, len(v.Path.Edges), httpapi.MaxPathEdges)
 	}

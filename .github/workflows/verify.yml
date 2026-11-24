@@ -75,11 +75,25 @@ jobs:
           test -z "$unformatted" || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
           .tools/linux/go/bin/go vet ./cmd/... ./internal/... ./build ./tools/...
 
-      - name: Tests (race) for readiness and the serving process
+      - name: Tests (race) for readiness, the release build and the serving process
         # The race detector needs cgo; release binaries stay CGO_ENABLED=0 (workflow env).
+        # Measured on a lab VM pinned to two CPUs (taskset -c 0,1, GOMAXPROCS=2, go1.27.3, warm build cache): 180 s for the
+        # three packages together, 179 s of it cmd/soundpost, so go test's default 10 minute limit is ample.
         env:
           CGO_ENABLED: "1"
-        run: .tools/linux/go/bin/go test -race -count=1 ./internal/health ./internal/httpapi ./cmd/soundpost ./build
+        run: .tools/linux/go/bin/go test -race -count=1 ./internal/health ./cmd/soundpost ./build
+
+      - name: Tests (race) for the HTTP API
+        # internal/httpapi is its own step because it alone outlasts the default limit on a two-vCPU runner (the run of
+        # this step's predecessor died with "panic: test timed out after 10m0s" in this package although nothing hung):
+        # each test on its own installation, and the password KDF (64 MiB per call) that every login and user costs
+        # about 0.4 CPU-seconds under -race. Measured on the same two-CPU lab VM, go test -race -count=1
+        # ./internal/httpapi, test run only: 867 s before the speedups of the package's test fixtures, 605 s after.
+        # The explicit -timeout is that last figure plus 50 % (908 s), rounded up to the minute; it is far below the
+        # job's timeout-minutes. Re-measure and adjust when the package's test time changes materially.
+        env:
+          CGO_ENABLED: "1"
+        run: .tools/linux/go/bin/go test -race -count=1 -timeout 16m ./internal/httpapi
 
   distribution:
     needs: server
