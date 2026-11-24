@@ -24,6 +24,10 @@ const SIZES = [10, 100, 400];
 
 const timing = `
  window.__batchMs = [];
+ // The recorder schedules the slices of an id-space checkpoint it prepares between callbacks as zero-delay timers (its event flush is 1 s, its cadence 30 s): each zero-delay task is timed, so the work moved out of the callback is measured too.
+ window.__sliceMs = [];
+ const nativeSetTimeout = window.setTimeout.bind(window);
+ window.setTimeout = (callback, delay, ...rest) => typeof callback !== "function" || delay !== 0 ? nativeSetTimeout(callback, delay, ...rest) : nativeSetTimeout((...args) => { const t0 = performance.now(); try { return callback(...args); } finally { window.__sliceMs.push(performance.now() - t0); } }, 0, ...rest);
  const Native = window.MutationObserver;
  window.MutationObserver = class extends Native {
   constructor(callback) { super((records, observer) => { const t0 = performance.now(); try { callback(records, observer); } finally { window.__batchMs.push(performance.now() - t0); } }); }
@@ -51,14 +55,14 @@ test("recorder p95 per mutation batch stays within the 5 ms budget", async ({pag
  const profilePath = process.env.SOUNDPOST_BATCH_CPUPROFILE;
  const cdp = profilePath ? await page.context().newCDPSession(page) : undefined;
  if (cdp) { await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", {interval: 100}); await cdp.send("Profiler.start"); }
- const rows: Array<{burst_nodes: number; batches: number; p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; chunks: number; checkpoints: number; gaps: number}> = [];
+ const rows: Array<{burst_nodes: number; batches: number; p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; chunks: number; checkpoints: number; gaps: number; slices: number; slice_max_ms: number}> = [];
  // What the recorder emitted: one JSON text per chunk (the page keeps them in __chunks). A checkpoint is a chunk that is its own checkpoint_sequence.
  const emitted = async (): Promise<{chunks: number; checkpoints: number; gaps: number}> => page.evaluate(() => {
   const all = (Reflect.get(window, "__chunks") as string[]).map(text => JSON.parse(text) as {sequence: string; checkpoint_sequence: string; gap: boolean});
   return {chunks: all.length, checkpoints: all.filter(chunk => chunk.sequence === chunk.checkpoint_sequence).length, gaps: all.filter(chunk => chunk.gap).length};
  });
  for (const size of SIZES) {
-  await page.evaluate(() => { (Reflect.get(window, "__batchMs") as number[]).length = 0; });
+  await page.evaluate(() => { (Reflect.get(window, "__batchMs") as number[]).length = 0; (Reflect.get(window, "__sliceMs") as number[]).length = 0; });
   const emittedBefore = await emitted(), rowStart = Date.now();
   for (let batch = 0; batch < BATCHES; batch++) {
    await page.evaluate(count => {
@@ -75,9 +79,10 @@ test("recorder p95 per mutation batch stays within the 5 ms budget", async ({pag
    await page.waitForTimeout(25); // let the observer deliver this batch before the next burst
   }
   const durations = (await page.evaluate(() => Reflect.get(window, "__batchMs") as number[])).slice().sort((a, b) => a - b);
+  const sliceMs = await page.evaluate(() => Reflect.get(window, "__sliceMs") as number[]);
   expect(durations.length).toBeGreaterThanOrEqual(BATCHES);
   const emittedAfter = await emitted(), seconds = (Date.now() - rowStart) / 1000;
-  const row = {burst_nodes: size, batches: durations.length, p50_ms: +quantile(durations, 0.5).toFixed(3), p95_ms: +quantile(durations, 0.95).toFixed(3), p99_ms: +quantile(durations, 0.99).toFixed(3), max_ms: +durations.at(-1)!.toFixed(3), chunks: emittedAfter.chunks - emittedBefore.chunks, checkpoints: emittedAfter.checkpoints - emittedBefore.checkpoints, gaps: emittedAfter.gaps - emittedBefore.gaps};
+  const row = {burst_nodes: size, batches: durations.length, p50_ms: +quantile(durations, 0.5).toFixed(3), p95_ms: +quantile(durations, 0.95).toFixed(3), p99_ms: +quantile(durations, 0.99).toFixed(3), max_ms: +durations.at(-1)!.toFixed(3), chunks: emittedAfter.chunks - emittedBefore.chunks, checkpoints: emittedAfter.checkpoints - emittedBefore.checkpoints, gaps: emittedAfter.gaps - emittedBefore.gaps, slices: sliceMs.length, slice_max_ms: +Math.max(0, ...sliceMs).toFixed(3)};
   rows.push(row);
   console.log("MUTATION_BATCH_ROW " + JSON.stringify(row));
   // Design (soundpost-design.md:162): a checkpoint is due every 30 s or after a gap. A burst that makes the page's list larger than one chunk
@@ -86,8 +91,73 @@ test("recorder p95 per mutation batch stays within the 5 ms budget", async ({pag
   expect(row.checkpoints, `burst of ${size} nodes: checkpoints in ${seconds.toFixed(1)} s`).toBeLessThanOrEqual(Math.floor(seconds / 30) + Math.floor(BATCHES / 20));
  }
  if (cdp && profilePath) writeFileSync(profilePath, JSON.stringify((await cdp.send("Profiler.stop")).profile));
- const report = JSON.stringify({budget_p95_ms: BUDGET_P95_MS, browser: page.context().browser()?.version(), rows});
+ // engine: the browser type that actually ran ("chromium", "firefox", "webkit"), so a harness row built for one engine is never satisfied by another's report.
+ const report = JSON.stringify({budget_p95_ms: BUDGET_P95_MS, engine: page.context().browser()?.browserType().name(), browser: page.context().browser()?.version(), rows});
  console.log("MUTATION_BATCH_P95 " + report);
  await test.info().attach("mutation-batch-p95.json", {body: report, contentType: "application/json"});
+ for (const row of rows) expect(row.p95_ms, `burst of ${row.burst_nodes} nodes`).toBeLessThanOrEqual(BUDGET_P95_MS);
+});
+
+// The same budget through the production consumer: the page bundles the REAL `startReplay` (packages/browser/src/replay.ts) over a REAL core client (mutation-batch-prod.ts) whose transport is an in-page
+// ledger, so each timed observer callback includes the recorder AND core's serialisation and validation of the chunk it emits. Same canary page, same bursts, same timing wrapper, same budget.
+const prodDir = mkdtempSync(join(tmpdir(), "soundpost-replay-batch-prod-"));
+execFileSync(bun, ["build", join(root, "fixtures/sdk/replay/mutation-batch-prod.ts"), "--outdir", prodDir, "--target=browser", "--format=esm"], {stdio: "pipe"});
+const prodHtml = html.replace(/<script type="module">[\s\S]*?<\/script>/, '<script type="module" src="/prod.js"></script>');
+/** The client's queue is drained through the in-page ledger this often (outside any timed callback), as a real page's own flush would. */
+const FLUSH_EVERY = 10;
+
+async function openProd(page: Page): Promise<void> {
+ await page.addInitScript(timing);
+ await page.route(`${origin}/**`, async route => {
+  const path = new URL(route.request().url()).pathname;
+  if (path === "/") return route.fulfill({contentType: "text/html", body: prodHtml});
+  if (path === "/prod.js") return route.fulfill({contentType: "text/javascript", body: readFileSync(join(prodDir, "mutation-batch-prod.js"), "utf8")});
+  return route.fulfill({status: 404, body: ""});
+ });
+ await page.goto(`${origin}/`);
+ await page.waitForFunction(() => Reflect.get(window, "__ready") === true);
+}
+
+test("recorder p95 per mutation batch through the production consumer stays within the 5 ms budget", async ({page}) => {
+ await openProd(page);
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ const rows: Array<{burst_nodes: number; batches: number; p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; chunks: number; checkpoints: number; gaps: number; slices: number; slice_max_ms: number}> = [];
+ const emitted = async (): Promise<{chunks: number; checkpoints: number; gaps: number}> => page.evaluate(() => Reflect.get(window, "__counts")() as {chunks: number; checkpoints: number; gaps: number});
+ for (const size of SIZES) {
+  await page.evaluate(() => { (Reflect.get(window, "__batchMs") as number[]).length = 0; (Reflect.get(window, "__sliceMs") as number[]).length = 0; });
+  const emittedBefore = await emitted(), rowStart = Date.now();
+  for (let batch = 0; batch < BATCHES; batch++) {
+   await page.evaluate(count => {
+    const burst = document.getElementById("burst")!;
+    for (let i = 0; i < count; i++) {
+     const node = document.createElement(i % 2 ? "p" : "span");
+     node.className = "b" + (i % 7); node.setAttribute("data-i", String(i)); node.textContent = "t" + i;
+     burst.appendChild(node);
+     if (i % 3 === 0) node.firstChild!.textContent = "r" + i;
+     if (i % 5 === 0) burst.removeChild(node);
+    }
+    if (burst.childNodes.length > 1500) burst.textContent = "";
+   }, size);
+   await page.waitForTimeout(25); // let the observer deliver this batch before the next burst
+   if (batch % FLUSH_EVERY === FLUSH_EVERY - 1) await page.evaluate(() => Reflect.get(window, "__flush")() as Promise<unknown>);
+  }
+  const durations = (await page.evaluate(() => Reflect.get(window, "__batchMs") as number[])).slice().sort((a, b) => a - b);
+  const sliceMs = await page.evaluate(() => Reflect.get(window, "__sliceMs") as number[]);
+  expect(durations.length).toBeGreaterThanOrEqual(BATCHES);
+  const emittedAfter = await emitted(), seconds = (Date.now() - rowStart) / 1000;
+  const row = {burst_nodes: size, batches: durations.length, p50_ms: +quantile(durations, 0.5).toFixed(3), p95_ms: +quantile(durations, 0.95).toFixed(3), p99_ms: +quantile(durations, 0.99).toFixed(3), max_ms: +durations.at(-1)!.toFixed(3), chunks: emittedAfter.chunks - emittedBefore.chunks, checkpoints: emittedAfter.checkpoints - emittedBefore.checkpoints, gaps: emittedAfter.gaps - emittedBefore.gaps, slices: sliceMs.length, slice_max_ms: +Math.max(0, ...sliceMs).toFixed(3)};
+  rows.push(row);
+  console.log("MUTATION_BATCH_ROW_PROD " + JSON.stringify(row));
+  expect(row.checkpoints, `burst of ${size} nodes: checkpoints in ${seconds.toFixed(1)} s`).toBeLessThanOrEqual(Math.floor(seconds / 30) + Math.floor(BATCHES / 20));
+ }
+ // Every chunk reached core's queue and left through the ledger: nothing was refused, so what was timed is the whole production path and not a recorder that dropped its output.
+ const flushed = await page.evaluate(() => Reflect.get(window, "__flush")() as Promise<{pending: number; lost: number; receipts: number}>);
+ const diagnostics = await page.evaluate(() => Reflect.get(window, "__diagnostics")() as Record<string, number>);
+ expect(flushed, "queue drained").toMatchObject({pending: 0, lost: 0});
+ expect(diagnostics.batches, "batches the ledger accepted").toBeGreaterThan(0);
+ expect(Object.keys(diagnostics).filter(key => key !== "batches"), "client diagnostics (losses, refusals)").toEqual([]);
+ const report = JSON.stringify({budget_p95_ms: BUDGET_P95_MS, consumer: "startReplay+core client", engine: page.context().browser()?.browserType().name(), browser: page.context().browser()?.version(), rows});
+ console.log("MUTATION_BATCH_P95_PROD " + report);
+ await test.info().attach("mutation-batch-p95-prod.json", {body: report, contentType: "application/json"});
  for (const row of rows) expect(row.p95_ms, `burst of ${row.burst_nodes} nodes`).toBeLessThanOrEqual(BUDGET_P95_MS);
 });

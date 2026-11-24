@@ -221,4 +221,13 @@ describe("recorder batch browser environment", () => {
   expect(env.NODE_PATH).toMatch(/web[\\/]node_modules$/);
   expect(env.PATH).toBe("/bin");
  });
+ test("the Firefox harness row keeps SOUNDPOST_FIREFOX only when SOUNDPOST_RECORDER_BROWSER says firefox, and never inherits SOUNDPOST_CHROME as its browser", () => {
+  const env=recorderBatchEnv({PATH:"/bin",SOUNDPOST_RECORDER_BROWSER:"firefox",SOUNDPOST_FIREFOX:"/opt/firefox/firefox",SOUNDPOST_CHROME:""},"/opt/bun","/repo");
+  expect(env.SOUNDPOST_FIREFOX).toBe("/opt/firefox/firefox");
+  expect(env.SOUNDPOST_CHROME).toBe("");
+  const without=recorderBatchEnv({PATH:"/bin",SOUNDPOST_RECORDER_BROWSER:"firefox"},"/opt/bun","/repo");
+  expect(without.SOUNDPOST_FIREFOX).toBe(""); // the harness then reports not_measured instead of running Chromium
+  const other=recorderBatchEnv({PATH:"/bin",SOUNDPOST_RECORDER_BROWSER:"chromium",SOUNDPOST_FIREFOX:"/opt/firefox/firefox"},"/opt/bun","/repo");
+  expect(other.SOUNDPOST_FIREFOX).toBe("");
+ });
 });

@@ -5,6 +5,8 @@ package qualify
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -102,7 +104,7 @@ func runRecorderRow(t *testing.T, run *sdkOverheadRun) Row {
 }
 
 func batchRows(p10, p100, p400 string) string {
-	return `{"browser":"142.0.7444.59","playwright_exit_code":0,"worst_p95_ms":0.1,"rows":[` +
+	return `{"engine":"chromium","browser":"142.0.7444.59","playwright_exit_code":0,"worst_p95_ms":0.1,"rows":[` +
 		`{"burst_nodes":10,"batches":60,"p50_ms":1,"p95_ms":` + p10 + `,"p99_ms":9,"max_ms":9},` +
 		`{"burst_nodes":100,"batches":60,"p50_ms":1,"p95_ms":` + p100 + `,"p99_ms":9,"max_ms":9},` +
 		`{"burst_nodes":400,"batches":60,"p50_ms":1,"p95_ms":` + p400 + `,"p99_ms":9,"max_ms":9}]}`
@@ -141,5 +143,77 @@ func TestOverheadRecorderBatchRefusesWhatWasNotMeasured(t *testing.T) {
 	}
 	if row := runRecorderRow(t, &sdkOverheadRun{Failure: "harness exited 1", Command: "node overhead.mjs", Exit: 1}); row.Outcome != OutcomeFailed || row.State != StateExercised {
 		t.Errorf("a failed harness is a failed row: %+v", row)
+	}
+}
+
+// firefoxBatchRows is a recorder report as the spec prints it for the stock Firefox run.
+func firefoxBatchRows(engine, p400 string) string {
+	return `{"engine":"` + engine + `","browser":"144.0.2","playwright_exit_code":0,"worst_p95_ms":0.1,"rows":[` +
+		`{"burst_nodes":10,"batches":60,"p50_ms":0.3,"p95_ms":0.9,"p99_ms":2,"max_ms":2},` +
+		`{"burst_nodes":100,"batches":60,"p50_ms":0.7,"p95_ms":1,"p99_ms":3,"max_ms":3},` +
+		`{"burst_nodes":400,"batches":60,"p50_ms":1.9,"p95_ms":` + p400 + `,"p99_ms":11,"max_ms":11}]}`
+}
+
+func runRecorderRowOnFamily(t *testing.T, family string, run *sdkOverheadRun) Row {
+	t.Helper()
+	rc := overheadCtx(t)
+	rc.probes["node"].Build.Family = family
+	spec0 := rc.matrix.Builds["node"]
+	spec0.Family = family
+	rc.matrix.Builds["node"] = spec0
+	rc.cache["sdk-overhead-recorder:node"] = run
+	spec := RowSpec{ID: "overhead.x", Suite: SuiteOverhead, Build: "node"}
+	row := runOverheadRecorderBatch(rc, spec)
+	row.ID, row.Suite, row.Required, row.Subject = spec.ID, spec.Suite, true, rc.subject(spec)
+	if err := ValidateRow(row); err != nil {
+		t.Fatalf("recorder overhead runner produced an invalid row: %v", err)
+	}
+	return row
+}
+
+// A Firefox row is judged on the same 5 ms budget and only by a report that says Firefox ran: Chromium's numbers can never satisfy it, nor Firefox's a Chromium row.
+func TestOverheadRecorderBatchFirefoxRowNeedsAFirefoxReport(t *testing.T) {
+	if row := runRecorderRowOnFamily(t, "firefox", recorderRun(firefoxBatchRows("firefox", "4.2"))); row.Outcome != OutcomePassed || row.Budgets[0].Observed != 4.2 || len(row.Series) != 3 {
+		t.Errorf("a Firefox report within the budget passes the Firefox row: %+v", row)
+	}
+	if row := runRecorderRowOnFamily(t, "firefox", recorderRun(firefoxBatchRows("firefox", "7.9"))); row.Outcome != OutcomeFailed || row.Budgets[0].Within || row.Budgets[0].Observed != 7.9 {
+		t.Errorf("a 400-node burst at 7.9 ms p95 on Firefox is a measured failure with the budget untouched: %+v", row)
+	}
+	if row := runRecorderRowOnFamily(t, "firefox", recorderRun(firefoxBatchRows("chromium", "1"))); row.Outcome != OutcomeFailed || !strings.Contains(strings.Join(row.Failures, " "), `needs "firefox"`) {
+		t.Errorf("a Chromium report must not satisfy the Firefox row: %+v", row)
+	}
+	if row := runRecorderRowOnFamily(t, "chrome", recorderRun(firefoxBatchRows("firefox", "1"))); row.Outcome != OutcomeFailed || !strings.Contains(strings.Join(row.Failures, " "), `needs "chromium"`) {
+		t.Errorf("a Firefox report must not satisfy the Chrome row: %+v", row)
+	}
+	if row := runRecorderRowOnFamily(t, "firefox", recorderRun(`{"browser":"144.0.2","rows":[{"burst_nodes":10,"batches":60,"p95_ms":1}]}`)); row.Outcome != OutcomeFailed {
+		t.Errorf("a report that names no engine proves nothing: %+v", row)
+	}
+}
+
+func TestRecorderBrowserEnvNamesTheRowsOwnBrowserOnly(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "fixtures", "sdk", "firefox", "firefox-bidi")
+	if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ff, why := recorderBrowserEnv(root, "/x/bun", &probeResult{Path: "/x/firefox", Build: Build{Family: "firefox"}})
+	if why != "" {
+		t.Fatal(why)
+	}
+	if got := strings.Join(ff, " "); got != "SOUNDPOST_BUN=/x/bun SOUNDPOST_RECORDER_BROWSER=firefox SOUNDPOST_FIREFOX=/x/firefox SOUNDPOST_CHROME=" {
+		t.Errorf("Firefox row environment: %q", got)
+	}
+	cr, why := recorderBrowserEnv(root, "/x/bun", &probeResult{Path: "/x/chrome", Build: Build{Family: "chrome"}})
+	if why != "" {
+		t.Fatal(why)
+	}
+	if got := strings.Join(cr, " "); got != "SOUNDPOST_BUN=/x/bun SOUNDPOST_CHROME=/x/chrome SOUNDPOST_FIREFOX=" {
+		t.Errorf("Chrome row environment (an inherited SOUNDPOST_FIREFOX must be emptied): %q", got)
+	}
+	if _, why := recorderBrowserEnv(t.TempDir(), "/x/bun", &probeResult{Path: "/x/firefox", Build: Build{Family: "firefox"}}); why == "" {
+		t.Error("a Firefox row without the BiDi launcher cannot run: the reason must be reported, not a Chromium run")
 	}
 }

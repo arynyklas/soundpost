@@ -30,8 +30,9 @@ Revocation, deletion or any host error (`{kind:"revoke"}`, `{kind:"error"}`, a r
 
 ## Known limits
 
-- The Go closed format has no node rectangle or presentation field, so layout is structure and tag only. The recorder (`packages/browser`) still emits `rect`/`pres` and a wider tag enum that Go refuses; see its README and CHANGELOG. Until that is reconciled, recorder chunks are refused by this viewer exactly as the server would refuse them.
-- Closed shadow roots, frames and unsupported widgets arrive as opaque nodes; nothing inside them exists.
+- The Go closed format has no node rectangle or presentation field, so layout is structure and tag only. The recorder (`packages/browser`) emits exactly that closed schema (decision D2: no rectangle, no presentation field, the server's eight tags), so its chunks decode here and validate on the server unchanged.
+- Frames, unsupported widgets and the rest of the opaque regions arrive as opaque nodes (`[opaque]`); a closed shadow root the recorder saw or inferred arrives as the closed-shadow mark (an opaque node with the constant mask text) and is drawn as `[opaque: closed shadow root not observable]`. Nothing inside any of them exists. A pre-existing closed root the recorder could not infer is an ordinary element here (the recorder README lists what it cannot see).
+- A recording whose first checkpoint is gap-marked started late (the recorder began after the page had loaded, D100): the viewer shows a banner that pre-existing closed shadow roots may be unobservable and never claims full coverage for it.
 - Exact browser-matrix support is parent-qualified: the real-browser rows here ran on Chrome 156 only.
 
 ## Checks

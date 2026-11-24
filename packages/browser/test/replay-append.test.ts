@@ -15,13 +15,14 @@ const txt = (): F => ({t: 3, name: "#text", kids: [], parent: null});
 const comment = (): F => ({t: 8, name: "#comment", kids: [], parent: null});
 const documentOf = (html: F): F => { const doc: F = {t: 9, name: "#document", kids: [html], parent: null}; html.parent = doc; return doc; };
 
-interface Rec { target: F; added?: F[]; removed?: F[] }
+/** `next`: the record's `nextSibling` (null: the change was at the end of the target's children); absent for a record that only names its target (attributes, character data). */
+interface Rec { target: F; added?: F[]; removed?: F[]; next?: F | null }
 const dom: DomAccessors = {
  nodeType: n => (n as F).t, firstChild: n => (n as F).kids[0] ?? null, lastChild: n => (n as F).kids.at(-1) ?? null,
  nextSibling: n => { const p = (n as F).parent; return p === null ? null : p.kids[p.kids.indexOf(n as F) + 1] ?? null; },
  previousSibling: n => { const p = (n as F).parent; return p === null ? null : p.kids[p.kids.indexOf(n as F) - 1] ?? null; },
  parentNode: n => (n as F).parent, localName: n => (n as F).name, openShadowRoot: n => (n as F).shadow ?? null, editable: n => (n as F).editable === true,
- childListChange: record => { const r = record as Rec; return r.added === undefined && r.removed === undefined ? null : {added: r.added ?? [], removed: r.removed ?? []}; },
+ recordKind: record => { const r = record as Rec; return r.next === undefined ? "other" : r.next === null ? "tail" : "inside"; },
  mutationTarget: record => (record as Rec).target, eventTarget: () => null, clientX: () => 0, clientY: () => 0,
 };
 
@@ -30,12 +31,12 @@ function add(parent: F, child: F, before?: F): Rec {
  if (child.parent !== null) child.parent.kids.splice(child.parent.kids.indexOf(child), 1);
  child.parent = parent;
  if (before === undefined) parent.kids.push(child); else parent.kids.splice(parent.kids.indexOf(before), 0, child);
- return {target: parent, added: [child], removed: []};
+ return {target: parent, added: [child], removed: [], next: before ?? null};
 }
 function remove(child: F): Rec {
- const parent = child.parent!;
- parent.kids.splice(parent.kids.indexOf(child), 1); child.parent = null;
- return {target: parent, added: [], removed: [child]};
+ const parent = child.parent!, at = parent.kids.indexOf(child), next = parent.kids[at + 1] ?? null;
+ parent.kids.splice(at, 1); child.parent = null;
+ return {target: parent, added: [], removed: [child], next};
 }
 const changed = (target: F): Rec => ({target});
 
@@ -135,14 +136,16 @@ test("a scripted element, a comment and an element recorded together: only what 
  expect(r.chunks[1]!.nodes.map(node => node.tag)).toEqual(["span"]);
 });
 
-test("new nodes are sent in document order even when they were recorded in another order", () => {
+test("new nodes are shown in document order even when they were recorded in another order: an insertion before a node of the same batch is a record that is not at the end of the list, so the list is re-read", () => {
  const {html, items} = list(3);
  const r = page(html);
  const later = el("span"), earlier = el("p");
  r.deliver(add(items, later), add(items, earlier, later));
- const delta = r.chunks[1]!;
- expect(delta.nodes.map(node => node.tag)).toEqual(["p", "span"]);
- expect(Number(delta.nodes[0]!.id)).toBeLessThan(Number(delta.nodes[1]!.id));
+ const delta = r.chunks[1]!, listId = r.chunks[0]!.nodes.find(node => node.tag === "div")!.id;
+ expect(mutations(delta)).toEqual([listId]);
+ const shown = delta.nodes.filter(node => node.parent === listId);
+ expect(shown.map(node => node.tag)).toEqual(["p", "p", "p", "p", "span"]); // the three known children, then the two new ones in document order
+ expect(Number(shown[3]!.id)).toBeLessThan(Number(shown[4]!.id));
 });
 
 test("a new node that does not end the list, because an element the replay never showed sits after it, is the re-walk of the list (never a wrong order)", () => {
@@ -186,7 +189,7 @@ test("an append the chunk cannot hold becomes the re-walk of the parent, which c
  const r = page(html);
  const batch = Array.from({length: 5000}, () => el("p"));
  for (const child of batch) { child.parent = items; items.kids.push(child); }
- r.deliver({target: items, added: batch, removed: []});
+ r.deliver({target: items, added: batch, removed: [], next: null});
  const delta = r.chunks.at(-1)!;
  expect(r.chunks.length).toBeGreaterThanOrEqual(2);
  expect(delta.nodes.length).toBeLessThanOrEqual(4096);
@@ -245,4 +248,48 @@ test("a change to a node directly under an open shadow root, whose host the plat
  const last = r.chunks.at(-1)!;
  expect(r.chunks).toHaveLength(2);
  expect(last.sequence).toBe(last.checkpoint_sequence);
+});
+
+// Firefox reports `parent.replaceChildren(...)` as ONE record whose `nextSibling` is null, however the children were rearranged: a tail record that is not an append.
+test("a replaceChildren batch (one record, nextSibling null) that inserts before or reorders the held children is the re-walk of the parent, never an append or nothing", () => {
+ for (const shape of ["new first", "reorder", "new first and reorder", "new in the middle"] as const) {
+  const {html, items, known} = list(5);
+  const r = page(html);
+  const checkpoint = r.chunks[0]!, listId = checkpoint.nodes.find(node => node.tag === "div")!.id;
+  const before = checkpoint.nodes.filter(node => node.parent === listId).map(node => node.id);
+  const fresh = el("span", txt());
+  const order = shape === "new first" ? [fresh, ...known] : shape === "reorder" ? [known[1]!, known[0]!, ...known.slice(2)] : shape === "new first and reorder" ? [fresh, known[3]!, known[0]!, known[1]!, known[2]!, known[4]!] : [known[0]!, known[1]!, fresh, known[2]!, known[3]!, known[4]!];
+  const old = [...items.kids];
+  items.kids = order; for (const kid of order) kid.parent = items;
+  r.deliver({target: items, added: order, removed: old, next: null});
+  expect(r.chunks, shape).toHaveLength(2);
+  const delta = r.chunks[1]!;
+  expect(mutations(delta), shape).toContain(listId);
+  const after = delta.nodes.filter(node => node.parent === listId).map(node => node.id);
+  const expected = order.map(kid => kid === fresh ? "fresh" : before[known.indexOf(kid)]!);
+  expect(after.map(id => before.includes(id) ? id : "fresh"), shape).toEqual(expected);
+ }
+});
+
+test("a custom element is re-walked, never appended to: while it had no children it may have been recorded as an inferred closed shadow host", () => {
+ const card = el("x-card"), html = el("section", card);
+ const r = page(html);
+ const cardId = r.chunks[0]!.nodes.find(node => node.tag === "masked")!.id;
+ r.deliver(add(card, el("p", txt())));
+ expect(r.chunks).toHaveLength(2);
+ const delta = r.chunks[1]!;
+ expect(delta.sequence).not.toBe(delta.checkpoint_sequence);
+ expect(delta.nodes.map(node => node.tag)).toEqual(["masked", "p", "masked"]);
+ expect(delta.nodes[0]!.id).toBe(cardId); // the host itself is sent again, now with its child
+});
+test("a late start is recorded: the first checkpoint is gap-marked and lateStart() names the reason; a supported start is neither (D100)", () => {
+ const late = page(el("section", el("p")), {lateStart: () => "document_ready_state"});
+ expect(late.chunks[0]!.gap).toBe(true);
+ expect(late.recorder.lateStart()).toBe("document_ready_state");
+ const supported = page(el("section", el("p")), {lateStart: () => null});
+ expect(supported.chunks[0]!.gap).toBe(false);
+ expect(supported.recorder.lateStart()).toBeNull();
+ const thrown = page(el("section"), {lateStart: () => { throw Error("probe"); }});
+ expect(thrown.recorder.lateStart()).toBe("probe_failed"); // an unknown start is never claimed supported
+ expect(thrown.chunks[0]!.gap).toBe(true);
 });

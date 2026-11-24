@@ -67,7 +67,7 @@ const snapshot = (frame: Frame): Promise<Snapshot> => frame.evaluate(() => {
 });
 
 test.describe("replay viewer in a real browser", () => {
- test("no network: malicious tag, class, text, URL, CSS and script payloads cause zero requests, script runs and navigations under the production CSP and sandbox", async ({page}) => {
+ test("no network: malicious tag, class, text, URL, CSS and script payloads cause zero requests, script runs and navigations under the production CSP and sandbox", async ({page, browserName}) => {
   const {seen, frame, messages} = await open(page, "production");
   expect(seen.requests).toEqual([`${origin}/`, `${origin}/frame.html`]);
   expect(seen.served).toEqual(["/", "/frame.html"]); // host page and frame only: nothing else was fetched to boot the viewer
@@ -82,8 +82,14 @@ test.describe("replay viewer in a real browser", () => {
    return {fetched, imaged, parentAccess, storage, origin: window.origin, cookie: (() => { try { return document.cookie; } catch { return "blocked"; } })()};
   });
   expect(probe).toMatchObject({fetched: "blocked", imaged: "blocked", parentAccess: "blocked", storage: "blocked", origin: "null"});
-  // The browser attempted the probe image but CSP blocked it before the network: the route never served it.
-  expect(seen.failed.filter(failure => failure.url.endsWith("/probe-img")).map(failure => failure.error)).toEqual(["csp"]); // Playwright's errorText for a request blocked by Content-Security-Policy
+  // The browser attempted the probes and CSP stopped them before the network: the route never served them (below), and every engine says so in
+  // words in its console, naming the blocked URL and the directive (Chromium "Loading the image '…' violates … \"img-src 'none'\"", WebKit
+  // "Refused to load … does not appear in the img-src directive"). Playwright's `requestfailed` differs: Chromium emits it with errorText "csp",
+  // WebKit blocks before it reports a request and emits none, so that stricter check is Chromium's alone and the console report is the proof for all.
+  const cspReport = (url: string, directive: string): number => seen.consoleErrors.filter(text => /content security policy/i.test(text) && text.includes(url) && text.includes(directive)).length;
+  await expect.poll(() => cspReport(`${origin}/probe-img`, "img-src"), {message: "a console CSP report naming the blocked probe image and img-src"}).toBeGreaterThan(0);
+  await expect.poll(() => cspReport(`${origin}/probe-fetch`, "connect-src"), {message: "a console CSP report naming the blocked probe fetch and connect-src"}).toBeGreaterThan(0);
+  if (browserName === "chromium") expect(seen.failed.filter(failure => failure.url.endsWith("/probe-img")).map(failure => failure.error)).toEqual(["csp"]); // Playwright's errorText for a request blocked by Content-Security-Policy
   expect(seen.served).toEqual(["/", "/frame.html"]);
   // From here on, not even a blocked attempt may happen: every request the browser starts is counted.
   const baseline = {requests: [...seen.requests], navigations: [...seen.navigations]};

@@ -145,7 +145,8 @@ export function d54Row(collected,{capture,protocol,budget,loop=false,delivered=f
  return row;
 }
 
-/** Environment of the recorder-batch Playwright run. The spec drives Chromium: a SOUNDPOST_FIREFOX inherited from the host (the frozen tool bundle exports it for the Firefox rows) would make fixtures/sdk/firefox/project.ts turn the run into a Firefox run, so it is emptied here. */
+/** Environment of the recorder-batch Playwright run. The run drives Chromium unless SOUNDPOST_RECORDER_BROWSER is "firefox" (the Firefox harness row, which also needs SOUNDPOST_FIREFOX naming the stock binary). Otherwise a SOUNDPOST_FIREFOX inherited from the host (the frozen tool bundle exports it for the Firefox rows) would make fixtures/sdk/firefox/project.ts turn the run into a Firefox run, so it is emptied here. */
 export function recorderBatchEnv(env,bunPathValue,root){
- return {...env,SOUNDPOST_FIREFOX:"",SOUNDPOST_BUN:bunPathValue,NODE_PATH:root+"/web/node_modules"};
+ const firefox=env.SOUNDPOST_RECORDER_BROWSER==="firefox";
+ return {...env,SOUNDPOST_FIREFOX:firefox?(env.SOUNDPOST_FIREFOX??""):"",SOUNDPOST_BUN:bunPathValue,NODE_PATH:root+"/web/node_modules"};
 }

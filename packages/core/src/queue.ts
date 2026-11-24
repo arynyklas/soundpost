@@ -6,7 +6,7 @@ import {decimal,unixNano,canonicalId,utf8Size,compareNano} from './policy.ts';
 import {hashBytes,nativeCanonical,resourceWire,routeRecord,routeSlot,validateDescriptor,kinds} from './routing.ts';
 import {verifyReceipt,type FrozenBatch,type ReceiptTransport,type Outcome} from './transport.ts';
 import type {EncryptedSpool} from './spool.ts';
-import {object,array,text,parseSafeRecord,strippedFields,type NativeRecord} from './wire.ts';
+import {object,array,text,parseSafeRecord,strippedFields,nodesText,type NativeRecord} from './wire.ts';
 export type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;lazy:number;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
 export type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
 type LossBucket={epoch:string;signal:string;reason:string;revision:string;observed:bigint;acked:bigint;unbatched:bigint;start:string|null;end:string|null;at:number;wall:number};
@@ -124,10 +124,12 @@ export class DeliveryQueue {
  records():readonly string[]{this.expire();this.materializeAll();const batches=new Map(this.batches.map(s=>[s.batch.id,{revision:s.batch.policyRevision,records:array(object(JSON.parse(s.batch.body)).records)}]));return Object.freeze(this.entries.map(e=>{if(e.text)return e.text;const batch=batches.get(e.batch!);if(!batch||e.position===undefined)throw Error('invalid frozen entry');const r=object(batch.records[e.position]);return nativeCanonical({id:r.id,kind:r.kind,observed_at_ns:r.observed_at_ns,policy_revision:batch.revision,payload:r.payload});}));}
  enqueue(text:string):boolean{return this.admitText(text,false);}
  /** `enqueue` for a text the caller just produced with `nativeCanonical` from a record that has exactly the five record fields: that text already is the stored form (keys in canonical order, line separators escaped), so the payload is not serialized a second time and the batch form is the same text with the resource spliced in. A record whose parse removed an empty optional field, or a text that does not end the way the stored form does, takes the full `enqueue` path and gets the same bytes it always did. */
- enqueueNative(text:string):boolean{return this.admitText(text,true);}
- private admitText(text:string,native:boolean):boolean{
+ enqueueNative(text:string,nodes?:string):boolean{return this.admitText(text,true,nodes);}
+ /** `nodes` is a replay chunk's node list as canonical JSON text (see `nodesText`), left out of `text`, which holds `"nodes":[]` in its place: the record is parsed and validated that way, the nodes are checked by their text and spliced in, so no node object or node JSON parse happens. The stored form is the same bytes as a text built with the nodes in it. */
+ private admitText(text:string,native:boolean,nodes?:string):boolean{
   if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss){this.loss("closed");return false;}this.expire();
   if(typeof text!=='string')throw Error('serialized safe record required');const removed=strippedFields(),parsed=parseSafeRecord(text);if(!this.recovering&&parsed.policy_revision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
+  if(nodes!==undefined){nodesText(nodes);text=text.replace('"nodes":[]','"nodes":'+nodes);}
   const {safe,wire,bytes:recordBytes}=native&&removed===strippedFields()?this.serializeNative(text,parsed):this.serialize(parsed),slot=routeRecord(parsed,this.descriptor,this.producer);
   return this.place(parsed.kind,safe,wire,recordBytes,slot);
  }

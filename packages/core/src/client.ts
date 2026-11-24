@@ -72,10 +72,10 @@ export class Client {
   try{unixNano(observed);if(policyRefusal(this.policy,"span",observed)!==undefined)return false;}catch{return false;}
   return this.delivery.rejectsWhenFull("span");
  }
- private admit(input:CaptureInput):boolean{
+ private admit(input:CaptureInput,nodes?:()=>string):boolean{
   if(this.closed){this.loss("closed");return false;}if(this.exportContext.active()){this.loss("exporter_recursion");return false;}const result=normalizeRecord(this.policy,input,this.templates);
   if(!result.record){this.loss(result.reason??"policy_rejected");return false;}
-  return this.delivery.enqueueNative(nativeCanonical(result.record));
+  return this.delivery.enqueueNative(nativeCanonical(result.record),nodes?.());
  }
  /** admit() for a lean span (see LiveSpan): the same closed, recursion and policy refusals in the same order and with the same loss reasons, then the queue, which keeps the raw span and serializes it at flush time. */
  private admitLean(span:LiveSpan):void{
@@ -126,11 +126,14 @@ export class Client {
   try{if(BigInt(unixNano(atNs))>=BigInt(this.policy.expiresNs))return false;return this.delivery.recordSignalLoss("profile_chunk","truncated",count,atNs);}catch{return false;}
  }
  /** Enqueues one browser-recorded replay chunk on the ordinary delivery path (same queue, closed wire validation, batching, retry, receipts and loss counters). The chunk's own wall clock is its
-  * observation time. Never throws: false means the chunk was not queued (policy off, queue full, invalid) and the reason is counted in diagnostics(). */
- captureReplay(chunk:Readonly<Record<string,unknown>>):boolean{
-  let observed:string;
-  try{observed=unixNano(object(object(chunk).clock).wall_ns);}catch{this.loss("invalid_replay_record");return false;}
-  try{return this.admit({kind:"replay_chunk",id:this.id(),observed_at_ns:observed,payload:chunk});}catch{this.loss("invalid_replay_record");return false;}
+  * observation time. `nodesJson` is the canonical JSON text of the chunk's node array (sorted keys, no whitespace, the text `canonicalJSON(nodes)` makes): the caller that has the nodes as numbers hands that
+  * text in and `chunk.nodes` is then never read; core checks it against the same closed node schema as the object form (one anchored match, no node object) and queues the same bytes. Without it
+  * `chunk.nodes` is read and put into canonical text first. Never throws: false means the chunk was not queued (policy off, queue full, invalid) and the reason is counted in diagnostics(). */
+ captureReplay(chunk:Readonly<Record<string,unknown>>,nodesJson?:string):boolean{
+  try{
+   const payload:Record<string,unknown>={nodes:[]};for(const key of Object.keys(chunk))if(key!=="nodes")payload[key]=chunk[key];
+   return this.admit({kind:"replay_chunk",id:this.id(),observed_at_ns:unixNano(object(object(chunk).clock).wall_ns),payload},()=>nodesJson??nativeCanonical(chunk.nodes));
+  }catch{this.loss("invalid_replay_record");return false;}
  }
  /** Destroys the replay chunks that are queued but not yet part of a batch (consent revoked). Batches already frozen or acknowledged are not recalled. Returns how many were destroyed. */
  discardUnsentReplay():number{const count=this.delivery.discardUnsent("replay_chunk");if(count>0)this.counts.replay_chunks_discarded=(this.counts.replay_chunks_discarded??0)+count;return count;}

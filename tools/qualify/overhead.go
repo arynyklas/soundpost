@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -553,6 +554,7 @@ func runOverheadBundle(rc *runCtx, spec RowSpec) Row {
 // recorderBatch is the harness's browser_recorder_mutation_batch_p95 row: the recorder's measured cost per MutationObserver batch, or the harness's own statement that it could not measure.
 type recorderBatch struct {
 	NotMeasured    string  `json:"not_measured"`
+	Engine         string  `json:"engine"`
 	Browser        string  `json:"browser"`
 	PlaywrightExit int     `json:"playwright_exit_code"`
 	WorstP95       float64 `json:"worst_p95_ms"`
@@ -593,10 +595,34 @@ func (rc *runCtx) recorderOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult,
 	if why != "" {
 		return nil, p, why
 	}
-	env := []string{"SOUNDPOST_BUN=" + bun, "SOUNDPOST_CHROME=" + p.Path}
+	env, why := recorderBrowserEnv(rc.root, bun, p)
+	if why != "" {
+		return nil, p, why
+	}
 	run := rc.recorderHarness(nodePath, env, "recorder", 20*time.Minute)
 	rc.cache[key] = run
 	return run, p, ""
+}
+
+// recorderBrowserEnv is the environment that makes the recorder harness drive the row's own browser: a Chromium-family build is named by SOUNDPOST_CHROME; a stock
+// Firefox by SOUNDPOST_FIREFOX with SOUNDPOST_RECORDER_BROWSER=firefox (the other browser variable is set empty, so nothing inherited from the host turns one
+// row into the other's run). The launcher that stands in for the Firefox executable must be executable.
+func recorderBrowserEnv(root, bun string, p *probeResult) ([]string, string) {
+	if p.Build.Family != "firefox" {
+		return []string{"SOUNDPOST_BUN=" + bun, "SOUNDPOST_CHROME=" + p.Path, "SOUNDPOST_FIREFOX="}, ""
+	}
+	if err := os.Chmod(filepath.Join(root, "fixtures", "sdk", "firefox", "firefox-bidi"), 0o755); err != nil {
+		return nil, "the Firefox WebDriver-BiDi launcher (fixtures/sdk/firefox/firefox-bidi) cannot be made executable: " + err.Error()
+	}
+	return []string{"SOUNDPOST_BUN=" + bun, "SOUNDPOST_RECORDER_BROWSER=firefox", "SOUNDPOST_FIREFOX=" + p.Path, "SOUNDPOST_CHROME="}, ""
+}
+
+// recorderEngine is the Playwright browser type a build's family runs as; the spec's report must name it.
+func recorderEngine(family string) string {
+	if family == "firefox" {
+		return "firefox"
+	}
+	return "chromium"
 }
 
 // recorderQueueOverhead runs the harness for the recorder's queue bound alone (--only recorder_queue). The bound is measured by
@@ -670,6 +696,11 @@ func runOverheadRecorderBatch(rc *runCtx, spec RowSpec) Row {
 	}
 	if rb.NotMeasured != "" {
 		return notExercised(rb.NotMeasured)
+	}
+	// A row built for one engine is never satisfied by another's report: the spec names the browser type that actually ran.
+	if want := recorderEngine(p.Build.Family); rb.Engine != want {
+		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the recorder report says the run used engine %q, but this row is a %s build and needs %q", rb.Engine, p.Build.Family, want)}
+		return row
 	}
 	if len(rb.Rows) == 0 {
 		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness recorder row carries no burst rows"}

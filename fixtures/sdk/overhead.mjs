@@ -277,10 +277,11 @@ function buildBundle(bun,entrySource,dir,name,target="node",extra=[]){
 }
 const fwd=p=>JSON.stringify(p.replaceAll("\\","/"));
 
-/** Runs fixtures/sdk/replay/mutation-batch.spec.ts (real Chrome through Playwright) and returns the harness row: the spec's own MUTATION_BATCH_P95 report judged against the 5 ms p95 budget, or a not_measured statement of why the browser run produced no report. SOUNDPOST_CHROME names the browser (default Playwright's Chromium); SOUNDPOST_CHROME_ARGS passes launch flags. */
+/** Runs fixtures/sdk/replay/mutation-batch.spec.ts (a real browser through Playwright) and returns the harness row: the spec's own MUTATION_BATCH_P95 report judged against the 5 ms p95 budget, or a not_measured statement of why the browser run produced no report. SOUNDPOST_CHROME names the Chromium browser (default Playwright's Chromium); SOUNDPOST_CHROME_ARGS passes launch flags; SOUNDPOST_RECORDER_BROWSER=firefox with SOUNDPOST_FIREFOX makes it the stock-Firefox row. */
 function recorderBatchRow(bunPathValue){
  const cli=join(root,"web/node_modules/@playwright/test/cli.js");
  if(!existsSync(cli))return {not_measured:"Playwright (web/node_modules/@playwright/test) is not installed in this checkout"};
+ if(process.env.SOUNDPOST_RECORDER_BROWSER==="firefox"&&!process.env.SOUNDPOST_FIREFOX)return {not_measured:"SOUNDPOST_RECORDER_BROWSER=firefox but SOUNDPOST_FIREFOX names no Firefox binary"};
  const r=spawnSync(process.execPath,[cli,"test","-c",join(root,"fixtures/sdk/replay/budget.config.ts"),"--reporter=json","mutation-batch.spec.ts"],{cwd:join(root,"web"),encoding:"utf8",timeout:600000,maxBuffer:64*1024*1024,env:recorderBatchEnv(process.env,bunPathValue,root)});
  return recorderBatchFromReport(r.stdout||"",r.status,(r.stderr||"").slice(-300));
 }
@@ -295,8 +296,8 @@ function recorderBatchFromReport(stdout,exitCode,stderrTail=""){
  const rows=Array.isArray(data.rows)?data.rows:[];
  if(rows.length===0)return {not_measured:"the MUTATION_BATCH_P95 report has no burst rows"};
  const worst=Math.max(...rows.map(x=>x.p95_ms));
- return {workload:"real Chrome, canary page with replay consent: 60 bursts per size (10, 100, 400 nodes) of insert/rewrite/attribute/remove; the page's MutationObserver is wrapped so the recorder's own handler is timed with performance.now() per batch",
-  browser:data.browser??null,playwright_exit_code:exitCode,budget_p95_ms:BUDGET.recorder_batch_p95_ms,rows,worst_p95_ms:worst,
+ return {workload:"real browser (see engine), canary page with replay consent: 60 bursts per size (10, 100, 400 nodes) of insert/rewrite/attribute/remove; the page's MutationObserver is wrapped so the recorder's own handler is timed with performance.now() per batch",
+  engine:data.engine??null,browser:data.browser??null,playwright_exit_code:exitCode,budget_p95_ms:BUDGET.recorder_batch_p95_ms,rows,worst_p95_ms:worst,
   verdict:{p95:worst<=BUDGET.recorder_batch_p95_ms?"within_budget":"exceeds_budget"},
   note:"the recorder's 2 MiB queue bound is measured separately (browser_recorder_queue_bound)"};
 }

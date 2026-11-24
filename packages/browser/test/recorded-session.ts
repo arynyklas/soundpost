@@ -63,7 +63,7 @@ export function scriptedPage(ids: {readonly replay: string; readonly session: st
   previousSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) - 1] ?? null; },
   parentNode: n => (n as Fake).parent, localName: n => (n as Fake).name, openShadowRoot: () => null, editable: () => false,
   mutationTarget: record => (record as {target: object}).target,
-  childListChange: record => { const r = record as {added?: object[]; removed?: object[]}; return r.added === undefined && r.removed === undefined ? null : {added: r.added ?? [], removed: r.removed ?? []}; },
+  recordKind: record => { const r = record as {next?: object | null}; return r.next === undefined ? "other" : r.next === null ? "tail" : "inside"; },
   eventTarget: event => (event as {target: object}).target,
   clientX: event => (event as {x: number}).x, clientY: event => (event as {y: number}).y,
  };
@@ -89,18 +89,19 @@ export function scriptedPage(ids: {readonly replay: string; readonly session: st
   grow: (secret?: string) => { append(section, secret === undefined ? node("p") : node("p", text(secret))); observe!([{target: section}]); },
   /** Replaces everything under <section> with `count` new text-free paragraphs: the live tree stays small while every call allocates `count` ids. */
   churn: (count: number) => { section.kids = []; for (let i = 0; i < count; i++) append(section, node("p")); observe!([{target: section}]); },
-  /** New <p> elements (each with a text child when a secret is given) added under <section> in one batch, each reported as the platform reports it; `first` puts the first one before <section>'s first child instead of at the end. */
+  /** New <p> elements (each with a text child when a secret is given) added under <section> in one batch, each reported as the platform reports it (its `nextSibling` is the node it was inserted before); `first` puts the first one before <section>'s first child instead of at the end. */
   attach: (secret: string, second?: string, first = false) => {
    const records: object[] = [];
    for (const value of second === undefined ? [secret] : [secret, second]) {
     const child = node("p", text(value));
+    const next = first ? section.kids[0] ?? null : null;
     if (first) { child.parent = section; section.kids.unshift(child); } else append(section, child);
-    records.push({target: section, added: [child], removed: []});
+    records.push({target: section, added: [child], removed: [], next});
    }
    observe!(records);
   },
   /** Removes <section>'s first child and reports it. */
-  detachFirst: () => { const gone = section.kids.shift()!; gone.parent = null; observe!([{target: section, added: [], removed: [gone]}]); },
+  detachFirst: () => { const gone = section.kids.shift()!; gone.parent = null; observe!([{target: section, added: [], removed: [gone], next: section.kids[0] ?? null}]); },
  };
 }
 

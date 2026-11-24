@@ -1,8 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import type {ReplayTag} from "./types.ts";
+import type {Nodes} from "./nodes.ts";
 
-export const MASK = "[masked]" as const;
 export const RECORDER_VERSION = "1";
 export const MAX_NODES = 20000;
 export const MAX_CHUNK_BYTES = 120000;
@@ -13,9 +12,13 @@ export const GAP_EVENT_BYTES = 96;
 export const MAX_MUTATION_ROOTS = 64;
 /** Records of one observer callback the recorder will attribute; a larger burst is a declared gap and one full checkpoint (a bound on main-thread work, not a cadence: ordinary bursts, such as a list re-render of a few hundred rows, are deltas). */
 export const MAX_MUTATION_RECORDS = 4096;
-/** Nodes one child-list record may name (added or removed) for the recorder to read them; a longer list is read as "the target changed" and re-walked, which is also what such a record cost before append deltas. */
-export const MAX_RECORD_NODES = 4096;
 export const CHECKPOINT_INTERVAL_MS = 30000;
+/** Ids left (of MAX_NODES) when the recount an id-space checkpoint does is started between callbacks instead of waiting for a delta to hit the cap inside one: at least this many ids must also have been used since the last checkpoint, so a live tree that itself fills the cap does not recount all the time. */
+export const PREPARE_HEADROOM = 4096;
+/** Nodes one slice of a prepared checkpoint walks before it yields to the page (about 0.5 ms of walking in the browsers measured). */
+export const PREPARE_SLICE_NODES = 512;
+/** Times a prepared checkpoint starts over because the page changed while it was being walked, before the recount is left to the callback that reaches the cap. */
+export const PREPARE_RESTARTS = 8;
 export const EVENT_FLUSH_MS = 1000;
 export const MAX_PENDING_EVENTS = 1024;
 export const MAX_DEPTH = 256;
@@ -26,19 +29,20 @@ export const MAX_NODE_ID = 2 ** 31;
 export const MAX_SEQUENCE = 1 << 16;
 export const MAX_CHECKPOINTS = 1024;
 
-/** The server's closed tag vocabulary (internal/replays nodeTags) minus the generic "masked". Anything else is recorded as "masked". */
-const TAGS: ReadonlySet<string> = new Set(["div", "span", "p", "button", "input", "section", "canvas"]);
 /** Elements with no replay representation at all (code, style and metadata are never walked). */
 const SKIPPED: ReadonlySet<string> = new Set(["script", "style", "template", "noscript", "head", "link", "meta", "title", "base"]);
 /** Frames, embedded media and widgets whose value or content cannot be masked structurally. */
 const OPAQUE: ReadonlySet<string> = new Set(["iframe", "frame", "frameset", "object", "embed", "video", "audio", "select", "textarea", "datalist", "option", "optgroup", "portal", "fencedframe", "dialog"]);
 
-/** Allowlisted tag, or "masked" for anything outside the enum (custom elements, SVG, MathML). */
-export function tagFor(localName: string): ReplayTag {
- return TAGS.has(localName) ? (localName as ReplayTag) : "masked";
-}
 export function isSkipped(localName: string): boolean { return SKIPPED.has(localName); }
 export function isOpaqueWidget(localName: string): boolean { return OPAQUE.has(localName); }
+
+/** Hyphenated names that are not valid custom element names (the HTML reserved list: SVG/MathML elements that carry a hyphen). */
+const RESERVED_HYPHENATED: ReadonlySet<string> = new Set(["annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format", "font-face-name", "missing-glyph"]);
+/** True for a name that can be an autonomous custom element, the elements whose own code attaches closed shadow roots. A shape check only; whether the element is defined is asked of the platform. */
+export function isCustomElementName(localName: string): boolean {
+ return localName.indexOf("-") > 0 && !RESERVED_HYPHENATED.has(localName);
+}
 
 /** Quantize to a multiple of 8 CSS px and clamp to ±32768. Non-finite input becomes 0. */
 export function quantize(value: number): number {
@@ -64,7 +68,22 @@ let message = new Uint8Array(1 << 17);
 export function sha256Hex(input: string): string {
  const most = input.length * 3 + 72;
  if (message.length < most) message = new Uint8Array(Math.max(most, message.length * 2));
- const length = encoder.encodeInto(input, message).written, padded = message, paddedLength = ((length + 9 + 63) >> 6) << 6;
+ return digest(encoder.encodeInto(input, message).written);
+}
+/**
+ * SHA-256 hex of `pre + canonical JSON array of nodes + post` without building that text: the table writes its nodes (ASCII: decimals and closed-vocabulary
+ * strings) in canonical form byte by byte into the shared message buffer, so a batch leaves no node object, node text or chunk text for the garbage collector,
+ * whose pauses Firefox charged to the batch (03.07 / 03.09 p95 row). The bytes, and so the hash, are exactly those of sha256Hex(pre + canonicalJSON(nodes) + post).
+ */
+export function sha256ChunkHex(pre: string, nodes: Nodes, post: string): string {
+ const most = (pre.length + post.length) * 3 + 80 + nodes.bytes;
+ if (message.length < most) message = new Uint8Array(Math.max(most, message.length * 2));
+ const m = message;
+ const at = nodes.canonical(m, encoder.encodeInto(pre, m).written);
+ return digest(at + encoder.encodeInto(post, m.subarray(at)).written);
+}
+function digest(length: number): string {
+ const padded = message, paddedLength = ((length + 9 + 63) >> 6) << 6;
  padded.fill(0, length, paddedLength); padded[length] = 0x80;
  const bits = length * 8, high = Math.floor(bits / 4294967296), tail = paddedLength - 8;
  padded[tail] = high >>> 24; padded[tail + 1] = (high >>> 16) & 255; padded[tail + 2] = (high >>> 8) & 255; padded[tail + 3] = high & 255;

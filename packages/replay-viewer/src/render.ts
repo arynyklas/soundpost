@@ -54,6 +54,10 @@ const MAX_UINT64 = (1n << 64n) - 1n;
 
 const MASK_TEXT = "[masked]";
 const OPAQUE_TEXT = "[opaque]";
+/** An opaque node whose text is the mask is the recorder's closed-shadow-root mark (the one opaque shape no other cause produces): the host has a shadow root the page cannot read, so nothing inside it exists. */
+const CLOSED_SHADOW_TEXT = "[opaque: closed shadow root not observable]";
+/** Shown when the recorder began after the page had loaded; it never claims full coverage after a late start. */
+const LATE_START_TEXT = "Recording started after the page had loaded: pre-existing closed shadow roots may be unobservable.";
 const STATUS_TEXT: Readonly<Record<ReplayStatus, string>> = {loading: "Loading replay", ready: "Replay ready", gap: "History gap", unsupported: "Unsupported recorder version", error: "Replay unavailable"};
 /** Stream tag to element name; anything else is the generic opaque block. Interactive elements are never created. */
 const TAG_ELEMENT: Readonly<Record<ReplayTag, "div" | "span" | "p" | "section">> = {div: "div", span: "span", p: "p", button: "div", input: "div", section: "section", canvas: "div", masked: "div"};
@@ -88,11 +92,11 @@ export function renderTree(doc: Document, nodes: Iterable<TreeInput>): HTMLEleme
    visited.add(node.id);
    const tag: ReplayTag = TAG_NAMES.find(name => name === node.tag) ?? "masked";
    const element = elementWith(doc, TAG_ELEMENT[tag], [["data-tag", tag]]);
-   const opaque = node.class === "masked";
+   const opaque = node.class === "masked", closedShadow = opaque && node.text === MASK_TEXT;
    if (opaque || node.text === MASK_TEXT) {
     const label = elementWith(doc, "span", [["data-masked", ""]]);
-    label.textContent = opaque ? OPAQUE_TEXT : MASK_TEXT;
-    if (opaque) element.setAttribute("data-opaque", "1");
+    label.textContent = closedShadow ? CLOSED_SHADOW_TEXT : opaque ? OPAQUE_TEXT : MASK_TEXT;
+    if (opaque) element.setAttribute("data-opaque", closedShadow ? "closed-shadow" : "1");
     element.append(label);
    }
    frame.host.append(element);
@@ -138,6 +142,8 @@ class ReplayView implements ReplayViewHandle {
  private openGap: (Entry & {kind: "gap"}) | null = null;
  private model: Model = new Map();
  private unsupportedOpen = false;
+ /** The recording's first checkpoint is gap-marked: the recorder started late (D100), so closed shadow roots made before it may be unobservable. */
+ private lateStart = false;
  private cursor: bigint | null = null;
  private retainedNodes = 0;
  private timer: ReturnType<typeof setTimeout> | undefined;
@@ -255,6 +261,7 @@ class ReplayView implements ReplayViewHandle {
    case "checkpoint":
     if (decision.gap !== null) this.addGap(decision.gap);
     this.openGap = null; this.unsupportedOpen = false;
+    if (decoded.sequence === "1" && decoded.gap) this.lateStart = true;
     this.entries.push({kind: "checkpoint", seq: BigInt(decoded.sequence), nodes: decoded.nodes, events: decoded.events, loss: BigInt(decoded.loss)});
     this.retainedNodes += decoded.nodes.length;
     this.model = new Map(decoded.nodes.map(node => [node.id, node]));
@@ -332,6 +339,11 @@ class ReplayView implements ReplayViewHandle {
   const status = this.status();
   const shown = this.cursor === null ? {model: this.model, entries: this.entries} : this.fold(this.cursor);
   const root = this.shell(status);
+  if (this.lateStart) {
+   const note = elementWith(this.doc, "p", [["data-kind", "late-start"], ["role", "note"]]);
+   note.textContent = LATE_START_TEXT;
+   root.append(note);
+  }
   const timeline = elementWith(this.doc, "ol", [["data-replay-timeline", ""]]);
   const interactions = elementWith(this.doc, "ol", [["data-replay-interactions", ""]]);
   const lines: HTMLElement[] = [], moves: HTMLElement[] = [];

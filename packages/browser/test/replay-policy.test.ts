@@ -7,6 +7,7 @@ import {setReplayConsent, startReplay} from "../src/replay.ts";
 import {createRecorder} from "../src/replay/recorder.ts";
 import {ReplayStream} from "../src/replay/stream.ts";
 import {captureDomAccessors, fitSubtrees} from "../src/replay/tree.ts";
+import {NodeTable} from "../src/replay/nodes.ts";
 import {MAX_MUTATION_RECORDS, MAX_NODES, canonicalJSON, quantize, sha256Hex} from "../src/replay/policy.ts";
 import type {ReplayChunk, ReplayConfig, ReplayEventTargetLike, ReplayNode, ReplayTimers} from "../src/replay/types.ts";
 import {config as coreConfig} from "../../core/test/fixture.ts";
@@ -125,7 +126,7 @@ test("pre-buffer canaries: mask constant, no raw field, nothing read, opaque sub
  for (const secret of secrets) expect(wire).not.toContain(secret);
  expect(reads).toEqual({value: 0, data: 0, attributes: 0, text: 0, html: 0, layout: 0, traps: 0});
  for (const n of nodes) { expect(Object.keys(n).sort()).toEqual(NODE_KEYS); expect(["", "[masked]"]).toContain(n.text); expect(["", "masked"]).toContain(n.class); expect(TAGS).toContain(n.tag); }
- const texts = nodes.filter(n => n.text === "[masked]");
+ const texts = nodes.filter(n => n.text === "[masked]" && n.class === "");
  expect(texts.length).toBeGreaterThan(13);
  expect(new Set(texts.filter(n => n.tag === "masked").map(n => JSON.stringify({...n, id: "", parent: ""}))).size).toBe(1);
  const inputsOut = nodes.filter(n => n.tag === "input");
@@ -134,6 +135,8 @@ test("pre-buffer canaries: mask constant, no raw field, nothing read, opaque sub
  const opaque = nodes.filter(n => n.class === "masked");
  // editable, textarea, iframe, video, closed shadow host, plus nothing else
  expect(opaque).toHaveLength(5);
+ // The closed shadow host is the one opaque node that carries the constant mask (its recorded reason); every other opaque node has empty text.
+ expect(opaque.filter(n => n.text === "[masked]")).toHaveLength(1);
  for (const o of opaque) expect(nodes.some(n => n.parent === o.id)).toBe(false);
  // open shadow content and its light DOM are walked under the same masking rules
  const hostId = String(nodes.find(n => n.tag === "div" && nodes.some(c => c.parent === n.id && c.tag === "p" && nodes.some(t => t.parent === c.id && t.text === "[masked]")))?.id);
@@ -308,18 +311,23 @@ test("a delta chunk that had to be truncated carries gap:true like a truncated c
 test("fitSubtrees collapses the lowest-priority (latest, deepest) whole subtrees first and keeps the head of the page", () => {
  const node = (id: string, parent: string): ReplayNode => ({id, parent, tag: "div", class: "", text: ""});
  const nodes = [node("1", "0"), node("2", "1"), node("3", "2"), node("4", "1"), node("5", "4"), node("6", "4"), node("7", "1"), node("8", "7")];
- const unchanged = fitSubtrees(nodes, 8, 1_000_000);
+ const whole = NodeTable.of(nodes), unchanged = fitSubtrees(whole, 8, 1_000_000);
  expect(unchanged.truncated).toBe(false);
- expect(unchanged.nodes).toBe(nodes);
- const fitted = fitSubtrees(nodes, 6, 1_000_000);
- expect(fitted.truncated).toBe(true);
- expect(fitted.nodes.map(n => [n.id, n.parent, n.tag, n.class])).toEqual([["1", "0", "div", ""], ["2", "1", "div", ""], ["3", "2", "div", ""], ["4", "1", "masked", "masked"], ["7", "1", "masked", "masked"]]);
- expect([...fitted.suppressed].sort()).toEqual([4, 5, 6, 7, 8]);
- const byBytes = fitSubtrees(nodes, 100, JSON.stringify(node("1", "0")).length * 6);
- expect(byBytes.nodes.length).toBeLessThan(8);
- expect(JSON.stringify(byBytes.nodes[0]!.id)).toBe("\"1\"");
+ expect(whole.toArray()).toEqual(nodes);
+ const fitted = NodeTable.of(nodes), result = fitSubtrees(fitted, 6, 1_000_000);
+ expect(result.truncated).toBe(true);
+ expect(fitted.toArray().map(n => [n.id, n.parent, n.tag, n.class])).toEqual([["1", "0", "div", ""], ["2", "1", "div", ""], ["3", "2", "div", ""], ["4", "1", "masked", "masked"], ["7", "1", "masked", "masked"]]);
+ expect([...result.suppressed].sort()).toEqual([4, 5, 6, 7, 8]);
+ // The byte total follows the edit: it is the JSON size of what is left.
+ expect(fitted.bytes).toBe(fitted.toArray().reduce((sum, n) => sum + JSON.stringify(n).length + 1, 0));
+ const byBytes = NodeTable.of(nodes);
+ fitSubtrees(byBytes, 100, JSON.stringify(node("1", "0")).length * 6);
+ expect(byBytes.length).toBeLessThan(8);
+ expect(byBytes.toArray()[0]!.id).toBe("1");
  // A single root that still cannot fit collapses to itself; the result is never larger than asked for when a root placeholder fits.
- expect(fitSubtrees(nodes, 1, 1_000_000).nodes).toHaveLength(1);
+ const single = NodeTable.of(nodes);
+ fitSubtrees(single, 1, 1_000_000);
+ expect(single.length).toBe(1);
 });
 
 test("mutation bursts extract masked structure synchronously, never raw text or removed nodes", () => {

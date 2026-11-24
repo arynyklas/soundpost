@@ -5,7 +5,7 @@
 // anything outside the server's closed schema.
 import {test, expect} from "bun:test";
 import {createRecorder} from "../src/replay/recorder.ts";
-import {MAX_CHECKPOINTS, MAX_SEQUENCE, sha256Hex} from "../src/replay/policy.ts";
+import {MAX_CHECKPOINTS, MAX_SEQUENCE, canonicalJSON, sha256ChunkHex, sha256Hex} from "../src/replay/policy.ts";
 import {createHash} from "node:crypto";
 import type {ReplayChunk} from "../src/replay/types.ts";
 import {CHECKPOINT_MS, FLUSH_MS, scriptedPage} from "./recorded-session.ts";
@@ -66,7 +66,7 @@ function wideDom(): DomAccessors {
   lastChild: n => (n as Fake).kids.at(-1) ?? null,
   previousSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) - 1] ?? null; },
   parentNode: n => (n as Fake).parent, localName: n => (n as Fake).name, openShadowRoot: () => null, editable: () => false,
-  mutationTarget: record => (record as {target: object}).target, childListChange: () => null, eventTarget: () => null, clientX: () => 0, clientY: () => 0,
+  mutationTarget: record => (record as {target: object}).target, recordKind: () => "other", eventTarget: () => null, clientX: () => 0, clientY: () => 0,
  };
 }
 
@@ -97,6 +97,7 @@ test("a live tree that outgrows the cap through a delta is recounted: opaque pla
 
 // ---- Closed shadow roots (03.07-W1): recognised at attachShadow time while a recorder is active, opaque in the replay tree. ----
 import {captureDomAccessors, newWalkState, walk} from "../src/replay/tree.ts";
+import {NodeTable} from "../src/replay/nodes.ts";
 
 class PNode {
  parent: PNode | null = null; kids: PNode[] = [];
@@ -111,6 +112,10 @@ class PElement extends PNode {
  // The platform reads the init dictionary itself; `mode: "closed"` hides the root from shadowRoot.
  attachShadow(init: {mode: string}): object { if (this.root !== null || this.attached) throw new TypeError("already attached"); this.attached = true; const made = {}; if (init.mode === "open") this.root = made; return made; }
  private attached = false;
+ // What the platform answers about upgrade state and layout; a test sets them per element.
+ defined = true; box = 0; layoutReads = 0;
+ matches(selector: string): boolean { return selector === ":defined" && this.defined; }
+ get offsetWidth() { this.layoutReads++; return this.box; } get offsetHeight() { this.layoutReads++; return this.box; }
 }
 class PRecord { get target() { return null; } }
 class PEvent { get target() { return null; } get clientX() { return 0; } get clientY() { return 0; } }
@@ -159,8 +164,68 @@ test("walk emits a closed-shadow host as one opaque node and never its light chi
  root.add(host); host.add(light);
  host.attachShadow({mode: "closed"});
  const state = newWalkState(new WeakMap(), (() => { let n = 0; return () => ++n; })());
- walk(dom, root, "0", state);
- expect(state.nodes.map(node => [node.tag, node.class])).toEqual([["div", ""], ["masked", "masked"]]);
+ walk(dom, root, 0, state);
+ expect(state.nodes.toArray().map(node => [node.tag, node.class])).toEqual([["div", ""], ["masked", "masked"]]);
+ dom.release!();
+});
+
+// ---- A closed root made BEFORE capture started cannot be proven; it is inferred from platform answers only, never from content. ----
+const preexisting = (name: string, set: (element: PElement) => void = () => {}): PElement => {
+ const element = new PElement(name); element.box = 20;
+ element.attachShadow({mode: "closed"}); // before captureDomAccessors installed the attachShadow hook: the recorder never saw this call
+ set(element);
+ return element;
+};
+
+test("a pre-existing closed host is recognised from the platform's own answers: an upgraded custom element, null shadowRoot, no light child, a layout box", () => {
+ const widget = preexisting("x-widget");
+ const dom = captureDomAccessors(platform());
+ expect(dom.closedShadow!(widget, "x-widget")).toBe(true);
+ expect(dom.closedShadow!(widget)).toBe(true); // the name is optional
+ dom.release!();
+});
+
+test("the inference never fires without all of its facts: plain tags, light children, undefined or boxless or reserved names and open roots stay ordinary elements", () => {
+ const plain = preexisting("div"), withChild = preexisting("x-widget", e => e.add(new PElement("p"))), undefinedName = preexisting("x-widget", e => { e.defined = false; });
+ const boxless = preexisting("x-widget", e => { e.box = 0; }), reserved = preexisting("font-face"), open = new PElement("x-widget"); open.box = 20; open.attachShadow({mode: "open"});
+ const none = new PElement("x-widget"); none.box = 20; // a custom element that never had a shadow root and renders through CSS: indistinguishable, so it is marked (the documented false positive)
+ const dom = captureDomAccessors(platform());
+ expect([plain, withChild, undefinedName, boxless, reserved, open].map(e => dom.closedShadow!(e))).toEqual([false, false, false, false, false, false]);
+ expect(dom.closedShadow!(none)).toBe(true);
+ dom.release!();
+});
+
+test("the inference reads only platform accessors: page-planted traps on the element never run", () => {
+ const widget = preexisting("x-widget");
+ let traps = 0;
+ for (const name of ["matches", "offsetWidth", "offsetHeight", "shadowRoot", "firstChild"]) Object.defineProperty(widget, name, {configurable: true, get() { traps++; throw Error("TRAP " + name); }});
+ const dom = captureDomAccessors(platform());
+ expect(dom.closedShadow!(widget, "x-widget")).toBe(true);
+ expect(traps).toBe(0);
+ dom.release!();
+});
+
+test("walk emits a pre-existing closed host as the closed-shadow mark (opaque with the constant mask), distinct from every other opaque node, and walks a custom element that has light children", () => {
+ const root = new PElement("div"), host = new PElement("x-widget"), withChild = new PElement("x-card"), light = new PElement("p"), frame = new PElement("iframe");
+ host.box = 20; host.attachShadow({mode: "closed"}); withChild.box = 20; withChild.attachShadow({mode: "closed"});
+ root.add(host); root.add(withChild); withChild.add(light); root.add(frame);
+ const dom = captureDomAccessors(platform());
+ const state = newWalkState(new WeakMap(), (() => { let n = 0; return () => ++n; })());
+ walk(dom, root, 0, state);
+ expect(state.nodes.toArray().map(node => [node.tag, node.class, node.text])).toEqual([["div", "", ""], ["masked", "masked", "[masked]"], ["masked", "", ""], ["p", "", ""], ["masked", "masked", ""]]);
+ dom.release!();
+});
+
+test("layout is read only for an empty, upgraded custom element: plain tags, custom elements with children or not upgraded, and open hosts never cost a box read", () => {
+ const root = new PElement("section"), plain = new PElement("div"), para = new PElement("p"), withChild = new PElement("x-card"), notUpgraded = new PElement("x-later"), open = new PElement("x-open"), empty = new PElement("x-empty");
+ for (const element of [plain, para, withChild, notUpgraded, open, empty]) element.box = 20;
+ withChild.add(new PElement("p")); notUpgraded.defined = false; open.attachShadow({mode: "open"});
+ for (const element of [plain, para, withChild, notUpgraded, empty]) root.add(element);
+ const dom = captureDomAccessors(platform());
+ walk(dom, root, 0, newWalkState(new WeakMap(), (() => { let n = 0; return () => ++n; })()));
+ expect(dom.closedShadow!(open)).toBe(false); // an open host answers shadowRoot, so no box is read
+ expect([plain, para, withChild, notUpgraded, open].map(element => element.layoutReads)).toEqual([0, 0, 0, 0, 0]);
+ expect(empty.layoutReads).toBeGreaterThan(0); // the one element the inference has to ask
  dom.release!();
 });
 
@@ -172,4 +237,12 @@ test("sha256Hex equals the platform SHA-256 across every padding boundary and mu
   for (const text of [ascii, mixed, "\u2028\u{1f600}" + ascii]) expect(sha256Hex(text)).toBe(createHash("sha256").update(text, "utf8").digest("hex"));
  }
  expect(sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+});
+test("sha256ChunkHex hashes exactly the text sha256Hex would for the same nodes, across padding boundaries and a buffer that must grow", () => {
+ for (const count of [0, 1, 2, 3, 7, 40, 1000, 5000]) {
+  const nodes = Array.from({length: count}, (_, i) => ({id: String(i + 1), parent: String(i % 5), tag: (["div", "masked", "input"] as const)[i % 3]!, class: i % 7 === 0 ? "masked" as const : "" as const, text: i % 2 === 0 ? "[masked]" as const : "" as const}));
+  const pre = '{"a":"é"', post = ',"z":"ü"}';
+  const text = pre + canonicalJSON(nodes) + post;
+  expect(sha256ChunkHex(pre, NodeTable.of(nodes), post)).toBe(sha256Hex(text));
+ }
 });

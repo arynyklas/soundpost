@@ -11,6 +11,8 @@ const root = resolve(__dirname, "../../..");
 const bundleDir = mkdtempSync(join(tmpdir(), "soundpost-replay-"));
 const bun = process.env.SOUNDPOST_BUN ?? "bun";
 execFileSync(bun, ["build", join(root, "packages/browser/src/replay/recorder.ts"), join(root, "packages/browser/src/replay/stream.ts"), "--outdir", bundleDir, "--target=browser", "--format=esm"], {stdio: "pipe"});
+// The production viewer's tree renderer, bundled alone (one entry keeps the output name render.js), so the placeholder is checked on the recorder's own output.
+execFileSync(bun, ["build", join(root, "packages/replay-viewer/src/render.ts"), "--outdir", bundleDir, "--target=browser", "--format=esm"], {stdio: "pipe"});
 const html = readFileSync(join(root, "fixtures/sdk/replay/canaries.html"), "utf8");
 const origin = "http://soundpost.test";
 interface Node {tag: string; class: string; text: string}
@@ -25,7 +27,7 @@ async function open(page: Page, init?: string): Promise<{console: string[]; erro
  await page.route(`${origin}/**`, async route => {
   const path = new URL(route.request().url()).pathname;
   if (path === "/") return route.fulfill({contentType: "text/html", body: html});
-  if (path === "/recorder.js" || path === "/stream.js") return route.fulfill({contentType: "text/javascript", body: readFileSync(join(bundleDir, path.slice(1)), "utf8")});
+  if (path === "/recorder.js" || path === "/stream.js" || path === "/render.js") return route.fulfill({contentType: "text/javascript", body: readFileSync(join(bundleDir, path.slice(1)), "utf8")});
   return route.fulfill({status: 404, body: ""});
  });
  await page.goto(`${origin}/`);
@@ -69,7 +71,8 @@ test("pre-buffer canaries: nothing from the page survives into chunks, queue byt
  for (const pattern of secrets) expect(compressedBuffer.toString("latin1")).not.toMatch(pattern);
  expect(gunzipSync(compressedBuffer).toString("utf8")).toBe(wire);
  // Diagnostics: the page's own single console.log is the only canary anywhere; no trap fired, no page error.
- expect(seen.console.filter(line => /canary/i.test(line))).toEqual(["CANARY_CONSOLE_ARGUMENT_EEEEEEEE"]);
+ // The browser itself logs "Failed to load resource: ... canary.invalid" (WebKit) for the page's own canary URLs; that is the engine reporting the page's request, not output of the recorder.
+ expect(seen.console.filter(line => /canary/i.test(line) && !/^Failed to load resource/.test(line))).toEqual(["CANARY_CONSOLE_ARGUMENT_EEEEEEEE"]);
  expect(seen.errors).toEqual([]);
  expect(await page.evaluate(() => Reflect.get(window, "__traps"))).toBe(0);
  const chunks = queue.map(line => JSON.parse(line));
@@ -141,4 +144,179 @@ test("closed shadow roots attached while capture is active are opaque (roots att
  for (const node of opaque) expect(nodes.some(other => other.parent === node.id)).toBe(false);
  // The open host's shadow content IS walked (masked text) under it, so the opaque node above is the closed host, not the open one.
  expect(nodes.filter(node => node.tag === "span" || node.tag === "p").length).toBeGreaterThan(0);
+});
+
+test("a closed shadow root attached BEFORE capture started: its canary never reaches a chunk, its host is the closed-shadow mark and the viewer shows the explicit placeholder", async ({page}) => {
+ await open(page);
+ // The page really hides the root (shadowRoot is null, no light child): nothing here could ever be read, only inferred from the platform's own answers.
+ const facts = await page.evaluate(() => { const host = document.getElementById("pre-closed")!; return {rootHidden: host.shadowRoot === null, boxed: host.offsetWidth > 0 && host.offsetHeight > 0, light: host.childNodes.length}; });
+ expect(facts).toEqual({rootHidden: true, boxed: true, light: 0});
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ await page.waitForTimeout(1500);
+ const queue = await chunksOf(page);
+ expect(queue.length).toBeGreaterThan(0);
+ for (const pattern of [...secrets, /PREEXISTING/i, /CLOSED_SHADOW/i]) expect(queue.join("\n")).not.toMatch(pattern);
+ const first = JSON.parse(queue[0]!) as {nodes: Array<Node & {id: string; parent: string}>};
+ // The mark is an opaque node (class masked) carrying the constant mask: no other cause of opacity produces that shape, and only the one pre-existing component qualifies.
+ const marks = first.nodes.filter(node => node.tag === "masked" && node.class === "masked" && node.text === "[masked]");
+ expect(marks).toHaveLength(1);
+ expect(first.nodes.some(node => node.parent === marks[0]!.id)).toBe(false);
+ // The production renderer draws that record as the explicit placeholder and nothing inside it.
+ const shown = await page.evaluate(async nodes => {
+  const {renderTree} = await import("/render.js");
+  const tree = renderTree(document, nodes);
+  return Array.from(tree.querySelectorAll("[data-opaque=\"closed-shadow\"]"), element => element.textContent);
+ }, first.nodes);
+ expect(shown).toEqual(["[opaque: closed shadow root not observable]"]);
+});
+test("late start (D100): a recorder started after the page loaded says so, its first checkpoint is gap-marked and the viewer shows the banner", async ({page}) => {
+ await open(page); // the recorder module runs after the document was parsed: not the supported install (a classic script first in <head>)
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ await page.waitForTimeout(500);
+ const reason = await page.evaluate(() => Reflect.get(window, "__replay").lateStart());
+ expect(["document_ready_state", "body_content_present"]).toContain(reason);
+ const queue = await chunksOf(page);
+ expect(JSON.parse(queue[0]!).gap).toBe(true);
+ // The production viewer over the recorder's own chunks (the module comes from the served bundle: a runtime-selected page module, not a build-time import).
+ const banner = await page.evaluate(async chunks => {
+  const {renderReplay} = await import("/render.js");
+  const host = document.createElement("div"), encoder = new TextEncoder();
+  const items = async function* () { for (const text of chunks) yield {kind: "chunk" as const, bytes: encoder.encode(text)}; };
+  await renderReplay(host, items()).done;
+  return Array.from(host.querySelectorAll("[data-kind=\"late-start\"]"), element => element.textContent);
+ }, queue);
+ expect(banner).toEqual(["Recording started after the page had loaded: pre-existing closed shadow roots may be unobservable."]);
+});
+
+// The recorder answers an append from the page's children and a child-list record's `nextSibling`, never from `addedNodes`/`removedNodes`. Fake pages encode what the platform reports; this runs seeded random
+// histories of every kind of child-list operation (append, fragment append, last child removal, removal of any child, insertion, replacement, move, replaceChildren, prepend, remove(), textContent, character data) on the real
+// DOM of each engine, plays the recorder's deltas through the production viewer, and compares what it shows with what a fresh checkpoint of the same page shows.
+test("random DOM histories in a real browser: the viewer shows after the recorder's deltas what a fresh checkpoint of the page shows", async ({page}) => {
+ await open(page);
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ let deltas = 0;
+ for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+  const verdict = await page.evaluate(async seed => {
+   const {renderReplay} = await import("/render.js");
+   const chunks = Reflect.get(window, "__chunks") as string[];
+   const from = chunks.length - 1; // the checkpoint the recorder made when it (re)started: the history of this seed begins there
+   let s = seed >>> 0;
+   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
+   const root = document.getElementById("burst")!;
+   const tags = ["div", "p", "span", "section", "button", "my-widget", "select", "input"];
+   const make = (depth = 0): Element => {
+    const element = document.createElement(tags[Math.floor(rnd() * tags.length)]!);
+    if (depth < 2 && element.tagName !== "INPUT") for (let count = Math.floor(rnd() * 3); count > 0; count--) element.append(rnd() < 0.3 ? document.createTextNode("t") : make(depth + 1));
+    return element;
+   };
+   const pick = (): Element => { const all = [root, ...Array.from(root.querySelectorAll("*"))]; return all[Math.floor(rnd() * all.length)]!; };
+   const child = (parent: Element): ChildNode | null => parent.childNodes[Math.floor(rnd() * parent.childNodes.length)] ?? null;
+   for (let batch = 0; batch < 40; batch++) {
+    for (let operations = 1 + Math.floor(rnd() * 5); operations > 0; operations--) {
+     const roll = rnd(), parent = pick();
+     try {
+      if (roll < 0.22) parent.appendChild(make());
+      else if (roll < 0.30) { const fragment = document.createDocumentFragment(); fragment.append(make(), make(), document.createTextNode("f")); parent.appendChild(fragment); }
+      else if (roll < 0.40 && parent.lastChild) parent.removeChild(parent.lastChild);
+      else if (roll < 0.48 && parent.firstChild) parent.removeChild(child(parent)!);
+      else if (roll < 0.55 && parent.firstChild) parent.insertBefore(make(), child(parent));
+      else if (roll < 0.61 && parent.firstChild) parent.replaceChild(make(), child(parent)!);
+      else if (roll < 0.69) { const moved = pick(); if (moved !== root) parent.appendChild(moved); }
+      else if (roll < 0.73) parent.textContent = rnd() < 0.5 ? "" : "x";
+      else if (roll < 0.77) parent.replaceChildren(make(), make());
+      else if (roll < 0.81) parent.prepend(make());
+      else if (roll < 0.85 && parent !== root) parent.remove();
+      else if (roll < 0.90) { const text = Array.from(parent.childNodes).find(node => node.nodeType === 3); if (text) text.nodeValue = "changed" + batch; }
+      else if (roll < 0.94 && parent.lastChild) { parent.removeChild(parent.lastChild); parent.appendChild(make()); parent.appendChild(make()); }
+      else parent.setAttribute("data-n", String(batch));
+     } catch { /* a hierarchy error (a node moved into itself) changes nothing */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, 0)); // the observer delivers this batch
+   }
+   const summarize = (element: Element): string => {
+    const own = Array.from(element.children).filter(item => item.hasAttribute("data-masked")).map(item => item.textContent).join("");
+    const kids = Array.from(element.children).filter(item => item.hasAttribute("data-tag")).map(summarize);
+    return (element.getAttribute("data-tag") ?? "?") + (own === "" ? "" : ":" + own) + (kids.length > 0 ? "[" + kids.join(",") + "]" : "");
+   };
+   const encoder = new TextEncoder();
+   const shown = async (texts: string[]): Promise<{tree: string; status: string}> => {
+    const host = document.createElement("div");
+    const items = async function* () { for (const text of texts) yield {kind: "chunk" as const, bytes: encoder.encode(text)}; };
+    const handle = renderReplay(host, items());
+    await handle.done;
+    const tree = host.querySelector("[data-replay-tree]")!;
+    return {tree: Array.from(tree.children).filter(item => item.hasAttribute("data-tag")).map(summarize).join("|"), status: handle.status()};
+   };
+   const after = await shown(chunks.slice(from));
+   const delta = chunks.slice(from).filter(text => { const chunk = JSON.parse(text) as {sequence: string; checkpoint_sequence: string}; return chunk.sequence !== chunk.checkpoint_sequence; }).length;
+   // A fresh checkpoint of the page as it is now: consent off and on again starts the recorder over, and its first chunk is a full snapshot.
+   const replay = Reflect.get(window, "__replay") as {setConsent(on: boolean): void};
+   replay.setConsent(false); replay.setConsent(true);
+   const fresh = await shown([chunks.at(-1)!]);
+   return {after: after.tree, fresh: fresh.tree, status: after.status, delta};
+  }, seed);
+  expect(["ready", "gap"], `seed ${seed}: a recording resumed after revoked consent starts with a gap-marked checkpoint`).toContain(verdict.status);
+  expect(verdict.after, `seed ${seed}`).toBe(verdict.fresh);
+  expect(verdict.after.length, `seed ${seed}: the page shows something`).toBeGreaterThan(20);
+  deltas += verdict.delta;
+ }
+ expect(deltas).toBeGreaterThan(100);
+});
+
+// Firefox reports `replaceChildren(...)` as ONE child-list record with nextSibling null, whatever was inserted before or reordered among the children the replay holds; Chromium and WebKit report an
+// "inside" record there. Every engine must show, after the recorder's deltas, exactly what a fresh checkpoint of the page shows.
+test("replaceChildren shapes in a real browser (new node first or in the middle, reorders, drops, pure append): the viewer shows what a fresh checkpoint shows", async ({page}) => {
+ await open(page);
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ const verdicts = await page.evaluate(async () => {
+  const {renderReplay} = await import("/render.js");
+  const chunks = Reflect.get(window, "__chunks") as string[];
+  const replay = Reflect.get(window, "__replay") as {setConsent(on: boolean): void};
+  const encoder = new TextEncoder();
+  const summarize = (element: Element): string => {
+   const own = Array.from(element.children).filter(item => item.hasAttribute("data-masked")).map(item => item.textContent).join("");
+   const kids = Array.from(element.children).filter(item => item.hasAttribute("data-tag")).map(summarize);
+   return (element.getAttribute("data-tag") ?? "?") + (own === "" ? "" : ":" + own) + (kids.length > 0 ? "[" + kids.join(",") + "]" : "");
+  };
+  const shown = async (texts: string[]): Promise<string> => {
+   const host = document.createElement("div");
+   const items = async function* () { for (const text of texts) yield {kind: "chunk" as const, bytes: encoder.encode(text)}; };
+   await renderReplay(host, items()).done;
+   return Array.from(host.querySelector("[data-replay-tree]")!.children).filter(item => item.hasAttribute("data-tag")).map(summarize).join("|");
+  };
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const restart = async () => { replay.setConsent(false); replay.setConsent(true); await tick(); };
+  const shapes: Record<string, (kids: Element[], fresh: () => Element) => (Element | string)[]> = {
+   "new first": (kids, fresh) => [fresh(), ...kids],
+   "new in the middle": (kids, fresh) => [kids[0]!, kids[1]!, fresh(), ...kids.slice(2)],
+   "reverse": kids => [...kids].reverse(),
+   "swap the first two": kids => [kids[1]!, kids[0]!, ...kids.slice(2)],
+   "new first and reorder": (kids, fresh) => [fresh(), kids[3]!, kids[0]!, kids[1]!, kids[2]!, kids[4]!],
+   "drop the first": kids => kids.slice(1),
+   "drop the last and add a new one first": (kids, fresh) => [fresh(), ...kids.slice(0, -1)],
+   "pure append of a new node": (kids, fresh) => [...kids, fresh()],
+   "text first": kids => ["text", ...kids],
+  };
+  const out: {shape: string; after: string; fresh: string; chunks: number}[] = [];
+  for (const [shape, order] of Object.entries(shapes)) {
+   const box = document.createElement("div");
+   for (const name of ["div", "p", "section", "button", "span"]) box.append(document.createElement(name));
+   document.getElementById("burst")!.append(box);
+   await tick(); await restart();
+   const from = chunks.length - 1;
+   const kids = Array.from(box.children);
+   box.replaceChildren(...order(kids, () => document.createElement("input")).map(item => typeof item === "string" ? document.createTextNode(item) : item));
+   await tick();
+   const after = await shown(chunks.slice(from));
+   const count = chunks.length - from;
+   await restart();
+   out.push({shape, after, fresh: await shown([chunks.at(-1)!]), chunks: count});
+   box.remove(); await tick();
+  }
+  return out;
+ });
+ for (const verdict of verdicts) {
+  expect(verdict.chunks, `${verdict.shape}: the change was recorded`).toBeGreaterThan(1);
+  expect(verdict.after, verdict.shape).toBe(verdict.fresh);
+ }
 });

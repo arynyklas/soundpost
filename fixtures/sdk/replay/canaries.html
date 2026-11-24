@@ -39,6 +39,7 @@
  <iframe id="frame" srcdoc="<p>CANARY_FRAME_TEXT_AAAAAAAAAA</p>"></iframe>
  <div id="open-host"></div>
  <div id="closed-host"></div>
+ <x-closed-widget id="pre-closed"></x-closed-widget>
  <div id="trapped"><span>CANARY_TRAPPED_TEXT</span></div>
  <div id="burst"></div>
  <button id="button">CANARY_BUTTON_LABEL</button>
@@ -48,6 +49,10 @@
  open.innerHTML = "<p>CANARY_OPEN_SHADOW_TEXT_BBBBBBBB</p><input value='CANARY_OPEN_SHADOW_INPUT'>";
  const closed = document.getElementById("closed-host").attachShadow({mode: "closed"});
  closed.innerHTML = "<p>CANARY_CLOSED_SHADOW_TEXT_CCCCCC</p>";
+ // A web component whose own constructor attached a closed root before the recorder module below runs: the page can never read it again (shadowRoot is null) and the recorder's attachShadow hook never saw it.
+ customElements.define("x-closed-widget", class extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode: "closed"}).innerHTML = "<style>:host{display:block}</style><p>CANARY_PREEXISTING_CLOSED_SHADOW_TEXT_GGGGGG</p>"; }
+ });
  const context = document.getElementById("canvas").getContext("2d");
  context.font = "14px sans-serif"; context.fillText("CANARY_CANVAS_PIXELS_DDDDDD", 4, 24);
  // Getter traps on the page's own nodes: any read by the recorder is recorded and fails the run.

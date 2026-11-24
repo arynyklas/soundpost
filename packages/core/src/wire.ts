@@ -76,6 +76,13 @@ function nativeProfile(p:Record<string,unknown>,revision:string):void{
 }
 const structureStrings:Readonly<Record<string,readonly string[]>>={metric:'name sample_kind unit type'.split(' '),log:'severity template_id line source_class'.split(' '),span:'span_kind operation status dependency_alias sample_decision'.split(' '),error:'exception_class mechanism'.split(' '),job_attempt:'schedule_occurrence state'.split(' '),replay_chunk:['recorder_version'],profile_chunk:'method units'.split(' '),capability:'runtime version build os arch signal method status reason'.split(' '),loss:'signal reason'.split(' '),condition:'status severity'.split(' ')};
 const structureIds:Readonly<Record<string,readonly string[]>>={metric:['exemplar_trace'],log:'trace_id run_id'.split(' '),span:'trace_id job_id replay_id profile_id'.split(' '),error:'occurrence_id build_id release_id trace_id replay_id profile_id run_id'.split(' '),job_attempt:'job_id run_id attempt_id producer_epoch cause_trace cause_error'.split(' '),replay_chunk:'replay_id session_id'.split(' '),profile_chunk:'profile_id process_id capability_id'.split(' '),loss:'source producer producer_epoch'.split(' '),condition:'condition_id epoch'.split(' ')};
+const nodesShape=/^\[(?:(?:\{"class":"(?:masked)?","id":"(?:0|[1-9]\d{0,19})","parent":"(?:0|[1-9]\d{0,19})","tag":"(?:div|span|p|button|input|section|canvas|masked)","text":"(?:\[masked\])?"\},){0,4095}\{"class":"(?:masked)?","id":"(?:0|[1-9]\d{0,19})","parent":"(?:0|[1-9]\d{0,19})","tag":"(?:div|span|p|button|input|section|canvas|masked)","text":"(?:\[masked\])?"\})?\]$/;
+/** The closed replay node list as canonical JSON text (sorted keys, no whitespace): at most 4096 nodes, each exactly id, parent (canonical uint64 decimals), tag (the eight names), class ("" or "masked"), text ("" or "[masked]").
+ * One anchored match decides it without making a node object; the one thing a shape cannot say, a 20 digit id above 2^64-1, is checked for the rare ids that long. */
+export function nodesText(value:string):void{
+ if(!nodesShape.test(value))throw Error('unmasked replay node');
+ value.match(/\d{20}/g)?.forEach(id=>decimal(id));
+}
 function structures(kind:string,p:Record<string,unknown>,revision:string):void{
  for(const key of Object.hasOwn(structureStrings,kind)?structureStrings[kind]!:[])text(p[key]);if(kind==='error'){if(p.code!==null)text(p.code);if(p.template_id!==undefined)text(p.template_id);}if(kind==='log'&&p.timestamp_ns!==undefined)unixNano(p.timestamp_ns);
  for(const key of Object.hasOwn(structureIds,kind)?structureIds[kind]!:[])if(p[key]!==undefined)canonicalId(p[key]);
@@ -102,8 +109,8 @@ function structures(kind:string,p:Record<string,unknown>,revision:string):void{
  if(kind==='job_attempt'){decimal(p.ordinal);decimal(p.sequence);unixNano(p.observed_ns);if(p.terminal_ns!==null)unixNano(p.terminal_ns);}
  if(kind==='replay_chunk'){
   clock(p.clock);for(const key of ['sequence','checkpoint_sequence','loss','capture_policy_revision'])decimal(p[key]);bits(p.previous_hash,64);bits(p.checkpoint_hash,64);if(typeof p.gap!=='boolean')throw Error('invalid replay gap');
-  if(array(p.nodes).length>4096||array(p.events).length>4096)throw Error('invalid replay bounds');
-  for(const item of array(p.nodes)){const n=fields(item,'id parent tag class text');decimal(n.id);decimal(n.parent);if(!['div','span','p','button','input','section','canvas','masked'].includes(text(n.tag))||!['','masked'].includes(text(n.class))||!['','[masked]'].includes(text(n.text)))throw Error('unmasked replay node');}
+  if(array(p.events).length>4096)throw Error('invalid replay bounds');
+  nodesText(canonical(p.nodes));
   for(const item of array(p.events)){const e=fields(item,'at_ns kind node x y');decimal(e.at_ns);decimal(e.node);integer(e.x,-2147483648,2147483647);integer(e.y,-2147483648,2147483647);if(!['pointer','scroll','resize','mutation','checkpoint','gap'].includes(text(e.kind)))throw Error('invalid replay event');}
  }
  if(kind==='profile_chunk'){

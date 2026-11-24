@@ -3,10 +3,14 @@
 // The replay entry (`@soundpost/browser/replay`). Replay is a separate bundle from the core client (design 13: core <=40 KiB gzip, replay
 // separate <=60 KiB gzip), so nothing in the core entry imports the recorder; an application that records opts in by importing this module.
 import type {Client} from "./index.ts";
-import {createRecorder} from "./replay/recorder.ts";
+import {chunkNodes,createRecorder} from "./replay/recorder.ts";
 import type {EnqueueResult,ReplayChunk,ReplayConfig,ReplayRecorder} from "./replay/types.ts";
 
 const recorders=new WeakMap<Client,ReplayRecorder>();
+/** Every field of a chunk but its nodes, built without reading `chunk.nodes`. */
+function fieldsOf(chunk:ReplayChunk):Omit<ReplayChunk,"nodes">{
+ return {replay_id:chunk.replay_id,session_id:chunk.session_id,recorder_version:chunk.recorder_version,sequence:chunk.sequence,previous_hash:chunk.previous_hash,checkpoint_sequence:chunk.checkpoint_sequence,checkpoint_hash:chunk.checkpoint_hash,clock:chunk.clock,events:chunk.events,loss:chunk.loss,gap:chunk.gap,capture_policy_revision:chunk.capture_policy_revision};
+}
 
 /** Creates the owned recorder under `client`'s policy. Capture stays off until setReplayConsent(client, true). Every chunk the recorder emits is enqueued by THIS client on its ordinary delivery path
  * (closed wire validation, batching, retry, receipts); a chunk the queue refuses is the recorder's counted loss and is healed by a gap-marked checkpoint. `tap` is an optional local consumer
@@ -17,7 +21,9 @@ export function startReplay(client:Client,config:Omit<ReplayConfig,"projectPolic
  // policyDecision.replay is project policy AND deployment opt-in already combined by core.
  const allowed=client.policyDecision.replay;
  const deliver=(chunk:ReplayChunk):EnqueueResult=>{
-  const queued=client.captureReplay({...chunk});
+  // A chunk this module's recorder emitted keeps its nodes as numbers: core takes their canonical JSON text and never sees a node object (the lazy `chunk.nodes` is not read here).
+  const columns=chunkNodes(chunk);
+  const queued=columns===undefined?client.captureReplay({...chunk}):client.captureReplay(fieldsOf(chunk),columns.canonicalText());
   if(tap!==undefined){try{tap(chunk);}catch{/* a local consumer cannot break delivery */}}
   return queued?"accepted":"rejected";
  };

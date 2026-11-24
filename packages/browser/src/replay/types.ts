@@ -51,17 +51,22 @@ export interface DomAccessors {
  localName(element: object): string;
  /** Open shadow root or null. Closed roots are invisible to page script and become opaque only when closedShadow reports them. */
  openShadowRoot(element: object): object | null;
- /** True for a host whose closed shadow root was observed being attached while capture was active. */
- closedShadow?(element: object): boolean;
+ /**
+  * True for a host whose closed shadow root the recorder knows or infers: one observed being attached while capture was active, or a root made before
+  * capture started that the platform's own answers give away (see `captureDomAccessors`). `name` is the element's lower-case local name when the caller has it.
+  */
+ closedShadow?(element: object, name?: string): boolean;
  /** Undoes every platform hook the accessors installed; called when capture stops. */
  release?(): void;
  editable(element: object): boolean;
  mutationTarget(record: object): object | null;
  /**
-  * What a child-list record added and removed (snapshots, in order), or null for any other record (attributes, character data) and for a
-  * record the platform cannot describe within the recorder's bound: such a record only names its target, which is then re-read whole.
+  * How a record changed its target, read without the record's node lists (a platform NodeList wrapper per record was most of what the observer callback still allocated):
+  * "tail" for a child-list record whose change sits at the end of the target's children (the record's `nextSibling` is null: an append, or the removal of the last child),
+  * "inside" for any other child-list record (the change has a following sibling), "other" for every record that only names its target (attributes, character data) and for
+  * a record the platform cannot describe. What was added or removed is never asked of the record: the recorder reads the target's children at the end of the batch.
   */
- childListChange(record: object): { readonly added: readonly object[]; readonly removed: readonly object[] } | null;
+ recordKind(record: object): "other" | "tail" | "inside";
  eventTarget(event: object): object | null;
  clientX(event: object): number;
  clientY(event: object): number;
@@ -87,5 +92,8 @@ export interface ReplayConfig {
  readonly timers?: ReplayTimers;
  /** Called after setConsent(false) so the owner can destroy its own pending replay chunks. */
  readonly onRevoked?: () => void;
+ /** Why this recording started late, or null for a supported start (D100). Default: read from `document` (readyState not "loading", or body content already present). */
+ readonly lateStart?: () => string | null;
 }
-export interface ReplayRecorder { setConsent(enabled: boolean): void; close(): void }
+/** `lateStart()` is the reason capture began after the page had loaded (a closed shadow root made before it cannot be observed with certainty), or null; a late start marks the first checkpoint as a gap. */
+export interface ReplayRecorder { setConsent(enabled: boolean): void; close(): void; lateStart(): string | null }

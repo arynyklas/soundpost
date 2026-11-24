@@ -11,7 +11,8 @@ import {createRecorder} from "../../browser/src/replay/recorder.ts";
 import type {DomAccessors, ReplayChunk, ReplayConfig} from "../../browser/src/replay/types.ts";
 
 interface F { t: number; name: string; kids: F[]; parent: F | null }
-interface Rec { target: F; added?: F[]; removed?: F[] }
+/** `next`: the record's `nextSibling` at the time of the change (null: at the end of the target's children); absent for a record that only names its target. */
+interface Rec { target: F; added?: F[]; removed?: F[]; next?: F | null }
 const el = (name: string, ...kids: F[]): F => { const out: F = {t: 1, name, kids, parent: null}; for (const kid of kids) kid.parent = out; return out; };
 const txt = (): F => ({t: 3, name: "#text", kids: [], parent: null});
 
@@ -21,13 +22,13 @@ function accessors(understandChildList: boolean): DomAccessors {
   nextSibling: n => { const p = (n as F).parent; return p === null ? null : p.kids[p.kids.indexOf(n as F) + 1] ?? null; },
   previousSibling: n => { const p = (n as F).parent; return p === null ? null : p.kids[p.kids.indexOf(n as F) - 1] ?? null; },
   parentNode: n => (n as F).parent, localName: n => (n as F).name, openShadowRoot: () => null, editable: () => false,
-  childListChange: record => { const r = record as Rec; return !understandChildList || r.added === undefined ? null : {added: r.added, removed: r.removed ?? []}; },
+  recordKind: record => { const r = record as Rec; return !understandChildList || r.next === undefined ? "other" : r.next === null ? "tail" : "inside"; },
   mutationTarget: record => (record as Rec).target, eventTarget: () => null, clientX: () => 0, clientY: () => 0,
  };
 }
 
 interface Recording { readonly chunks: ReplayChunk[]; observe(records: readonly object[]): void }
-function record(root: F, understandChildList: boolean): Recording {
+function record(root: F, understandChildList: boolean, extra: Partial<ReplayConfig> = {}): Recording {
  let observe: ((records: readonly object[]) => void) | undefined;
  class Observer { constructor(callback: (records: readonly object[]) => void) { observe = callback; } observe(): void {} disconnect(): void {} }
  const chunks: ReplayChunk[] = [];
@@ -35,7 +36,7 @@ function record(root: F, understandChildList: boolean): Recording {
  const config: ReplayConfig = {
   projectPolicy: true, deploymentOptIn: true, root, replayId: "11".repeat(16), sessionId: "22".repeat(16), capturePolicyRevision: "7", domain: {host: "33".repeat(16), boot: "44".repeat(16), runtime: "55".repeat(16)},
   clock: () => ({wall_ns: "1700000000000000000", mono_ns: String(5_000_000_000 + ++tick * 1000), uncertainty_ns: "1000"}), dom: accessors(understandChildList), observer: Observer,
-  eventTarget: {addEventListener: () => {}, removeEventListener: () => {}}, timers: {set: () => 1, clear: () => {}},
+  eventTarget: {addEventListener: () => {}, removeEventListener: () => {}}, timers: {set: () => 1, clear: () => {}}, ...extra,
  };
  createRecorder(config, chunk => { chunks.push(JSON.parse(JSON.stringify(chunk))); return "accepted"; }).setConsent(true);
  return {chunks, observe: records => observe!(records)};
@@ -81,7 +82,8 @@ function subtree(next: () => number, depth = 0): F {
 const elements = (node: F): F[] => [node, ...node.kids.flatMap(elements)].filter(candidate => candidate.t === 1);
 const inside = (node: F, ancestor: F): boolean => { for (let up: F | null = node; up !== null; up = up.parent) if (up === ancestor) return true; return false; };
 
-function history(seed: number): {root: F; apply: () => Rec[]} {
+/** `tailOps` adds batches of operations that only touch the end of one element's children (appends, removals of the last child, re-appends of nodes just removed): every record is a tail record, the case the recorder answers from the page's children instead of the records' node lists. */
+function history(seed: number, tailOps = false): {root: F; apply: () => Rec[]} {
  const next = prng(seed);
  const body = el("body", el("div", el("p"), txt()), el("section", el("span")));
  const root: F = {t: 9, name: "#document", kids: [el("html", body)], parent: null}; root.kids[0]!.parent = root;
@@ -89,21 +91,33 @@ function history(seed: number): {root: F; apply: () => Rec[]} {
   // one batch of 1-5 DOM operations
   const records: Rec[] = [];
   const operations = 1 + Math.floor(next() * 5);
+  const detach = (child: F): void => { const from = child.parent!, at = from.kids.indexOf(child), following = from.kids[at + 1] ?? null; from.kids.splice(at, 1); child.parent = null; records.push({target: from, added: [], removed: [child], next: following}); };
+  const into = (parent: F, child: F, before?: F): void => {
+   if (child.parent !== null) detach(child);
+   child.parent = parent;
+   if (before === undefined) parent.kids.push(child); else parent.kids.splice(parent.kids.indexOf(before), 0, child);
+   records.push({target: parent, added: [child], removed: [], next: before ?? null});
+  };
   for (let op = 0; op < operations; op++) {
    const all = elements(root.kids[0]!), pick = (): F => all[Math.floor(next() * all.length)]!;
+   if (tailOps && next() < 0.4) {
+    const parent = pick(), popped: F[] = [];
+    for (let steps = 1 + Math.floor(next() * 6); steps > 0; steps--) {
+     const roll = next();
+     if (roll < 0.35 && parent.kids.length > 0) { const last = parent.kids.at(-1)!; detach(last); popped.push(last); }
+     else if (roll < 0.7) into(parent, subtree(next));
+     else if (popped.length > 0) into(parent, popped.splice(Math.floor(next() * popped.length), 1)[0]!);
+     if (next() < 0.15 && parent.kids.length > 0 && parent.kids.at(-1)!.t === 1) records.push({target: parent.kids.at(-1)!});
+    }
+    continue;
+   }
    const roll = next();
-   const into = (parent: F, child: F, before?: F): void => {
-    if (child.parent !== null) { const from = child.parent; from.kids.splice(from.kids.indexOf(child), 1); child.parent = null; records.push({target: from, added: [], removed: [child]}); }
-    child.parent = parent;
-    if (before === undefined) parent.kids.push(child); else parent.kids.splice(parent.kids.indexOf(before), 0, child);
-    records.push({target: parent, added: [child], removed: []});
-   };
    if (roll < 0.5) { const fresh = subtree(next); into(pick(), fresh); if (next() < 0.5 && fresh.kids.length > 0) records.push({target: fresh.kids[0]!}); if (next() < 0.4) records.push({target: fresh}); }
    else if (roll < 0.62) { const parent = pick(); const fresh = subtree(next); into(parent, fresh, parent.kids[0]); }
-   else if (roll < 0.74) { const victim = pick(); if (victim !== root.kids[0] && victim.parent !== null) { const from = victim.parent; from.kids.splice(from.kids.indexOf(victim), 1); victim.parent = null; records.push({target: from, added: [], removed: [victim]}); } }
+   else if (roll < 0.74) { const victim = pick(); if (victim !== root.kids[0] && victim.parent !== null) detach(victim); }
    else if (roll < 0.84) { const mover = pick(), target = pick(); if (mover !== root.kids[0] && !inside(target, mover)) into(target, mover); }
    else if (roll < 0.92) { const target = pick(); records.push({target}); }
-   else { const parent = pick(); const gone = subtree(next); into(parent, gone); records.push({target: parent, added: [], removed: [gone]}); gone.parent?.kids.splice(gone.parent.kids.indexOf(gone), 1); gone.parent = null; }
+   else { const parent = pick(); const gone = subtree(next); into(parent, gone); detach(gone); }
   }
   return records;
  };
@@ -133,4 +147,40 @@ test("append deltas and the former re-walk deltas show the viewer exactly what a
  }
  expect(deltas).toBeGreaterThan(100);
  expect(appendNodes).toBeLessThan(rewalkNodes); // the append path was taken and records less than the re-walk
+});
+
+test("histories of tail records (appends, removals of the last child, re-appends of nodes just removed, any order within a batch) show the viewer exactly what a fresh checkpoint shows: the recorder answers an append from the page's children, never from the records' node lists", async () => {
+ let appendNodes = 0, rewalkNodes = 0, deltas = 0;
+ for (let seed = 1; seed <= 60; seed++) {
+  const page = history(seed, true);
+  const appended = record(page.root, true), rewalked = record(page.root, false);
+  for (let batch = 0; batch < 24; batch++) {
+   const records = page.apply();
+   appended.observe(records); rewalked.observe(records);
+   if (batch % 3 === 2) {
+    const truth = await shown(record(page.root, true).chunks);
+    expect([seed, batch, await shown(appended.chunks)]).toEqual([seed, batch, truth]);
+    expect([seed, batch, await shown(rewalked.chunks)]).toEqual([seed, batch, truth]);
+    expect(truth.status).toBe("ready");
+   }
+  }
+  appendNodes += nodeTotal(appended.chunks); rewalkNodes += nodeTotal(rewalked.chunks);
+  deltas += appended.chunks.filter(chunk => chunk.sequence !== chunk.checkpoint_sequence).length;
+ }
+ expect(deltas).toBeGreaterThan(500);
+ expect(appendNodes).toBeLessThan(rewalkNodes);
+}, 60_000);
+test("a late-started recording shows the banner and a supported start shows none (D100)", async () => {
+ const banner = async (chunks: readonly ReplayChunk[]): Promise<string[]> => {
+  const container = new FakeEl("div", new FakeDoc());
+  const handle = renderReplay(container as unknown as HTMLElement, items(chunks));
+  await handle.done;
+  return container.find(el => el.attrs.get("data-kind") === "late-start").map(el => el.text);
+ };
+ const late = record(history(1).root, true, {lateStart: () => "document_ready_state"});
+ expect(late.chunks[0]!.gap).toBe(true);
+ expect(await banner(late.chunks)).toEqual(["Recording started after the page had loaded: pre-existing closed shadow roots may be unobservable."]);
+ const supported = record(history(1).root, true, {lateStart: () => null});
+ expect(supported.chunks[0]!.gap).toBe(false);
+ expect(await banner(supported.chunks)).toEqual([]);
 });

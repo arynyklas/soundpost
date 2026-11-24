@@ -198,7 +198,7 @@ function recordReal(extraNodes = 1): RecorderChunk[] {
   lastChild: node => (node as Fake).kids.at(-1) ?? null,
   previousSibling: node => { const parent = (node as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(node as Fake) - 1] ?? null; },
   parentNode: node => (node as Fake).parent, localName: node => (node as Fake).name, openShadowRoot: () => null, editable: () => false,
-  mutationTarget: record => (record as {target: object}).target, childListChange: () => null, eventTarget: event => (event as {target: object}).target,
+  mutationTarget: record => (record as {target: object}).target, recordKind: () => "other", eventTarget: event => (event as {target: object}).target,
   clientX: event => (event as {x: number}).x, clientY: event => (event as {y: number}).y,
  };
  let observe: ((records: readonly object[]) => void) | undefined;
@@ -497,13 +497,29 @@ describe("renderer", () => {
   expect(doc.ops.filter(op => op.kind === "html" || op.kind === "other")).toEqual([]);
   for (const op of doc.ops.filter(op => op.kind === "create")) expect(ELEMENT_NAMES.has(op.a)).toBe(true);
   for (const op of doc.ops.filter(op => op.kind === "attr")) expect(ATTRIBUTE_NAMES.has(op.a)).toBe(true);
-  const allowedText = new Set(["[masked]", "[opaque]"]);
+  const allowedText = new Set(["[masked]", "[opaque]", "[opaque: closed shadow root not observable]", "Recording started after the page had loaded: pre-existing closed shadow roots may be unobservable."]);
   for (const op of doc.ops.filter(op => op.kind === "text")) expect(allowedText.has(op.b!)).toBe(true);
   for (const op of doc.ops.filter(op => op.kind === "attr" && op.a === "data-tag")) expect(["div", "span", "p", "button", "input", "section", "canvas", "masked"]).toContain(op.b!);
   const written = doc.ops.map(op => op.b ?? "").join("\n");
   for (const marker of ["onerror", "script", "evil.test", "javascript", "iframe", "src="]) expect(written).not.toContain(marker);
   // Cyclic and orphaned parents are unreachable from the root and never rendered or looped on.
   expect(root.find(el => el.attrs.has("data-tag")).length).toBe(5);
+ });
+ test("a closed shadow host is an explicit placeholder with its reason, never its light children; other opaque nodes keep the generic label", () => {
+  const doc = new FakeDoc();
+  const nodes = [
+   {id: "1", parent: "0", tag: "div", class: "", text: ""},
+   {id: "2", parent: "1", tag: "masked", class: "masked", text: "[masked]"}, // the recorder's closed-shadow-root mark
+   {id: "3", parent: "2", tag: "p", class: "", text: "[masked]"}, // light child of the host: never shown
+   {id: "4", parent: "1", tag: "masked", class: "masked", text: ""}, // frame, widget or overflow: generic opaque
+   {id: "5", parent: "1", tag: "masked", class: "", text: "[masked]"}, // text: the plain mask
+  ];
+  const root = renderTree(doc as unknown as Document, nodes) as unknown as FakeEl;
+  const tree = root.find(el => el.attrs.has("data-tag"));
+  expect(tree.length).toBe(4);
+  expect(root.find(el => el.attrs.get("data-opaque") === "closed-shadow").map(el => el.textContent)).toEqual(["[opaque: closed shadow root not observable]"]);
+  expect(root.find(el => el.attrs.get("data-opaque") === "1").map(el => el.textContent)).toEqual(["[opaque]"]);
+  expect(root.find(el => el.attrs.has("data-masked") && !el.parent?.attrs.has("data-opaque")).map(el => el.textContent)).toEqual(["[masked]"]);
  });
  test("revocation stops reading, clears the DOM and every retained chunk, and later items are never applied", async () => {
   const {container} = mount();
