@@ -97,7 +97,7 @@ func (p *issueProducer) newMapHolds(_ context.Context, scopes ProducerScopes, le
 func (m *mapRetention) until(ctx context.Context, life *artifacts.Lifecycle) (model.UnixNano, error) {
 	now := model.UnixNano(life.Now().UnixNano())
 	var days uint32
-	err := m.app.Control.View(ctx, func(st model.ControlState) error {
+	err := m.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		days = retention.Resolve(st, m.org, &m.project, now).DaysFor(model.ErrorKind, false)
 		return nil
 	})

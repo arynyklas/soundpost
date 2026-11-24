@@ -12,6 +12,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -201,10 +202,21 @@ func (s *Store) RecordEvidenceGap(ctx context.Context, g model.EvidenceGap) (out
 	err = s.Update(ctx, func(st *State) (e error) { out, e = recordGap(st, g, GapDeclaredByWorker, st.Installation); return })
 	return
 }
+
+// evidenceGapMembers are the members EvidenceGaps reads.
+var evidenceGapMembers = memberSetOf("EvidenceGaps")
+
+// EvidenceGaps lists the declared gaps of an organization (of one project of it when project is set), by ID. It
+// reads the one member that holds them, from the shared decode, and returns copies.
 func (s *Store) EvidenceGaps(ctx context.Context, org, project model.ID) (out []model.EvidenceGap, err error) {
-	err = s.View(ctx, func(st State) error {
+	err = s.viewCoreOf(ctx, evidenceGapMembers, func(st State) error {
 		for _, g := range st.EvidenceGaps {
 			if g.Org == org && (project == (model.ID{}) || g.Project == project) {
+				g.Signals = slices.Clone(g.Signals)
+				if g.Actor != nil {
+					actor := *g.Actor
+					g.Actor = &actor
+				}
 				out = append(out, g)
 			}
 		}

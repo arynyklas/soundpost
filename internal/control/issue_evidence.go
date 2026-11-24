@@ -1030,8 +1030,8 @@ func (s *Store) CollectRetiredIssues(ctx context.Context, scope auth.Scope, proj
 		return nil, model.Fail(model.Invalid)
 	}
 	for range 8 {
-		var revision model.Revision
-		if err = s.View(ctx, func(st State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := s.Revision(ctx)
+		if err != nil {
 			return nil, err
 		}
 		res, err := s.Transact(ctx, scope, Command{CommandID: model.NewID(), ExpectedRevision: revision, Kind: string(KindApplyIssueEvidence), Payload: raw})

@@ -23,15 +23,23 @@ type trackedDB struct {
 	// viewGap, when set, runs once in the next View after the reader was counted and before bolt
 	// opened its transaction: tests hold a reader in the window the stat cannot see.
 	viewGap atomic.Pointer[func()]
-	// decodes counts the whole-state decodes of the state without the ledger (coreState), shared by
-	// ViewCore, ViewAdmission and ViewShared. Tests only.
+	// decodes counts the decodes of the state without the ledger (coreState, shared by ViewCore, ViewAdmission
+	// and ViewShared) that found nothing of the shared decode to reuse: the state decoded from scratch for the
+	// members its reader wanted. A decode of the members a commit changed is not one. Tests only.
 	decodes atomic.Uint64
-	// core is the decode of the state without the ledger of the newest transaction a core read has
-	// seen (coreState); coreAt is the newest transaction known to have changed the blob other than by
-	// stepping the revision. An entry is used by a reader whose transaction is not older than the
-	// entry and when no marked write is newer than it.
-	core   atomic.Pointer[coreEntry]
-	coreAt atomic.Int64
+	// memberDecodes counts the members of the state decoded by the shared reads (coreState): a decode of
+	// the whole state counts every member it decoded. blobDecodes counts every whole-blob decode of the
+	// control state made through readState, whoever asked (a reader's own State, a writer, the fallback
+	// of coreState). Tests only.
+	memberDecodes atomic.Uint64
+	blobDecodes   atomic.Uint64
+	// core is the shared decode of the state without the ledger, member by member (core_members.go). coreAt is
+	// the newest transaction known to have changed every member; memberAt[i] the newest known to have changed
+	// member i. A member of the entry serves a reader whose transaction is not older than its decode when no
+	// marked write is newer than that decode.
+	core     atomic.Pointer[coreEntry]
+	coreAt   atomic.Int64
+	memberAt [coreMax]atomic.Int64
 }
 
 // View counts the reader before bolt registers it and until its transaction ended.
@@ -69,39 +77,6 @@ func (d *trackedDB) syncFreelist() error {
 		tx.DB().NoFreelistSync = false
 		return nil
 	})
-}
-
-// markCoreChanged records, from inside the write transaction tx and before it commits, that the blob
-// under control/state changed in a way a decode of the older blob does not reflect (coreState). The
-// decode that is held is dropped with it: a state that was just rewritten (an erasure) is not kept in
-// memory until the next read replaces it.
-func markCoreChanged(tx *bolt.Tx) {
-	v, ok := trackedDBs.Load(tx.DB())
-	if !ok {
-		return
-	}
-	d := v.(*trackedDB)
-	id := int64(tx.ID())
-	for {
-		cur := d.coreAt.Load()
-		if id <= cur || d.coreAt.CompareAndSwap(cur, id) {
-			break
-		}
-	}
-	d.core.Store(nil)
-}
-
-// publishCore keeps e as the shared decode of the blob unless a newer one is already there.
-func (d *trackedDB) publishCore(e *coreEntry) {
-	for {
-		cur := d.core.Load()
-		if cur != nil && cur.txid >= e.txid {
-			return
-		}
-		if d.core.CompareAndSwap(cur, e) {
-			return
-		}
-	}
 }
 
 func unregisterTracked(d *trackedDB) {

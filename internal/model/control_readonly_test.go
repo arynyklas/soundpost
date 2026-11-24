@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -273,5 +274,68 @@ func TestActiveDeletionsReturnsPredicatesWithListsOfTheirOwn(t *testing.T) {
 	}
 	if fresh := roFixture(); !reflect.DeepEqual(st, fresh) {
 		t.Fatal("a write to a returned predicate reached the state")
+	}
+}
+
+// memberName is the name the state is encoded under for a field of ControlState.
+func memberName(f reflect.StructField) string {
+	if tag, ok := f.Tag.Lookup("json"); ok {
+		if name, _, _ := strings.Cut(tag, ","); name != "" && name != "-" {
+			return name
+		}
+	}
+	return f.Name
+}
+
+// A control store that decodes the members of the state one by one gives a shared reader the
+// members ReadOnlyControlMembers names and serves the books through a BookSource: every call answers
+// as it does against the whole state. A method that read another member would see an empty one and
+// answer wrongly (an empty deletion table is no deletion), so the lists are pinned to what the methods read.
+func TestReadOnlyControlReadsOnlyItsMembers(t *testing.T) {
+	keep := map[string]bool{}
+	for _, name := range model.ReadOnlyControlMembers() {
+		keep[name] = true
+	}
+	for _, name := range model.ReadOnlyBookMembers() {
+		keep[name] = true
+	}
+	full := roFixture()
+	var lean model.ControlState
+	fv, lv := reflect.ValueOf(&full).Elem(), reflect.ValueOf(&lean).Elem()
+	found := map[string]bool{}
+	for i := range fv.NumField() {
+		name := memberName(fv.Type().Field(i))
+		if keep[name] {
+			lv.Field(i).Set(fv.Field(i))
+			found[name] = true
+		}
+	}
+	lean.Revision = full.Revision // the store sets it from the commit, it is no member of the decode
+	for name := range keep {
+		if !found[name] {
+			t.Errorf("%s is listed as a member the read-only interface reads, and ControlState has none of that name", name)
+		}
+	}
+	fro, lro := model.ReadOnlyOf(&full), model.ReadOnlyOf(&lean)
+	for name, args := range roCalls() {
+		calls := [][]any{args}
+		if name == "BookKeys" || name == "BookRecord" {
+			calls = nil
+			for _, book := range model.ReadOnlyBookMembers() {
+				if name == "BookKeys" {
+					calls = append(calls, []any{model.Book(book), ""})
+				} else {
+					calls = append(calls, []any{model.Book(book), "book"})
+				}
+			}
+		}
+		for _, args := range calls {
+			want, got := call(t, fro, name, args), call(t, lro, name, args)
+			for j := range want {
+				if !reflect.DeepEqual(want[j].Interface(), got[j].Interface()) {
+					t.Errorf("%s%v result %d: %v from the whole state, %v from the members the interface is said to read", name, args, j, want[j], got[j])
+				}
+			}
+		}
 	}
 }

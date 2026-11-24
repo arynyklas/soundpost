@@ -449,7 +449,7 @@ func (w *Workers) orgs(ctx context.Context) ([]model.ID, error) {
 		return w.cfg.Orgs, nil
 	}
 	var out []model.ID
-	err := w.app.Control.View(ctx, func(st model.ControlState) error {
+	err := w.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		for key := range st.Orgs {
 			if _, retired := st.RetiredOrgs[key]; retired {
 				continue
@@ -486,7 +486,7 @@ func (w *Workers) serveOrg(ctx context.Context, org model.ID, lease replica.Fenc
 // consecutive passes.
 func (w *Workers) projects(ctx context.Context, org model.ID) ([]model.ID, error) {
 	var all []model.ID
-	err := w.app.Control.View(ctx, func(st model.ControlState) error {
+	err := w.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		o, ok := st.Orgs[org.String()]
 		if !ok {
 			return model.Fail(model.NotFound)

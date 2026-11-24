@@ -119,7 +119,7 @@ func (p *profileMapProducer) Produce(ctx context.Context, scopes ProducerScopes,
 	key := profileProjectKey{org, project}
 	now := model.UnixNano(life.Now().UnixNano()) // the clock every deadline in the ledger is on
 	var days uint32
-	if err = p.app.Control.View(ctx, func(st model.ControlState) error {
+	if err = p.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		days = retention.Resolve(st, org, &project, now).DaysFor(model.Profile, false)
 		return nil
 	}); err != nil || days == 0 {

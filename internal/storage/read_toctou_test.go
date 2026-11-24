@@ -54,11 +54,15 @@ func (v *toctouView) ActiveDeletions(_ context.Context, org model.ID, _ []model.
 	return out, nil
 }
 
-// pageFetchCalls is the number of DeletionView calls a Next makes up to and
-// including the per-partition predicate fetch of a scan (entry authorize, loop
-// authorize, readDeletions) and of a live Next with a queued event (first
-// iteration authorize, second iteration authorize, readDeletions).
+// pageFetchCalls is the number of DeletionView calls a live Next with a queued event makes up to and
+// including its per-page predicate fetch (first iteration authorize, second iteration authorize,
+// readDeletions).
 const pageFetchCalls = 3
+
+// scanFetchCalls is the same for a scan's Next: the authority read that starts a chunk ends in the
+// deletion read the chunk filters with, so the fetch is one call (a Next that builds a chunk has no
+// entry authorize before it, and no separate readDeletions after it).
+const scanFetchCalls = 1
 
 type toctouEnv struct {
 	engine *Engine
@@ -228,7 +232,7 @@ func drainScan(t *testing.T, env *toctouEnv, req ScanRequest, next ...model.Dele
 		t.Fatal(err)
 	}
 	defer it.Close()
-	env.view.arm(pageFetchCalls, next...)
+	env.view.arm(scanFetchCalls, next...)
 	var got []model.ID
 	for {
 		page, err := it.Next(context.Background())

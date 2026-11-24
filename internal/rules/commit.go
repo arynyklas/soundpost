@@ -48,10 +48,7 @@ func transact(ctx context.Context, ctl Control, scope auth.Scope, id model.ID, c
 	if err != nil {
 		return control.Result{}, model.Fail(model.Invalid)
 	}
-	readRevision := func() (revision model.Revision, err error) {
-		err = ctl.View(ctx, func(st control.State) error { revision = st.Revision; return nil })
-		return revision, err
-	}
+	readRevision := func() (model.Revision, error) { return control.RevisionOf(ctx, ctl) }
 	for range maxRevisionRetries {
 		revision, err := readRevision()
 		if err != nil {

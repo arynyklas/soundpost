@@ -5,6 +5,7 @@ package retention
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -103,7 +104,7 @@ func (s *Service) Delete(ctx context.Context, scope auth.Scope, req DeleteReques
 // PollDelete is C11 PollDelete. A scope for another organization (or an
 // operation that does not exist) is NotFound.
 func (s *Service) PollDelete(ctx context.Context, scope auth.Scope, operation model.ID) (DeleteReceipt, error) {
-	if err := s.cfg.Control.View(ctx, func(st control.State) error {
+	if err := s.cfg.Control.ViewCore(ctx, func(st control.State) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
 		}
@@ -119,8 +120,8 @@ func (s *Service) PollDelete(ctx context.Context, scope auth.Scope, operation mo
 
 // Resume explicitly starts a held deletion once its holds are released.
 func (s *Service) Resume(ctx context.Context, scope auth.Scope, operation model.ID) (DeleteReceipt, error) {
-	var revision model.Revision
-	if err := s.cfg.Control.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
+	revision, err := s.cfg.Control.Revision(ctx)
+	if err != nil {
 		return DeleteReceipt{}, err
 	}
 	payload, _ := json.Marshal(control.BeginFence{Operation: operation, At: s.now()})
@@ -131,7 +132,7 @@ func (s *Service) Resume(ctx context.Context, scope auth.Scope, operation model.
 }
 
 func (s *Service) receipt(ctx context.Context, org, id model.ID) (out DeleteReceipt, err error) {
-	err = s.cfg.Control.View(ctx, func(st control.State) error {
+	err = s.cfg.Control.ViewCore(ctx, func(st control.State) error {
 		op, ok := st.Deletions[id.String()]
 		if !ok || op.Predicate.Org != org {
 			return model.Fail(model.NotFound)
@@ -152,7 +153,7 @@ func (s *Service) receipt(ctx context.Context, org, id model.ID) (out DeleteRece
 	return
 }
 func receiptOf(st control.State, op model.DeletionOperation) DeleteReceipt {
-	r := DeleteReceipt{OperationID: op.Predicate.Operation, Mode: op.Predicate.Mode, Phase: op.Phase, Generation: uint64(op.Predicate.Generation), Revision: st.Revision, Progress: strconv.Itoa(len(op.Barriers)) + "/" + strconv.Itoa(model.DeleteSlots), PhysicalDeadline: op.PhysicalDeadline, BackupDeadline: op.BackupDeadline, Holds: op.Holds, SafeReason: op.SafeReason, OverErased: append([]model.OverErased(nil), op.OverErased...), Physical: PhysicalPending}
+	r := DeleteReceipt{OperationID: op.Predicate.Operation, Mode: op.Predicate.Mode, Phase: op.Phase, Generation: uint64(op.Predicate.Generation), Revision: st.Revision, Progress: strconv.Itoa(len(op.Barriers)) + "/" + strconv.Itoa(model.DeleteSlots), PhysicalDeadline: op.PhysicalDeadline, BackupDeadline: op.BackupDeadline, Holds: slices.Clone(op.Holds), SafeReason: op.SafeReason, OverErased: append([]model.OverErased(nil), op.OverErased...), Physical: PhysicalPending}
 	if op.PhysicalAt != 0 {
 		r.Physical = PhysicalDone
 	} else if op.Phase != model.DeletePhaseHeld {
@@ -180,7 +181,7 @@ func (s *Service) DeleteGeneration(ctx context.Context, org model.ID, projects [
 	if _, ok := s.cfg.Base.(auth.StateDeleteGenerations); ok {
 		var out uint64
 		derived := false
-		err := s.cfg.Control.View(ctx, func(st control.State) (err error) {
+		err := s.cfg.Control.ViewCore(ctx, func(st control.State) (err error) {
 			out, derived, err = s.DeleteGenerationFromState(st, org, projects)
 			return err
 		})

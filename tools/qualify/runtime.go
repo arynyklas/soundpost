@@ -78,6 +78,7 @@ var runners = map[string]runner{
 	"sdk_critical_path":           runSDKCriticalPath,
 	"overhead_native":             runOverheadNative,
 	"overhead_single_host":        runOverheadSingleHost,
+	"overhead_queries":            runOverheadQueries,
 }
 
 // subject is what the row claims to qualify, taken from its build or inline.

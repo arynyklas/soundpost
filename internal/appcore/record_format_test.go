@@ -3,12 +3,14 @@
 package appcore_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/incidents"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 func (n *workerNode) formatMarker() uint8 {
@@ -65,5 +67,50 @@ func TestRecordFormatMarkerIsRaisedByTheWriteAndRepairedByTheProducer(t *testing
 	n.recordFormatPass()
 	if m := n.formatMarker(); m != model.FormatMarkerRecords {
 		t.Fatalf("the repair did not raise the marker: %d", m)
+	}
+}
+
+// leaseTap is a producer that keeps the lease and the scopes of the pass it ran in, so a test can run another producer directly.
+type leaseTap struct {
+	lease  replica.FenceToken
+	scopes appcore.ProducerScopes
+	seen   bool
+}
+
+func (p *leaseTap) Produce(_ context.Context, scopes appcore.ProducerScopes, lease replica.FenceToken) (int, error) {
+	p.lease, p.scopes, p.seen = lease, scopes, true
+	return 0, nil
+}
+
+// The scan of the record-format repair reads the incident and issue books for a D92 record. It does so through the decode of the control state that
+// every shared reader uses, never a decode of the whole blob of its own: it runs on every node that has not yet found the marker up.
+func TestRecordFormatScanDoesNotDecodeTheControlBlob(t *testing.T) {
+	n := newWorkerNode(t)
+	n.openIncident() // an incident without a D92 record: the scan opens the incident book and finds nothing
+	tap := &leaseTap{}
+	w, err := n.app.NewWorkers(n.config(func(c *appcore.WorkerConfig) { c.Producers = []appcore.Producer{tap} }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.tick(w)
+	if !tap.seen {
+		t.Fatal("the pass did not reach a producer")
+	}
+	scan := func() {
+		t.Helper()
+		if _, err := n.app.RecordFormatProducer().Produce(n.ctx, tap.scopes, tap.lease); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan() // what the first scan decodes is shared by the rest
+	before := n.app.Control.DecodeStats()
+	for range 10 {
+		scan()
+	}
+	if got := n.app.Control.DecodeStats().Blobs - before.Blobs; got != 0 {
+		t.Fatalf("10 scans decoded the whole blob %d times, want never", got)
+	}
+	if m := n.formatMarker(); m != model.FormatMarkerBase {
+		t.Fatalf("a state with no D92 record got the marker: %d", m)
 	}
 }

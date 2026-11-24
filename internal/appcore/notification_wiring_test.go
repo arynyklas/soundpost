@@ -276,6 +276,28 @@ func TestOrgRoutingFollowsTheOrganizationsEnabledDestinations(t *testing.T) {
 	}
 }
 
+// Routing is read for every project on every pass of the workers: it reads the shared decode of the control
+// state, never a decode of the whole blob of its own.
+func TestRoutingReadsDoNotDecodeTheControlBlob(t *testing.T) {
+	n := newWorkerNode(t)
+	n.webhookDestination("https://hooks.example.test/live", "destination signing secret 0123456789", true)
+	routing, scope := n.app.OrgRouting(), n.admin()
+	read := func() {
+		t.Helper()
+		if _, found, err := routing.Routing(n.ctx, scope, n.project); err != nil || !found {
+			t.Fatalf("routing: found=%t err=%v", found, err)
+		}
+	}
+	read() // what the first read decodes is shared by the rest
+	before := n.app.Control.DecodeStats()
+	for range 10 {
+		read()
+	}
+	if got := n.app.Control.DecodeStats().Blobs - before.Blobs; got != 0 {
+		t.Fatalf("10 reads of the routing decoded the whole blob %d times, want never", got)
+	}
+}
+
 func (n *workerNode) setDestinationEnabled(id model.ID, enabled bool) {
 	n.t.Helper()
 	raw, _ := json.Marshal(auth.DestinationConfig{Type: "webhook", Endpoint: "https://hooks.example.test/notify", Enabled: enabled})

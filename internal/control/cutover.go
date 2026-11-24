@@ -799,7 +799,7 @@ func (s *Store) TransactCutover(ctx context.Context, scope auth.Scope, id model.
 	}
 	for range 16 {
 		var revision model.Revision
-		if err = s.View(ctx, func(st State) error { revision = st.Revision; return nil }); err != nil {
+		if revision, err = s.Revision(ctx); err != nil {
 			return CutoverRecord{}, err
 		}
 		_, err = s.Transact(ctx, scope, Command{CommandID: id, ExpectedRevision: revision, Kind: string(KindClaimDelivery), Payload: raw})

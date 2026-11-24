@@ -401,6 +401,20 @@ func loadPolicy(st *State, key string) (PolicyRecord, bool, error) {
 	return r, true, nil
 }
 
+// loadPolicyRO is loadPolicy against a read-only control state; the record is decoded from a copy of the
+// stored bytes.
+func loadPolicyRO(ro model.ReadOnlyControl, key string) (PolicyRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookDeliveries, key)
+	if !ok {
+		return PolicyRecord{}, false, nil
+	}
+	var r PolicyRecord
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return PolicyRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return r, true, nil
+}
+
 // projectDeliveries decodes every delivery of one project, in (eligible, ID)
 // order.
 func projectDeliveries(st *State, org, project model.ID) ([]DeliveryRecord, error) {
@@ -1195,12 +1209,12 @@ func (s *Store) Deliveries(ctx context.Context, scope auth.Scope, project model.
 
 // PolicyRecord reads one subject's committed policy state.
 func (s *Store) PolicyRecord(ctx context.Context, scope auth.Scope, project, policy model.ID, subject string) (out PolicyRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadPolicy(&st, policyKey(scope.OrgID(), project, policy, subject))
+		out, found, e = loadPolicyRO(st, policyKey(scope.OrgID(), project, policy, subject))
 		return e
 	})
 	return

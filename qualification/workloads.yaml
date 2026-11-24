@@ -32,6 +32,14 @@ budgets:
     {limit: 12884901888, unit: bytes, source: "design 13 Single-host: steady RSS <12 GiB"}
   single_host_missing_acked_records:
     {limit: 0, unit: records, source: "design 13 Single-host: no loss of ACKed records across process restart"}
+  queries_interactive_p95_ms:
+    {limit: 2000, unit: ms, source: "design 13 Queries: p95 interactive <2 s (24-hour representative scans, 1 GiB encoded input per signal, concurrent ingest, 10 active interactive queries, 100 rules/minute)"}
+  queries_false_healthy_answers:
+    {limit: 0, unit: count, source: "design 13 Queries: no false healthy state (no complete answer, rule evaluation or recovery notification over a lost shard)"}
+  queries_overlimit_unexplained:
+    {limit: 0, unit: count, source: "design 13 Queries: explicit resource error on limit (over-limit probes not answered by an explicit resource error)"}
+  queries_golden_mismatches:
+    {limit: 0, unit: count, source: "design 13 Queries: representative scans return the same answer for the same query (golden answers over immutable data)"}
 
 # Server SDK overhead: committed harness fixtures/sdk/overhead.mjs (03.09, measurement per D54): an open-loop load process at 1000 req/s
 # against a deterministic node:http handler. Every run is a fresh server process: a fixed warm-up (discarded for both arms) and then a

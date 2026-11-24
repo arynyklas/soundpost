@@ -236,6 +236,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, scope auth.Scope, rule Rule, a
 		// an absent series.
 		AllowPartial: false,
 	})
+	gateQueried(rule, at, result, qerr)
 	switch {
 	case qerr != nil:
 		if ctx.Err() != nil {

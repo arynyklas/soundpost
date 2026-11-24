@@ -100,6 +100,7 @@ type Engine struct {
 	scans            map[*rowIterator]struct{}
 	subscribers      map[*changeIterator]struct{}
 	storageStats     StorageStats
+	scanPages        scanPageCache // decoded pages shared by the scans (read.go); its own lock
 	snap             snapshotState
 	pressure         pressureState
 	journal          journalHolds // held lifecycle evidence journals (journal_hold.go)
@@ -119,6 +120,10 @@ type Engine struct {
 	// duringReleaseFence is a test seam: called while a live subscription's release fence runs (e.mu is not
 	// held), so a test can commit exactly while a page is being certified. Nil in production.
 	duringReleaseFence func()
+	// afterApplyPublished is a test seam: called by a slot machine's Apply once it has published a commit
+	// to the live subscribers and given e.mu up, before it returns to its group (which records the
+	// command as applied only then), so a test can hold the group exactly there. Nil in production.
+	afterApplyPublished func()
 	// replayYield is a test seam: called each time a replay's scan of irrelevant commits gives up e.mu (it is
 	// not held while the hook runs), so a test can see the scan is bounded. Nil in production.
 	replayYield func()
@@ -394,9 +399,16 @@ func (e *Engine) trip(at string) error {
 	return nil
 }
 
+// groupDerivedHook is a test seam: called each time a group identifier is derived (a SHA-256), so a
+// test can prove a hot path reads the table the replicated engine keeps instead. Nil in production.
+var groupDerivedHook atomic.Pointer[func()]
+
 // groupOf names the replica group of slot under an identity: the first 16 bytes of
 // SHA-256(identity || slot). It reads no engine state.
 func groupOf(identity model.ID, slot uint16) model.ID {
+	if h := groupDerivedHook.Load(); h != nil {
+		(*h)()
+	}
 	var in [18]byte
 	copy(in[:16], identity[:])
 	binary.BigEndian.PutUint16(in[16:], slot)

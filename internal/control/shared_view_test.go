@@ -30,30 +30,46 @@ func TestViewSharedDecodesOncePerCommittedRevision(t *testing.T) {
 		}
 		return uint64(rev)
 	}
-	before := f.store.SharedDecodesForTest()
+	// A restart: nothing is held. The first read decodes the members the read-only interface reads, never the
+	// whole state (its books are decoded when a reader opens one), and the 50 after it decode nothing.
+	f.store.DropSharedDecodeForTest()
+	before, members := f.store.SharedDecodesForTest(), f.store.SharedMemberDecodesForTest()
 	first := read()
 	for range 50 {
 		if got := read(); got != first {
 			t.Fatalf("revision moved from %d to %d without a commit", first, got)
 		}
 	}
-	if got := f.store.SharedDecodesForTest() - before; got != 1 {
-		t.Fatalf("51 shared reads of one revision decoded the state %d times, want 1", got)
+	if got := f.store.SharedMemberDecodesForTest() - members; got != uint64(len(model.ReadOnlyControlMembers())) {
+		t.Fatalf("51 shared reads of one revision decoded %d members, want the %d the read-only interface reads", got, len(model.ReadOnlyControlMembers()))
+	}
+	if got := f.store.SharedDecodesForTest() - before; got != 0 {
+		t.Fatalf("51 shared reads of one revision decoded the whole state %d times, want never", got)
 	}
 	// A read that mutates gets a decode of its own and leaves the shared one alone.
 	if err := f.store.View(f.ctx, func(st control.State) error { st.Users = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	read()
-	if got := f.store.SharedDecodesForTest() - before; got != 1 {
+	if got := f.store.SharedDecodesForTest() - before; got != 0 {
 		t.Fatalf("View changed the shared decode count to %d", got)
 	}
+	if got := f.store.SharedMemberDecodesForTest() - members; got != uint64(len(model.ReadOnlyControlMembers())) {
+		t.Fatalf("View changed the number of members decoded to %d", got)
+	}
 
-	if err := f.store.Update(f.ctx, func(st *control.State) error { return nil }); err != nil {
+	// A commit that changes members decodes those members again, and only those (the user table and the
+	// authority revision, which an Update moves), once for every reader after it; what the commit replaced is
+	// not kept in memory until then.
+	members = f.store.SharedMemberDecodesForTest()
+	if err := f.store.Update(f.ctx, func(st *control.State) error {
+		st.Users["shared-view-test"] = control.User{ID: model.ID{7}, Email: "shared-view@example.test"}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if f.store.SharedDecodeHeldForTest() {
-		t.Fatal("the decode of the revision that was just replaced is still held after the commit")
+	if f.store.SharedMemberHeldForTest("Users") || f.store.SharedMemberHeldForTest("authority_revision") {
+		t.Fatal("the decode of a member that was just replaced is still held after the commit")
 	}
 	if second := read(); second <= first {
 		t.Fatalf("a read after a commit sees revision %d, want more than %d", second, first)
@@ -61,8 +77,11 @@ func TestViewSharedDecodesOncePerCommittedRevision(t *testing.T) {
 	for range 10 {
 		read()
 	}
-	if got := f.store.SharedDecodesForTest() - before; got != 2 {
-		t.Fatalf("after one commit the state was decoded %d times, want 2", got)
+	if got := f.store.SharedDecodesForTest() - before; got != 0 {
+		t.Fatalf("after one commit the whole state was decoded %d times, want only the members it changed", got)
+	}
+	if got := f.store.SharedMemberDecodesForTest() - members; got != 2 {
+		t.Fatalf("after one commit that changed the users and the authority revision, %d members were decoded, want 2", got)
 	}
 }
 

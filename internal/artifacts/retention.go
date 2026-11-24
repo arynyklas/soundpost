@@ -73,7 +73,7 @@ func (l *Lifecycle) LatestReference(ctx context.Context, c storage.EraseCandidat
 	now := model.UnixNano(l.cfg.Now().UnixNano())
 	var latest model.UnixNano
 	var covered, retired, present bool
-	err := l.cfg.State.View(ctx, func(st model.ControlState) error {
+	err := l.view(ctx, false, model.ID{}, model.ID{}, func(st model.ControlState) error {
 		if covered = deletionCovers(st, m); covered {
 			return nil
 		}
@@ -143,7 +143,7 @@ func (l *Lifecycle) EffectiveRetention(ctx context.Context, scope auth.Scope, id
 		return 0, err
 	}
 	var out model.UnixNano
-	err = l.cfg.State.View(ctx, func(st model.ControlState) error {
+	err = l.view(ctx, false, model.ID{}, model.ID{}, func(st model.ControlState) error {
 		until, retired, e := refledger.EffectiveRetention(st, artifact.Map.Manifest)
 		if e != nil {
 			return e

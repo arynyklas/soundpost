@@ -242,6 +242,61 @@ func (s *Store) head() (installation model.ID, revision model.Revision, err erro
 	return
 }
 
+// Revision is the committed revision of the control state, read linearizably (the read barrier of View) and without
+// decoding the state: a caller that needs the revision to name it in a command (ExpectedRevision) needs no more.
+func (s *Store) Revision(ctx context.Context) (model.Revision, error) {
+	if e := ctx.Err(); e != nil {
+		return 0, e
+	}
+	if s.repl != nil {
+		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
+			return 0, replicaFaultUnder(ctx, err)
+		}
+	}
+	var revision model.Revision
+	err := s.db.View(func(tx *bolt.Tx) error {
+		ctrl := tx.Bucket([]byte("control"))
+		if ctrl == nil {
+			return model.Fail(model.Corrupt)
+		}
+		_, r, err := stateHead(ctrl)
+		revision = r
+		return err
+	})
+	return revision, err
+}
+
+// DecodeStats is how many times the control state was decoded since the store opened.
+type DecodeStats struct {
+	// Whole is the decodes of every member of the state for a shared reader (ViewShared, ViewCore and the
+	// admission rounds read the decode every reader shares): a restart, or a commit that changed every member.
+	Whole uint64
+	// Members is the members of the state decoded for those readers: the ones a commit changed, the ones a
+	// reader asked for that nobody had decoded (a book a shared reader opens), and all of them for a whole decode.
+	Members uint64
+	// Blobs is every decode of the whole blob made through readState, whoever asked: a reader of its own State
+	// (View), a writer, the fallback of the shared decode. A reader of the shared decode makes none.
+	Blobs uint64
+}
+
+// DecodeStats reports the decode counters of the store: what a steady load costs in decodes of the state.
+func (s *Store) DecodeStats() DecodeStats {
+	return DecodeStats{Whole: s.db.decodes.Load(), Members: s.db.memberDecodes.Load(), Blobs: s.db.blobDecodes.Load()}
+}
+
+// RevisionOf is the committed revision of c, a control store or a stand-in for one (a test double that counts or
+// fails reads): a *Store gives it without decoding the state (Store.Revision), any other type through its own View.
+func RevisionOf(ctx context.Context, c interface {
+	View(context.Context, func(State) error) error
+}) (model.Revision, error) {
+	if s, ok := c.(*Store); ok {
+		return s.Revision(ctx)
+	}
+	var revision model.Revision
+	err := c.View(ctx, func(st State) error { revision = st.Revision; return nil })
+	return revision, err
+}
+
 // Installation is the identity of the installation this file belongs to. It reads the committed file
 // directly, without the read barrier of the replication group, so that it can be asked before the group
 // is opened.
@@ -325,13 +380,14 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 // decode of the committed state that every concurrent shared reader uses, through the read-only
 // interface (model.ReadOnlyControl), which has no way to change it or to keep part of it: decoding
 // the whole state once per read made a pass of the background workers cost O(projects squared). The
-// decode is the one coreState keeps: it is made again only when a commit changed the blob other than
-// by stepping the revision (an admission round does not), so a reader on the append path of the data
-// engine (ActiveDeletions, once per batch) does not decode 1.8 MB for every control commit that went
-// before it. The linearizable read barrier is the same as View's, and so is the snapshot: the state
-// is the one of the bolt transaction the read runs in, so a reader sees one whole revision, never a
-// mix. The admission ledger is not part of it. fn must not retain the ReadOnlyControl past its
-// return. A caller that changes what it reads, or needs the State itself, uses View.
+// decode is the one coreMembers keeps, member by member: a commit makes the next reader decode the members it
+// changed that the read-only interface reads (the organizations, the sessions, the deletions), and the books
+// (the rule books, the outbox, the incident and condition books) only when a reader asks for the book, so a
+// reader on the append path of the data engine (ActiveDeletions, once per page chunk of a query) decodes
+// nothing for the rule commits and outbox writes that went before it. The linearizable read barrier is the
+// same as View's, and so is the snapshot: the state is the one of the bolt transaction the read runs in, so a
+// reader sees one whole revision, never a mix. The admission ledger is not part of it. fn must not retain the
+// ReadOnlyControl past its return. A caller that changes what it reads, or needs the State itself, uses View.
 func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
@@ -342,18 +398,22 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
-		st, err := s.coreState(tx)
+		st, err := s.coreMembers(tx, readOnlyMembers)
 		if err != nil {
 			return err
 		}
+		books := &sharedBooks{s: s, tx: tx}
 		if ledgerLayout(tx.Bucket([]byte("control"))) {
 			l, err := openLedger(tx)
 			if err != nil {
 				return err
 			}
-			return fn(model.ReadOnlyOfWith(st, ledgerBookSource{l}))
+			books.ledger = ledgerBookSource{l}
 		}
-		return fn(model.ReadOnlyOf(st))
+		if err = fn(model.ReadOnlyOfWith(st, books)); err != nil {
+			return err
+		}
+		return books.err
 	})
 }
 

@@ -66,7 +66,7 @@ func (a *App) NewIssueActions(clock issues.Clock) (*issues.Service, error) {
 // writes of an issue owner and external links wait for it, because the previous release cannot read them.
 func (a *App) orgContracted(ctx context.Context, org model.ID) (bool, error) {
 	contracted := false
-	err := a.Control.View(ctx, func(st model.ControlState) error {
+	err := a.Control.ViewCore(ctx, func(st model.ControlState) error {
 		contracted = st.Orgs[org.String()].IndexesContracted()
 		return nil
 	})
@@ -104,7 +104,7 @@ func (g humanReleaseGraphs) Graph(ctx context.Context, scope auth.Scope, project
 		return nil, err
 	}
 	out := releases.Graph{}
-	err := g.app.Control.View(ctx, func(st model.ControlState) error {
+	err := g.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
 		}

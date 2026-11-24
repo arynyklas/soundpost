@@ -211,7 +211,9 @@ rows:
   # result directory comes from SOUNDPOST_SINGLE_HOST_RESULT or a `result` param). Only a full-parameter result is exercised; anything reduced is not_exercised.
   - {id: overhead.single_host.gate, suite: overhead, required: true, runner: overhead_single_host, subject: {family: soundpost-single-host, version: "design-13", os: any, arch: any}, params: {orgs: "10", projects: "100", series: "100000", rate: "2000", duration: "3600", seed: "20261113"}}
   - {id: overhead.distributed.gate, suite: overhead, required: true, runner: unmeasured, subject: {family: soundpost-distributed, version: "design-13", os: any, arch: any}, params: {reason: "three independent 8 vCPU/16 GiB SSD nodes, 5k records/s for 1 hour with a killed storage leader: no three independent failure domains exist here"}}
-  - {id: overhead.queries.gate, suite: overhead, required: true, runner: unmeasured, subject: {family: soundpost-queries, version: "design-13", os: any, arch: any}, params: {reason: "24-hour representative scans over a fixed 1 GiB encoded input per signal with concurrent ingest: the 07.05 campaign verifies language semantics, not the p95 interactive budget"}}
+  # Design 13 Queries gate: validated from the result of a real 24-hour run of fixtures/overhead/queries (server, ingest and query roles on three hosts; the result
+  # directory comes from SOUNDPOST_QUERIES_RESULT or a `result` param). Only a full-parameter result is exercised; anything reduced is not_exercised.
+  - {id: overhead.queries.gate, suite: overhead, required: true, runner: overhead_queries, subject: {family: soundpost-queries, version: "design-13", os: any, arch: any}, params: {input_bytes: "1073741824", duration: "86400", interactive: "10", rules_per_minute: "100", ingest_rate: "100", seed: "20261124"}}
 
 # Native kernel/architecture matrix: one REQUIRED row per series x architecture x capability. A row is exercised only by a genuine
 # Linux runner of that exact series and architecture (WSL2 does not qualify; it is recorded as the wsl2-linux-kernel functional rows above).

@@ -140,7 +140,13 @@ func hashStripped(stripped []byte) (string, error) {
 
 // readState decodes the committed state of the control bucket (the ledger members are not part of it).
 func readState(ctrl *bolt.Bucket, st *State) error {
-	if ctrl == nil || json.Unmarshal(ctrl.Get(stateKey), st) != nil {
+	if ctrl == nil {
+		return model.Fail(model.Corrupt)
+	}
+	if v, ok := trackedDBs.Load(ctrl.Tx().DB()); ok {
+		v.(*trackedDB).blobDecodes.Add(1)
+	}
+	if json.Unmarshal(ctrl.Get(stateKey), st) != nil {
 		return model.Fail(model.Corrupt)
 	}
 	if !ledgerLayout(ctrl) {
@@ -189,37 +195,30 @@ func stateHead(ctrl *bolt.Bucket) (installation model.ID, revision model.Revisio
 // memberJobBooks is the member of the state that holds the job books.
 const memberJobBooks = "JobBooks"
 
-// onlyJobBooksDiffer reports whether the members of the committed blob old and the members of the
-// blob about to replace it are the same but for the job books. A job update (the worker's ~35 a
-// second at the single-host gate) writes nothing else, and no core reader reads the job books
-// (coreState gives them empty; JobBook reads its record from the blob): the shared decode of the state
-// stays the decode, instead of every admission after the update decoding the blob again (32 % of
-// the server's CPU, L2w20Admission7/r5). Anything the comparison cannot establish is a change.
-func onlyJobBooksDiffer(old []byte, members map[string]json.RawMessage) bool {
+// changedMembers names the members of the blob about to replace the committed blob old that are not what old
+// holds: added, removed or encoded otherwise. A job update (the worker's ~35 a second at the single-host gate)
+// changes the job books and nothing else, a rule commit the rule books and the outbox, and a core reader
+// decodes again only what a write changed (coreMembers). Anything the comparison cannot establish is a change of
+// every member: all.
+func changedMembers(old []byte, members map[string]json.RawMessage) (names []string, all bool) {
 	if old == nil {
-		return false
+		return nil, true
 	}
 	oldMembers, err := decodeMembers(old)
 	if err != nil {
-		return false
+		return nil, true
 	}
-	other := 0
 	for name, v := range members {
-		if name == memberJobBooks {
-			continue
+		if o, ok := oldMembers[name]; !ok || !bytes.Equal(o, v) {
+			names = append(names, name)
 		}
-		o, ok := oldMembers[name]
-		if !ok || !bytes.Equal(o, v) {
-			return false
-		}
-		other++
 	}
 	for name := range oldMembers {
-		if name != memberJobBooks {
-			other--
+		if _, ok := members[name]; !ok {
+			names = append(names, name)
 		}
 	}
-	return other == 0
+	return names, false
 }
 
 // putStateLayout writes the encoding raw of a whole state into a layout 2 file: the blob without the
@@ -234,8 +233,10 @@ func putStateLayout(ctrl *bolt.Bucket, raw []byte) error {
 		return err
 	}
 	digest := hashMembers(members)
-	if !onlyJobBooksDiffer(ctrl.Get(stateKey), members) {
+	if names, all := changedMembers(ctrl.Get(stateKey), members); all {
 		markCoreChanged(ctrl.Tx())
+	} else {
+		markMembersChanged(ctrl.Tx(), names)
 	}
 	if err = ctrl.Put(stateKey, stripped); err != nil {
 		return err
@@ -286,11 +287,13 @@ func stripBlob(ctrl *bolt.Bucket) error {
 	if raw == nil {
 		return model.Fail(model.Corrupt)
 	}
+	markCoreChanged(ctrl.Tx())
 	return putStateLayout(ctrl, bytes.Clone(raw))
 }
 
 // dropLayoutKeys removes the keys of layout 2 (the file goes back to a blob that holds everything).
 func dropLayoutKeys(ctrl *bolt.Bucket) error {
+	markCoreChanged(ctrl.Tx())
 	for _, key := range [][]byte{stateRevKey, stateClockKey, stateInstKey, stateDigestKey} {
 		if err := ctrl.Delete(key); err != nil {
 			return err

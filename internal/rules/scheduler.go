@@ -148,6 +148,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, readScope, commitScope auth.Sco
 // committed first, or the state moved) is resolved by evaluating again, which
 // returns whatever was committed first, verbatim.
 func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Scope, rule Rule, at model.UnixNano, lease replica.FenceToken) error {
+	begun := gateBegin()
 	var last error
 	for range maxCommitAttempts {
 		ev, err := s.evaluator.Evaluate(ctx, readScope, rule, at, lease)
@@ -155,6 +156,7 @@ func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Sc
 			return err
 		}
 		if _, last = s.committer.Commit(ctx, commitScope, ev, lease); last == nil {
+			gateCommitted(ev, begun)
 			return nil
 		}
 		var fault *model.Fault

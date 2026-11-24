@@ -41,6 +41,10 @@ func (s *Store) registerDiag(group *replica.Group, directory string) {
 			"sparse_commits":        s.sparseCommits.Load(),
 			"sparse_locked_decodes": s.sparseLockedDecodes.Load(),
 			"settle_scan_rows":      s.settleScanRows.Load(),
+			// The decodes of the control state (DecodeStats).
+			"state_decodes":        s.DecodeStats().Whole,
+			"state_member_decodes": s.DecodeStats().Members,
+			"state_blob_decodes":   s.DecodeStats().Blobs,
 		}
 	})
 }

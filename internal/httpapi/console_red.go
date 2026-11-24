@@ -131,9 +131,9 @@ func NewServiceRED(scanner SpanScanner) *ServiceRED { return &ServiceRED{scanner
 //
 //	POST /api/v1/services/red  ServiceREDBody -> ServiceREDView
 func RegisterServiceREDRoute(mux *http.ServeMux, authority *auth.Service, r *ServiceRED) {
-	listRoute(mux, authority, "/api/v1/services/red", func(ctx context.Context, c auth.Credential, b ServiceREDBody) (any, []auth.Scope, error) {
+	mux.HandleFunc("POST /api/v1/services/red", gateScanRoute("service_red", listHandler(authority, func(ctx context.Context, c auth.Credential, b ServiceREDBody) (any, []auth.Scope, error) {
 		return r.View(ctx, authority, c, b)
-	})
+	})))
 }
 
 func validREDBody(b ServiceREDBody) error {
@@ -313,7 +313,7 @@ func (r *ServiceRED) scan(ctx context.Context, scope auth.Scope, projects []mode
 	if body.Environment != nil {
 		selectors = append(selectors, storage.Matcher{Target: storage.MatchField, Name: "environment_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: body.Environment.String()}})
 	}
-	rows, err := r.scanner.Scan(ctx, scope, storage.ScanRequest{
+	rows, err := gateScanner(ctx, r.scanner).Scan(ctx, scope, storage.ScanRequest{
 		Projects: projects, Signal: model.SpanKind, Start: body.Window.Start, End: body.Window.End, Selectors: selectors,
 		Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldSpan},
 		Fence:      storage.ReadFence{AllowPartial: true},

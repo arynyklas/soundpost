@@ -649,6 +649,7 @@ func (e *Engine) deleteBatchIndex(tx *bolt.Tx, b model.NormalizedBatch, receipt 
 		} else if !found {
 			return 0, model.Fail(model.Corrupt)
 		}
+		e.scanPages.drop(id)
 	}
 	return uint64(len(pageIDs)), nil
 }

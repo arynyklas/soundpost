@@ -79,8 +79,8 @@ func (s *Store) CommitSavedView(ctx context.Context, scope auth.Scope, cmd Comma
 		return Result{}, model.Fail(model.Invalid)
 	}
 	for range savedViewRevisionRetries {
-		var revision model.Revision
-		if err := s.View(ctx, func(st State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := s.Revision(ctx)
+		if err != nil {
 			return Result{}, err
 		}
 		cmd.ExpectedRevision = revision

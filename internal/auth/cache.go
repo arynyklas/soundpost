@@ -47,7 +47,7 @@ type StateDeleteGenerations interface {
 
 func (g sourceLifecycle) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
 	var out uint64
-	err := g.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) (err error) {
+	err := g.service.viewCore(ctx, func(st model.ControlState) (err error) {
 		out, _, err = g.DeleteGenerationFromState(st, org, projects)
 		return err
 	})

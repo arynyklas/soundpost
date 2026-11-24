@@ -5,6 +5,7 @@ package appcore
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync/atomic"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -22,7 +23,7 @@ import (
 // recordFormat raises the marker; idempotent, a no-op once it is up.
 func (a *App) recordFormat(ctx context.Context) error {
 	marked := false
-	if err := a.Control.View(ctx, func(st model.ControlState) error {
+	if err := a.Control.ViewCore(ctx, func(st model.ControlState) error {
 		marked = st.BearerHashKeyVersion >= model.FormatMarkerRecords
 		return nil
 	}); err != nil || marked {
@@ -51,14 +52,18 @@ func (p *recordFormatProducer) Produce(ctx context.Context, _ ProducerScopes, le
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return 0, err
 	}
-	marked, holds := false, false
-	if err := p.app.Control.View(ctx, func(st model.ControlState) error {
-		if marked = st.BearerHashKeyVersion >= model.FormatMarkerRecords; !marked {
-			holds = holdsD92Records(st)
-		}
-		return nil
-	}); err != nil {
+	marker, _, err := p.app.Control.ReadinessFacts(ctx)
+	if err != nil {
 		return 0, err
+	}
+	marked, holds := marker >= model.FormatMarkerRecords, false
+	if !marked {
+		if err := p.app.Control.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+			holds = holdsD92Records(st)
+			return nil
+		}); err != nil {
+			return 0, err
+		}
 	}
 	if marked || !holds {
 		p.done.Store(true)
@@ -72,14 +77,34 @@ func (p *recordFormatProducer) Produce(ctx context.Context, _ ProducerScopes, le
 }
 
 // holdsD92Records reports whether any issue holds an owner or an external link, or any incident a title, an external
-// link or a title, note or external timeline entry.
-func holdsD92Records(st model.ControlState) bool {
-	for _, issue := range st.GroupingIssues {
-		if issue.Owner != nil || len(issue.External) > 0 {
-			return true
+// link or a title, note or external timeline entry. It reads the shared decode of the control state.
+func holdsD92Records(st model.ReadOnlyControl) bool {
+	seen := map[string]bool{}
+	for _, key := range st.BookKeys(model.BookGroupingIssues, "") {
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) < 3 || seen[parts[0]+":"+parts[1]] {
+			continue
+		}
+		seen[parts[0]+":"+parts[1]] = true
+		org, err := model.ParseID(parts[0])
+		if err != nil {
+			continue
+		}
+		project, err := model.ParseID(parts[1])
+		if err != nil {
+			continue
+		}
+		for _, entry := range st.ProjectIssues(org, project) {
+			if entry.Issue.Owner != nil || len(entry.Issue.External) > 0 {
+				return true
+			}
 		}
 	}
-	for _, raw := range st.IncidentBooks {
+	for _, key := range st.BookKeys(model.BookIncidents, "") {
+		raw, ok := st.BookRecord(model.BookIncidents, key)
+		if !ok {
+			continue
+		}
 		var rec struct {
 			State json.RawMessage `json:"state"`
 		}

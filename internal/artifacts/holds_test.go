@@ -498,3 +498,39 @@ func TestLifecycleIssueHoldRacesReleaseAndGCFence(t *testing.T) {
 	}
 	t.Logf("the second hold won %d rounds, the fence won %d, neither %d", held, fenced, neither)
 }
+
+// The issue holds read the workflow of the issues of one project on every pass of the issue producer, and a pass that finds nothing to change is a read:
+// it must be the decode of the control state that every shared reader uses (and the project's own issues), never a decode of the whole blob of its own.
+func TestIssueHoldPassesDoNotDecodeTheControlBlob(t *testing.T) {
+	f := newLifeFx(t, 1<<20)
+	ctx := context.Background()
+	sys := f.system(t, auth.IssuesWrite)
+	a := f.put(t, "held", false)
+	issue := model.NewID()
+	until := f.hours(48)
+	f.setIssue(t, issue, "open")
+	if res, err := f.life.HoldIssues(ctx, sys, []artifacts.IssueHold{hold(issue, until, a.ID)}); err != nil || res.Held != 1 {
+		t.Fatalf("hold: %+v %v", res, err)
+	}
+	for range 2 { // the second settle proves it is idle; what these decode is shared by the rest
+		if _, err := f.life.SettleIssues(ctx, sys); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rev := f.revision(t)
+	before := f.app.Control.DecodeStats()
+	for range 10 {
+		if res, err := f.life.SettleIssues(ctx, sys); err != nil || res != (artifacts.HoldResult{}) {
+			t.Fatalf("an idle settle: %+v %v", res, err)
+		}
+		if res, err := f.life.HoldIssues(ctx, sys, []artifacts.IssueHold{hold(issue, until, a.ID)}); err != nil {
+			t.Fatalf("a repeated hold: %+v %v", res, err)
+		}
+	}
+	if got := f.app.Control.DecodeStats().Blobs - before.Blobs; got != 0 {
+		t.Fatalf("20 issue-hold passes decoded the whole blob %d times, want never", got)
+	}
+	if f.revision(t) != rev {
+		t.Fatal("an idle pass committed")
+	}
+}

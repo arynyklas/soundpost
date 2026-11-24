@@ -212,10 +212,15 @@ func openListCursor(ctx context.Context, t ListTickets, scope auth.Scope, op str
 	return nil
 }
 
-// listRoute mounts one console list route: the credential is the session with CSRF or a bearer token, the body is decoded
-// strictly, and every scope the handler used is revalidated before a byte of the answer is released.
+// listRoute mounts one console list route (see listHandler).
 func listRoute[B any](mux *http.ServeMux, authority *auth.Service, path string, handle func(ctx context.Context, credential auth.Credential, body B) (any, []auth.Scope, error)) {
-	mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+path, listHandler(authority, handle))
+}
+
+// listHandler is the handler of one console list route: the credential is the session with CSRF or a bearer token, the body is decoded
+// strictly, and every scope the handler used is revalidated before a byte of the answer is released.
+func listHandler[B any](authority *auth.Service, handle func(ctx context.Context, credential auth.Credential, body B) (any, []auth.Scope, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {
 			queryReply(w, nil, err)
@@ -233,7 +238,7 @@ func listRoute[B any](mux *http.ServeMux, authority *auth.Service, path string, 
 			}
 		}
 		queryReply(w, view, err)
-	})
+	}
 }
 
 // listPos is the position a cursor resumes after, in the order of listLess.

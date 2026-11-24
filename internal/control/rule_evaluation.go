@@ -331,6 +331,20 @@ func loadRuleBook(st *State, key string) (RuleBook, bool, error) {
 	return b, true, nil
 }
 
+// loadRuleBookRO is loadRuleBook against a read-only control state; the book is decoded from a copy of the
+// stored bytes.
+func loadRuleBookRO(ro model.ReadOnlyControl, key string) (RuleBook, bool, error) {
+	raw, ok := ro.BookRecord(model.BookRuleBooks, key)
+	if !ok {
+		return RuleBook{}, false, nil
+	}
+	var b RuleBook
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return RuleBook{}, false, model.Fail(model.Corrupt)
+	}
+	return b, true, nil
+}
+
 func storeRuleBook(st *State, key string, b RuleBook) error {
 	raw, err := json.Marshal(b)
 	if err != nil {
@@ -1210,12 +1224,12 @@ func ruleReadProject(scope auth.Scope, ro model.ReadOnlyControl, project model.I
 
 // RuleBook reads one rule's committed facts through a linearizable control read.
 func (s *Store) RuleBook(ctx context.Context, scope auth.Scope, project, rule model.ID) (out RuleBook, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadRuleBook(&st, ruleKey(scope.OrgID(), project, rule))
+		out, found, e = loadRuleBookRO(st, ruleKey(scope.OrgID(), project, rule))
 		return e
 	})
 	return

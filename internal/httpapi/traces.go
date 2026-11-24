@@ -106,6 +106,7 @@ func (s storageSpans) TraceSpans(ctx context.Context, scope auth.Scope, project,
 	if s.scanner == nil {
 		return SpanSet{}, model.Fail(model.Unavailable)
 	}
+	s.scanner = gateScanner(ctx, s.scanner)
 	rows, err := s.scanner.Scan(ctx, scope, storage.ScanRequest{
 		Projects: []model.ID{project}, Signal: model.SpanKind, Start: window.Start, End: window.End,
 		Selectors:  []storage.Matcher{{Target: storage.MatchField, Name: "trace_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: trace.String()}}},
@@ -548,7 +549,7 @@ func targetGrant(ctx context.Context, authority *auth.Service, credential auth.C
 //
 //	POST /api/v1/traces/view  TraceBody -> TraceView
 func RegisterTraceRoutes(mux *http.ServeMux, authority *auth.Service, t *Traces) {
-	mux.HandleFunc("POST /api/v1/traces/view", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/traces/view", gateScanRoute("trace_view", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {
 			queryReply(w, nil, err)
@@ -564,7 +565,7 @@ func RegisterTraceRoutes(mux *http.ServeMux, authority *auth.Service, t *Traces)
 			err = authority.Revalidate(r.Context(), scope)
 		}
 		queryReply(w, view, err)
-	})
+	}))
 }
 
 // IssueResolver is the optional second capability of the trace link resolver (*link.Resolver has it): the issue

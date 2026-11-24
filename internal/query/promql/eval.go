@@ -31,6 +31,15 @@ type evaluationState struct {
 	// statsOnly marks the selectors the reference decodes without buckets
 	// (histogram_stats.go); it is fixed for the plan.
 	statsOnly map[*Node]bool
+	// shareScans enables the shared range reads of rangescan.go. scope is the grid
+	// whose selectors share them, scopes every scope still holding memory, unshared
+	// the depth of evaluations that run off any grid (the 3.1.0 aggregation
+	// parameter) and rawAccount the account the shared reads are released to.
+	shareScans bool
+	scope      *rangeScope
+	scopes     []*rangeScope
+	unshared   int
+	rawAccount value.Account
 }
 
 func (s *evaluationState) reserve(n int64) error {
@@ -48,6 +57,12 @@ func (s *evaluationState) reserve(n int64) error {
 // regex caches have separate query-local caps for C06 admission to account for.
 // Returned values transfer to the caller's response-lifetime accounting.
 func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account value.Account) (result value.Result, diagnostics []syntax.Diagnostic, err error) {
+	return evaluate(ctx, plan, src, account, true)
+}
+
+// evaluate is Evaluate with the range scan sharing (rangescan.go) switchable, so
+// tests can compare it with the per-step path it must stay identical to.
+func evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account value.Account, shareScans bool) (result value.Result, diagnostics []syntax.Diagnostic, err error) {
 	if account == nil || plan.Expr.Expr == nil || src == nil || src.ProjectID() == (model.ID{}) {
 		return result, nil, model.Fail(model.Invalid)
 	}
@@ -55,7 +70,11 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 	if err != nil {
 		return result, nil, err
 	}
-	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account, statsOnly: statsOnlySelectors(plan.Expr, plan.Profile.ID)}
+	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account, rawAccount: account, statsOnly: statsOnlySelectors(plan.Expr, plan.Profile.ID)}
+	if shareScans {
+		s.shareScans = true
+		s.account = scanAccount{account, s}
+	}
 	if plan.Stats != nil {
 		plan.Stats.PerStep = nil
 	}
@@ -64,6 +83,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 		if plan.Stats != nil {
 			plan.Stats.PeakSamples = s.peakUnits
 		}
+		s.releaseScans()
 		account.Release(s.reserved)
 		err = engineBoundaryError(err)
 	}()
@@ -94,6 +114,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 		}
 		return result, s.annotations, err
 	}
+	s.enterScope(grid[0], grid[len(grid)-1], plan.Evaluation.Step)
 	if e = s.validateRangeAggregationParameters(grid); e != nil {
 		return value.Result{}, s.annotations, e
 	}
@@ -250,16 +271,22 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 				if !hasName {
 					selector.Text = "target_info"
 				}
-				r, e = s.selectMetric(&selector, nil, at, selectOptions{preserveTime: true})
+				r, e = s.selectMetric(&selector, nil, at, selectOptions{preserveTime: true, unshared: true})
 			} else {
 				if raw.Expr.(*Node).Kind == "range" {
 					r, e = s.evalFunctionWindow(raw, at)
 				} else {
 					evalAt := at
-					if n.Kind == "aggregate" && i == 0 && len(expr.Children) > 1 && n.Text != "count_values" && s.plan.Profile.ID == "promql-prometheus-3.1.0" {
+					// The 3.1.0 parameter is evaluated off the grid, at one time: nothing to share.
+					parameter := n.Kind == "aggregate" && i == 0 && len(expr.Children) > 1 && n.Text != "count_values" && s.plan.Profile.ID == "promql-prometheus-3.1.0"
+					if parameter {
 						evalAt = s.gridStart // 3.1.0 evaluates the aggregation parameter once over the grid: its first step's value applies throughout
+						s.unshared++
 					}
 					r, e = s.eval(c, evalAt)
+					if parameter {
+						s.unshared--
+					}
 				}
 			}
 			if e != nil {
@@ -268,7 +295,7 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 			args[i] = r
 		}
 		if n.Text == "info" && len(args) == 1 {
-			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, selectOptions{preserveTime: true})
+			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, selectOptions{preserveTime: true, unshared: true})
 			if e != nil {
 				return r, e
 			}
@@ -459,6 +486,7 @@ func (s *evaluationState) subquery(expr TypedExpr, at model.UnixNano) (value.Res
 	outerStart := s.gridStart
 	s.gridStart = model.UnixNano(start)
 	defer func() { s.gridStart = outerStart }()
+	defer s.enterSubquery(n, grid[0], grid[len(grid)-1], step, width)()
 	for _, t := range grid {
 		mark, markUnits := s.reserved, s.units
 		part, e := s.eval(expr.Children[0], t)

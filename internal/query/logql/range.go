@@ -86,14 +86,120 @@ type rangeGroup struct {
 	points []rangePoint
 }
 
+// rangeLabels is the label set of pipelined rows together with everything the
+// accumulation derives from it. The derivation depends on the label set and
+// the range plan only, never on the row, so rows that share a set (and a plan)
+// share the work.
+type rangeLabels struct {
+	labels model.Labels
+	// category is the value of the __error__ label, empty for a clean row.
+	category string
+	prepared bool
+	// scratch is the transient charge of one row of this set.
+	scratch int64
+	// grouped are the labels of the group the row folds into, key their map
+	// key and newGroup the charge of the first row of a group.
+	grouped  model.Labels
+	key      string
+	newGroup int64
+}
+
+func newRangeLabels(ls model.Labels) *rangeLabels {
+	return &rangeLabels{labels: ls, category: value.Label(ls, "__error__")}
+}
+
+// prepare derives the charge and the group of the set for one range plan.
+func (l *rangeLabels) prepare(unwrap string, p RangePlan) {
+	if l.prepared {
+		return
+	}
+	l.prepared = true
+	l.scratch = int64(256 + len(l.labels)*64)
+	for _, x := range l.labels {
+		l.scratch += int64(len(x.Name)+len(x.Value)) * 2
+	}
+	g := l.labels
+	if unwrap != "" {
+		g = removeMetricLabels(g, []string{unwrap, "__error__", "__error_details__"})
+	}
+	if p.Grouping != nil {
+		g = groupLabels(g, p.Grouping, p.Without)
+	}
+	l.grouped = g
+	l.key = value.LabelKey(g)
+	l.newGroup = int64(len(l.key)) + value.SeriesBytes(value.Series{Labels: g})
+}
+
+// rangeRow is what the range accumulation needs of one pipelined row. bytes is
+// the account charge the consumer releases once it is done with the row.
+type rangeRow struct {
+	retained      bool
+	at            model.UnixNano
+	multiplicity  model.Uint64
+	id            model.ID
+	labels        *rangeLabels
+	value         float64
+	hasValue      bool
+	lineLen       int
+	hash          uint64
+	languageError bool
+	bytes         int64
+}
+
+// rangeRows feeds the accumulation, either straight from a pipeline iterator
+// or from rows a union scan retained.
+type rangeRows interface {
+	next(context.Context) (rangeRow, error)
+	close() error
+	partial() bool
+	watermarks() []model.Cursor
+}
+
+// iteratorRows adapts an EntryIterator: one pipelined row per call, nothing kept.
+type iteratorRows struct {
+	input      EntryIterator
+	hashBuffer []byte
+}
+
+func (e *iteratorRows) next(ctx context.Context) (rangeRow, error) {
+	r, err := e.input.Next(ctx)
+	if err != nil {
+		return rangeRow{}, err
+	}
+	row := rangeRow{retained: r.Retained, at: r.Entry.Timestamp, bytes: r.Bytes}
+	if !r.Retained {
+		return row, nil
+	}
+	row.multiplicity, row.id, row.lineLen = r.Entry.Multiplicity, r.Entry.ID, len(r.Entry.Line)
+	row.labels = newRangeLabels(r.Labels)
+	row.languageError = r.Entry.languageError != ""
+	if r.Unwrapped != nil {
+		row.value, row.hasValue = *r.Unwrapped, true
+	}
+	if len(r.OriginalStreamLabels) > 0 {
+		e.hashBuffer = metricStreamHashBytes(e.hashBuffer, r.OriginalStreamLabels)
+		row.hash = metricXXH64(e.hashBuffer)
+	}
+	return row, nil
+}
+func (e *iteratorRows) close() error               { return e.input.Close() }
+func (e *iteratorRows) partial() bool              { return e.input.Partial() }
+func (e *iteratorRows) watermarks() []model.Cursor { return e.input.Watermarks() }
+
 // EvaluateRange owns and closes input. Metric windows are (left,right], unlike
 // the raw source's [start,end). A surviving error is not an absent sample.
 func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame Frame) (result value.Result, err error) {
+	if input == nil {
+		return result, model.Fail(model.Invalid)
+	}
+	return evaluateRange(ctx, p, &iteratorRows{input: input}, frame)
+}
+
+// evaluateRange is EvaluateRange over any row feed. It owns and closes rows.
+func evaluateRange(ctx context.Context, p RangePlan, rows rangeRows, frame Frame) (result value.Result, err error) {
 	defer func() { err = boundaryErr(err) }()
-	if ctx == nil || input == nil || frame.Account == nil || p.Range == nil || p.Range.Log == nil || p.Range.Interval < 0 || frame.Project == (model.ID{}) || !rangeNames[p.Function] {
-		if input != nil {
-			input.Close()
-		}
+	if ctx == nil || frame.Account == nil || p.Range == nil || p.Range.Log == nil || p.Range.Interval < 0 || frame.Project == (model.ID{}) || !rangeNames[p.Function] {
+		rows.close()
 		return result, model.Fail(model.Invalid)
 	}
 	a := frame.Account
@@ -104,11 +210,11 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 	held := int64(0)
 	result.Type = "vector"
 	defer func() {
-		closeErr := input.Close()
+		closeErr := rows.close()
 		if err == nil {
 			err = closeErr
 		}
-		value.InheritMetadata(&result, value.Result{Partial: input.Partial(), Watermarks: input.Watermarks()})
+		value.InheritMetadata(&result, value.Result{Partial: rows.partial(), Watermarks: rows.watermarks()})
 		a.Release(held)
 		if err == nil {
 			err = a.Check(ctx)
@@ -144,85 +250,68 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		}
 	}
 	groups := map[string]*rangeGroup{}
-	var hashBuffer []byte
 	anyEntry := false
 	for {
 		if e = a.Check(ctx); e != nil {
 			return result, e
 		}
-		r, e := input.Next(ctx)
+		r, e := rows.next(ctx)
 		if errors.Is(e, io.EOF) {
 			break
 		}
 		if e != nil {
 			return result, e
 		}
-		if !r.Retained || int64(r.Entry.Timestamp) <= left || int64(r.Entry.Timestamp) > right {
-			a.Release(r.Bytes)
+		if !r.retained || int64(r.at) <= left || int64(r.at) > right {
+			a.Release(r.bytes)
 			continue
 		}
-		category := value.Label(r.Labels, "__error__")
-		if category != "" {
-			a.Release(r.Bytes)
-			return result, &MetricPipelineError{Category: category, EngineSet: r.Entry.languageError != ""}
+		if category := r.labels.category; category != "" {
+			a.Release(r.bytes)
+			return result, &MetricPipelineError{Category: category, EngineSet: r.languageError}
 		}
-		if r.Entry.Multiplicity == 0 {
-			a.Release(r.Bytes)
+		if r.multiplicity == 0 {
+			a.Release(r.bytes)
 			return result, model.Fail(model.Corrupt)
 		}
 		anyEntry = true
 		if p.Function == "absent_over_time" {
-			a.Release(r.Bytes)
+			a.Release(r.bytes)
 			continue
 		}
-		scratch := int64(256 + len(r.Labels)*64)
-		for _, l := range r.Labels {
-			scratch += int64(len(l.Name)+len(l.Value)) * 2
-		}
+		r.labels.prepare(unwrap, p)
+		scratch := r.labels.scratch
 		if e = a.Reserve(scratch); e != nil {
-			a.Release(r.Bytes)
+			a.Release(r.bytes)
 			return result, e
 		}
 		held += scratch
-		labels := r.Labels
-		if unwrap != "" {
-			labels = removeMetricLabels(labels, []string{unwrap, "__error__", "__error_details__"})
-		}
-		if p.Grouping != nil {
-			labels = groupLabels(labels, p.Grouping, p.Without)
-		}
 		cost := int64(192)
-		key := value.LabelKey(labels)
-		g := groups[key]
+		g := groups[r.labels.key]
 		if g == nil {
-			cost += int64(len(key)) + value.SeriesBytes(value.Series{Labels: labels})
+			cost += r.labels.newGroup
 		}
 		if e = a.Reserve(cost); e != nil {
-			a.Release(r.Bytes)
+			a.Release(r.bytes)
 			return result, e
 		}
 		held += cost
 		if g == nil {
-			g = &rangeGroup{labels: value.CloneLabels(labels)}
-			groups[key] = g
+			g = &rangeGroup{labels: value.CloneLabels(r.labels.grouped)}
+			groups[r.labels.key] = g
 		}
 		v := float64(1)
 		if unwrap != "" {
-			if r.Unwrapped == nil {
-				a.Release(r.Bytes)
+			if !r.hasValue {
+				a.Release(r.bytes)
 				return result, model.Fail(model.Corrupt)
 			}
-			v = *r.Unwrapped
+			v = r.value
 		} else if p.Function == "bytes_rate" || p.Function == "bytes_over_time" {
-			v = float64(len(r.Entry.Line))
+			v = float64(r.lineLen)
 		}
-		hash := uint64(0)
-		if len(r.OriginalStreamLabels) > 0 {
-			hashBuffer = metricStreamHashBytes(hashBuffer, r.OriginalStreamLabels)
-			hash = metricXXH64(hashBuffer)
-		}
-		g.points = append(g.points, rangePoint{at: r.Entry.Timestamp, v: v, n: uint64(r.Entry.Multiplicity), id: r.Entry.ID, hash: hash})
-		a.Release(r.Bytes)
+		g.points = append(g.points, rangePoint{at: r.at, v: v, n: uint64(r.multiplicity), id: r.id, hash: r.hash})
+		a.Release(r.bytes)
 		a.Release(scratch)
 		held -= scratch
 	}

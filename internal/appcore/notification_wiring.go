@@ -69,7 +69,7 @@ func (c controlDestinations) Destination(ctx context.Context, scope auth.Scope, 
 	}
 	var rec notify.DestinationRecord
 	var found bool
-	err := c.a.Control.View(ctx, func(st model.ControlState) error {
+	err := c.a.Control.ViewCore(ctx, func(st model.ControlState) error {
 		if _, retired := st.RetiredOrgs[org.String()]; retired {
 			return nil
 		}
@@ -105,7 +105,7 @@ func (c controlSecrets) Read(ctx context.Context, scope auth.Scope, ref notify.S
 		return nil, model.Fail(model.Forbidden)
 	}
 	var sealed string
-	err := c.a.Control.View(ctx, func(st model.ControlState) error {
+	err := c.a.Control.ViewCore(ctx, func(st model.ControlState) error {
 		o, ok := st.Orgs[ref.Org.String()]
 		if !ok {
 			return model.Fail(model.Forbidden)
@@ -322,7 +322,7 @@ func (a *App) OrgRouting() NotificationRouting { return orgRouting{a} }
 func (r orgRouting) Routing(ctx context.Context, scope auth.Scope, project model.ID) (NotificationBinding, bool, error) {
 	var recipients []model.ID
 	var written *auth.NotificationPolicyRecord
-	err := r.a.Control.View(ctx, func(st model.ControlState) error {
+	err := r.a.Control.ViewCore(ctx, func(st model.ControlState) error {
 		if _, retired := st.RetiredOrgs[scope.OrgID().String()]; retired {
 			return nil
 		}

@@ -9,7 +9,6 @@ import (
 	"sort"
 
 	"github.com/arynyklas/soundpost/internal/model"
-	"github.com/arynyklas/soundpost/internal/query/scan"
 	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"github.com/arynyklas/soundpost/internal/query/value"
 )
@@ -22,6 +21,9 @@ type selectOptions struct {
 	// function. With an extension modifier the function receives the raw
 	// samples of the extended window and applies the extension itself.
 	functionArg bool
+	// unshared keeps the selector on the per-step path: its node is built per
+	// evaluation (info), so a shared read could never be found again.
+	unshared bool
 	// statsOnly is set by selectMetric for a selector decoded without buckets.
 	statsOnly bool
 }
@@ -87,32 +89,10 @@ func (s *evaluationState) selectMetric(sel, window *Node, at model.UnixNano, opt
 	if e != nil {
 		return r, e
 	}
-	// The lower bound is exclusive: the storage request starts right after it.
-	start, e := checkedAdd(bounds.from, 1)
-	if e != nil {
-		return r, e
+	if shared := s.sharedScan(sel, node, window, at, bounds, opts); shared != nil {
+		return s.selectShared(shared, node, window, at, bounds, opts)
 	}
-	end, e := checkedAdd(bounds.through, 1)
-	if e != nil {
-		return r, e
-	}
-	req := scan.MetricSelection{Start: model.UnixNano(start), End: model.UnixNano(end), Profile: s.plan.Profile, Account: s.account}
-	if sel.Text != "" {
-		req.Matchers = append(req.Matchers, scan.LabelMatcher{Name: "__name__", Op: "=", Value: sel.Text})
-	}
-	for _, m := range sel.Matchers {
-		req.Matchers = append(req.Matchers, scan.LabelMatcher{Name: m.Name, Op: m.Op, Value: m.Value})
-	}
-	for _, m := range req.Matchers {
-		if m.Op == "=~" || m.Op == "!~" {
-			req.RegexScope, e = s.matcherScope()
-			if e != nil {
-				return r, e
-			}
-			break
-		}
-	}
-	matchers, e := scan.CompileMatchers(s.ctx, req)
+	req, matchers, e := s.selectionRequest(sel, bounds.from, bounds.through)
 	if e != nil {
 		return r, e
 	}

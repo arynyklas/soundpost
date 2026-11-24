@@ -60,6 +60,12 @@ type Store interface {
 	BoundedRules() bool
 }
 
+// claimIdleReader is implemented by *control.Store: the idleness check of a claim from the decode of the control state that every shared reader
+// uses (control.Store.ClaimIdle), so that a claim pass does not decode the whole state per project. A store without it is read through View.
+type claimIdleReader interface {
+	ClaimIdle(ctx context.Context, scope auth.Scope, lease FenceToken, c control.DeliveryClaim) (control.DeliveryClaim, bool, error)
+}
+
 // Fencer validates a lease against a fresh quorum observation (*replica.Group):
 // an election term or a clock alone is not a lease.
 type Fencer interface {
@@ -224,8 +230,8 @@ func (o *Outbox) transact(ctx context.Context, scope auth.Scope, kind control.Co
 		return control.Result{}, model.Fail(model.Invalid)
 	}
 	for range maxRevisionRetries {
-		var revision model.Revision
-		if err = o.store.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := control.RevisionOf(ctx, o.store)
+		if err != nil {
 			return control.Result{}, err
 		}
 		res, err := o.store.Transact(ctx, scope, control.Command{CommandID: id, ExpectedRevision: revision, Kind: string(kind), Payload: raw})
@@ -439,7 +445,11 @@ func (o *Outbox) Claim(ctx context.Context, scope auth.Scope, now model.UnixNano
 	for attempt := 0; ; attempt++ {
 		claim := control.DeliveryClaim{Project: project, Now: now, Expires: expires, Limit: uint32(limit)}
 		idle := false
-		if err = o.store.View(ctx, func(st control.State) error {
+		if shared, ok := o.store.(claimIdleReader); ok {
+			if claim, idle, err = shared.ClaimIdle(ctx, scope, lease, claim); err != nil {
+				return nil, err
+			}
+		} else if err = o.store.View(ctx, func(st control.State) error {
 			claim.OwnerRevision = control.CutoverRevision(st, scope.OrgID(), project)
 			idle = control.DeliveryClaimIdle(scope, st, lease, claim)
 			return nil

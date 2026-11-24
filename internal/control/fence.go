@@ -629,8 +629,11 @@ func EffectSuppressed(st State, org, project model.ID, kind model.Kind, at model
 	return false
 }
 
+// deleteGenerationMembers are the members DeleteGeneration reads.
+var deleteGenerationMembers = memberSetOf("Orgs", "DeleteGenerations")
+
 func (s *Store) DeleteGeneration(ctx context.Context, org model.ID) (out uint64, err error) {
-	err = s.View(ctx, func(st State) error {
+	err = s.viewCoreOf(ctx, deleteGenerationMembers, func(st State) error {
 		if _, ok := st.Orgs[org.String()]; !ok {
 			return model.Fail(model.NotFound)
 		}

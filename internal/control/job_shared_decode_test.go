@@ -45,23 +45,33 @@ func TestJobUpdatesDoNotInvalidateTheSharedDecode(t *testing.T) {
 	}
 }
 
-// A write that changes anything else than the job books still drops the decode: a reader after it
-// sees the new state.
+// A write that changes anything else than the job books still drops what it changed from the shared decode: a reader
+// after it sees the new state, and decodes the members the write changed (the organizations), no more.
 func TestAWriteOtherThanAJobUpdateStillInvalidatesTheSharedDecode(t *testing.T) {
 	f := newJobFxOn(t, newFenceFxPatch(t))
-	read := func() {
+	read := func(org model.ID) (known bool) {
 		t.Helper()
-		if err := f.store.ViewShared(f.ctx, func(ro model.ReadOnlyControl) error { _ = ro.Revision(); return nil }); err != nil {
+		if err := f.store.ViewShared(f.ctx, func(ro model.ReadOnlyControl) error { _, known = ro.OrgEpoch(org.String()); return nil }); err != nil {
 			t.Fatal(err)
 		}
+		return known
 	}
-	read()
-	decodes := f.store.SharedDecodesForTest()
+	read(model.ID{})
+	decodes, members := f.store.SharedDecodesForTest(), f.store.SharedMemberDecodesForTest()
 	for i := range 3 {
-		f.admin("create_org", model.NewID(), auth.AdminPayload{Name: fmt.Sprintf("o%d", i), Reason: "fixture"})
-		read()
+		org := model.NewID()
+		if read(org) {
+			t.Fatalf("organization %d is known before it is created", i)
+		}
+		f.admin("create_org", org, auth.AdminPayload{Name: fmt.Sprintf("o%d", i), Reason: "fixture"})
+		if !read(org) {
+			t.Fatalf("organization %d is not seen by the shared read after the commit that created it", i)
+		}
 	}
-	if got := f.store.SharedDecodesForTest() - decodes; got < 3 {
-		t.Errorf("3 organizations created, each followed by a shared read, made %d decodes, want one each", got)
+	if got := f.store.SharedMemberDecodesForTest() - members; got < 3 {
+		t.Errorf("3 organizations created, each followed by a shared read, made %d member decodes, want one each at least", got)
+	}
+	if got := f.store.SharedDecodesForTest() - decodes; got != 0 {
+		t.Errorf("3 organizations created made %d decodes of the whole state, want only the members they changed", got)
 	}
 }

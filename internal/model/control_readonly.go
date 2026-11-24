@@ -125,10 +125,42 @@ type BookSource interface {
 	BookRecord(book Book, key string) ([]byte, bool)
 }
 
-// ReadOnlyOfWith is ReadOnlyOf for a state whose job and issue books (BookJobs, BookIssues) are read from
-// src instead of the state's own members.
+// ReadOnlyOfWith is ReadOnlyOf for a state whose books src serves (the job and issue books, the grouping issues
+// and the job positions, unless src is a BookRouter that names others) instead of the state's own members.
 func ReadOnlyOfWith(st *ControlState, src BookSource) ReadOnlyControl {
 	return readOnlyControl{st: st, src: src}
+}
+
+// BookRouter is implemented by a BookSource that says which books it serves. A source without it serves the
+// books of the ledger: the issue and job books, the grouping issues and the job positions.
+type BookRouter interface {
+	Serves(book Book) bool
+}
+
+// serves reports whether the book is read from the source instead of the state's own member.
+func (r readOnlyControl) serves(book Book) bool {
+	if r.src == nil {
+		return false
+	}
+	if router, ok := r.src.(BookRouter); ok {
+		return router.Serves(book)
+	}
+	return book == BookIssues || book == BookJobs || book == BookGroupingIssues || book == BookJobPositions
+}
+
+// ReadOnlyControlMembers are the members of ControlState, by the name the state is encoded under, that the
+// methods of ReadOnlyControl read from the state, the books apart. A state that holds these members
+// and a BookSource for the books answers every call as the whole state does: a control store that decodes
+// the members one by one decodes these for a shared reader and no others (TestReadOnlyControlReadsOnlyItsMembers).
+func ReadOnlyControlMembers() []string {
+	return []string{"Installation", "authority_revision", "Users", "Sessions", "ServerTokens", "Orgs", "RetiredOrgs", "RetiredProjects", "Deletions", "GroupingIssues"}
+}
+
+// ReadOnlyBookMembers are the members of ControlState that BookKeys and BookRecord read when the state is
+// the source of the book: the name of a book is the name of its member.
+func ReadOnlyBookMembers() []string {
+	return []string{string(BookIssues), string(BookJobs), string(BookConditions), string(BookIncidents), string(BookDeliveries), string(BookCutovers),
+		string(BookRuleBooks), string(BookRuleOutputs), string(BookRuleDefinition), string(BookJobDefinitions), string(BookJobPositions), string(BookSavedViews)}
 }
 
 type readOnlyControl struct {
@@ -302,10 +334,20 @@ func (r readOnlyControl) bookOf(book Book) map[string]json.RawMessage {
 }
 
 func (r readOnlyControl) BookKeys(book Book, prefix string) []string {
-	if r.src != nil && (book == BookIssues || book == BookJobs || book == BookGroupingIssues || book == BookJobPositions) {
+	if r.serves(book) {
 		return r.src.BookKeys(book, prefix)
 	}
 	var out []string
+	if book == BookGroupingIssues {
+		// The grouping issues are structs of the state, not opaque records: their keys are listed, their
+		// content is read through ProjectIssues.
+		for key := range r.st.GroupingIssues {
+			if strings.HasPrefix(key, prefix) {
+				out = append(out, key)
+			}
+		}
+		return out
+	}
 	for key := range r.bookOf(book) {
 		if strings.HasPrefix(key, prefix) {
 			out = append(out, key)
@@ -315,7 +357,7 @@ func (r readOnlyControl) BookKeys(book Book, prefix string) []string {
 }
 
 func (r readOnlyControl) BookRecord(book Book, key string) ([]byte, bool) {
-	if r.src != nil && (book == BookIssues || book == BookJobs || book == BookGroupingIssues || book == BookJobPositions) {
+	if r.serves(book) {
 		return r.src.BookRecord(book, key)
 	}
 	raw, ok := r.bookOf(book)[key]
@@ -327,7 +369,7 @@ func (r readOnlyControl) BookRecord(book Book, key string) ([]byte, bool) {
 
 func (r readOnlyControl) ProjectIssues(org, project ID) []GroupingIssueEntry {
 	var out []GroupingIssueEntry
-	if r.src != nil {
+	if r.serves(BookGroupingIssues) {
 		// The grouping issues are records of the control store; a project's are those under its key prefix.
 		for _, key := range r.src.BookKeys(BookGroupingIssues, org.String()+":"+project.String()+":") {
 			raw, ok := r.src.BookRecord(BookGroupingIssues, key)

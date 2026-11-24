@@ -84,6 +84,34 @@ type issueHoldUpdater interface {
 	UpdateIssueHolds(context.Context, func(*model.ControlState) error) error
 }
 
+// coreViewer is implemented by *control.Store: the committed state without the admission books, the job and issue
+// books and the grouping issues, shared by every reader and not to be changed (ViewCore). The reads of the
+// lifecycle that look at none of those use it, so that what a pass costs does not depend on how many batches were
+// admitted before it; a StateStore without it is read through View.
+type coreViewer interface {
+	ViewCore(context.Context, func(model.ControlState) error) error
+}
+
+// projectIssueViewer is implemented by *control.Store: the shared decode of the state, with the grouping issues of
+// one project added (ViewProjectIssues). The issue holds read the workflow of the issues of the project they hold for
+// and nothing else of the issue books.
+type projectIssueViewer interface {
+	ViewProjectIssues(ctx context.Context, org, project model.ID, fn func(model.ControlState) error) error
+}
+
+// view reads the committed state for fn, which only reads it: the shared decode when the store has one (with the grouping
+// issues of the project when fn looks at an issue: they are not part of the core decode), a decode of its own otherwise.
+func (l *Lifecycle) view(ctx context.Context, issues bool, org, project model.ID, fn func(model.ControlState) error) error {
+	if issues {
+		if v, ok := l.cfg.State.(projectIssueViewer); ok {
+			return v.ViewProjectIssues(ctx, org, project, fn)
+		}
+	} else if v, ok := l.cfg.State.(coreViewer); ok {
+		return v.ViewCore(ctx, fn)
+	}
+	return l.cfg.State.View(ctx, fn)
+}
+
 // SnapshotPins reports whether any local snapshot, journal or replica state
 // still needs the artifact root. An unknown answer is an error, never "no".
 type SnapshotPins interface {
@@ -207,20 +235,24 @@ func (p plan) write(st *model.ControlState, org model.ID, bump bool) error {
 // inside the transaction, over the state it really changes. The instant is fixed per call,
 // so both evaluations decide on the same time.
 func (l *Lifecycle) run(ctx context.Context, org model.ID, bump bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
-	return l.runUsing(ctx, org, bump, false, evaluate)
+	return l.runUsing(ctx, org, model.ID{}, bump, false, evaluate)
 }
 
 // runIssues is run for an evaluation that reads the workflow of an issue (HoldIssues,
 // SettleIssues): the transaction it commits in must be given the grouping issues, which the
 // plain ledger writer's state does not carry (issueHoldUpdater).
-func (l *Lifecycle) runIssues(ctx context.Context, org model.ID, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
-	return l.runUsing(ctx, org, false, true, evaluate)
+func (l *Lifecycle) runIssues(ctx context.Context, scope auth.Scope, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
+	var project model.ID // a scope over any other than one project is refused by the evaluation
+	if ids := scope.ProjectIDs(); len(ids) == 1 {
+		project = ids[0]
+	}
+	return l.runUsing(ctx, scope.OrgID(), project, false, true, evaluate)
 }
 
-func (l *Lifecycle) runUsing(ctx context.Context, org model.ID, bump, issues bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
+func (l *Lifecycle) runUsing(ctx context.Context, org, project model.ID, bump, issues bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
 	now := model.UnixNano(l.cfg.Now().UnixNano())
 	pending := false
-	if err := l.cfg.State.View(ctx, func(st model.ControlState) error {
+	if err := l.view(ctx, issues, org, project, func(st model.ControlState) error {
 		p, err := evaluate(st, now)
 		pending = !p.empty()
 		return err
@@ -449,7 +481,7 @@ func settingsOf(st model.ControlState, org model.ID) map[string]json.RawMessage 
 func (l *Lifecycle) ReconcileRetired(ctx context.Context) (int, error) {
 	now := model.UnixNano(l.cfg.Now().UnixNano())
 	var due []model.BlobManifest
-	if err := l.cfg.State.View(ctx, func(st model.ControlState) error {
+	if err := l.view(ctx, false, model.ID{}, model.ID{}, func(st model.ControlState) error {
 		for _, intent := range st.ArtifactIntents {
 			if intent.State != intentPublished || deletionCovers(st, intent.Map.Manifest) {
 				continue

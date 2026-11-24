@@ -25,53 +25,8 @@ import (
 // replica group, so it is asked once per round (roundOnce), not once per transition: a round commits up to
 // maxRoundTransitions of them.
 
-// coreEntry is the state without the ledger as the blob of bolt transaction txid held it.
-type coreEntry struct {
-	txid  int64
-	state *State
-}
-
-// coreState is the committed state without the ledger members, of the transaction tx. Revision is
-// the current one; RevisionClock is the one of the transaction that decoded it. The State and its
-// maps are shared by every reader of the same blob and must not be changed.
-//
-// A decode is reused while no write changed the blob other than stepping it (putState marks every
-// other write with the transaction that made it, in the transaction itself, before it commits): the
-// last marked write is not newer than the entry nor than tx, so the blob the entry decoded is the blob of
-// tx, whichever of the two transactions is the newer (a reader that began a moment before the freshest
-// decode was made uses it).
-func (s *Store) coreState(tx *bolt.Tx) (*State, error) {
-	d := s.db
-	var rev model.Revision
-	cacheable := false
-	if meta := tx.Bucket([]byte("replica_control")); meta != nil {
-		if raw := meta.Get([]byte("application")); len(raw) == 8 {
-			rev, cacheable = model.Revision(readWatermark(raw)), true
-		}
-	}
-	id := int64(tx.ID())
-	if e := d.core.Load(); cacheable && e != nil && d.coreAt.Load() <= min(e.txid, id) {
-		cp := *e.state
-		cp.Revision = rev
-		return &cp, nil
-	}
-	st := new(State)
-	if readState(tx.Bucket([]byte("control")), st) != nil {
-		return nil, model.Fail(model.Corrupt)
-	}
-	d.decodes.Add(1)
-	// The job books are not part of what a core reader sees: a job update does not drop this decode
-	// (putStateLayout, onlyJobBooksDiffer), so the books it holds would be the ones of the first
-	// decode. JobBook reads its record from the blob (viewJobBook).
-	st.JobBooks = nil
-	if !cacheable {
-		return st, nil
-	}
-	d.publishCore(&coreEntry{txid: id, state: st})
-	cp := *st
-	cp.Revision = rev
-	return &cp, nil
-}
+// The state without the ledger is decoded once for every command that leaves it as it is, member by member:
+// coreState (core_members.go) is what they and the shared readers read.
 
 // A background loop of the serving process (the fences, the workers: appcore.RunWorkers) reads the control state
 // every few seconds through View, and View assembles the admission ledger into the State it gives the reader:
@@ -91,6 +46,12 @@ func WithoutBooks(ctx context.Context) context.Context {
 // concurrent core reader shares, its maps are not the reader's to change, and its RevisionClock may be
 // older than the committed one. The linearizable read barrier is View's.
 func (s *Store) ViewCore(ctx context.Context, fn func(State) error) error {
+	return s.viewCoreOf(ctx, allCore, fn)
+}
+
+// viewCoreOf is ViewCore for a reader of the members of want only (the others come empty): a commit that
+// changed no member of want costs it nothing, whatever else it changed.
+func (s *Store) viewCoreOf(ctx context.Context, want memberSet, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
@@ -100,7 +61,7 @@ func (s *Store) ViewCore(ctx context.Context, fn func(State) error) error {
 		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
-		st, err := s.coreState(tx)
+		st, err := s.coreMembers(tx, want)
 		if err != nil {
 			return err
 		}
@@ -108,12 +69,16 @@ func (s *Store) ViewCore(ctx context.Context, fn func(State) error) error {
 	})
 }
 
+// readinessMembers are the members ReadinessFacts reads.
+var readinessMembers = memberSetOf("BearerHashKeyVersion", "SourceFences")
+
 // ReadinessFacts is what the readiness probe reads of the control state: the schema marker the file was
 // written under (BearerHashKeyVersion) and the number of source fences still draining. It is a core read: the
 // probe runs on every request of a load balancer, and the admission ledger it does not look at is, on a server
-// that has taken load, most of a second of CPU to assemble, which is more than the probe may spend.
+// that has taken load, most of a second of CPU to assemble, which is more than the probe may spend. It reads
+// those two members and no others, so a rule commit costs the probe nothing.
 func (s *Store) ReadinessFacts(ctx context.Context) (marker uint8, fencing uint64, err error) {
-	err = s.ViewCore(ctx, func(st State) error {
+	err = s.viewCoreOf(ctx, readinessMembers, func(st State) error {
 		marker = st.BearerHashKeyVersion
 		for _, f := range st.SourceFences {
 			if f.Phase == "fencing" {

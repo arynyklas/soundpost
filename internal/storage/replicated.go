@@ -22,7 +22,19 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-type replicatedEngine struct{ groups [64]*replica.Group }
+// replicatedEngine is the 64 data groups of a replicated engine. The identifier of each group is
+// fixed for as long as the groups are (InstallReplicationIdentity refuses once repl is set), and it
+// is a SHA-256 to derive, so the engine derives them once, when it builds the groups: owners is the
+// group by identifier. The per-page release barrier and the before-cursor check of every read
+// resolve a mark to its group through it; deriving the identifier of every slot per mark was
+// 64 x 64 hashes for each page released.
+type replicatedEngine struct {
+	groups [64]*replica.Group
+	owners map[model.ID]*replica.Group
+}
+
+// owner is the group named id, or nil when no group of this engine has that identifier.
+func (r *replicatedEngine) owner(id model.ID) *replica.Group { return r.owners[id] }
 
 // slotRetryMax is how many applied commands of a slot its replication group keeps in the retry table
 // (replica.Config.RetryMax; the 24 h window of replica.DefaultRetryWindow also applies). The table
@@ -536,9 +548,14 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	}
 	close(next)
 	wg.Wait()
+	r.owners = make(map[model.ID]*replica.Group, 64)
 	for slot, group := range opened {
 		if group != nil {
 			r.groups[slot] = group
+			id := e.group(uint16(slot))
+			if _, taken := r.owners[id]; !taken { // the first slot of an identifier wins, as a scan by slot did
+				r.owners[id] = group
+			}
 			out = append(out, group)
 		}
 	}
@@ -748,7 +765,13 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 		return putCounter(tx, meta, m.slot, "term", c.Term)
 	})
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	hook, published := e.afterApplyPublished, false
+	defer func() {
+		e.mu.Unlock()
+		if published && hook != nil {
+			hook()
+		}
+	}()
 	if err != nil {
 		e.failLocked()
 		return err
@@ -757,6 +780,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 		e.indexes[m.slot] = plan.logical
 		if !plan.rejected {
 			e.publishCommittedLocked(m.slot, plan.logical, plan.entry)
+			published = true
 			if plan.entry.Type == "delete_barrier" {
 				go e.noteDeletion() // never under e.mu or a group lock: Abort releases journal pins
 			}
@@ -1303,7 +1327,8 @@ func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, a
 	return marks, partial, nil
 }
 func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cursor) error {
-	if e.repl == nil {
+	repl := e.repl
+	if repl == nil {
 		return model.Fail(model.Unavailable)
 	}
 	e.mu.Unlock()
@@ -1313,13 +1338,7 @@ func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cu
 	}
 	owners := make([]*replica.Group, len(marks))
 	for i, mark := range marks {
-		for slot, group := range e.repl.groups {
-			if e.group(uint16(slot)) == mark.Group {
-				owners[i] = group
-				break
-			}
-		}
-		if owners[i] == nil {
+		if owners[i] = repl.owner(mark.Group); owners[i] == nil {
 			return model.Fail(model.Stale)
 		}
 	}
@@ -1329,7 +1348,14 @@ func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cu
 			return replicaFaultUnder(ctx, errs[i])
 		}
 		if cuts[i].Index < mark.Index {
-			return model.Fail(model.Stale)
+			// A mark is the cursor of a commit that a slot machine's Apply published, and a group records the
+			// command as applied (and a lone voter's reads see it) only after Apply returns: a fence that
+			// runs in that gap sees the group a command behind its own mark. The group is not stale, it has
+			// not caught up with its Apply yet; wait for it (g.mu is held across the whole of it). Only a
+			// group that stays behind for the wait is stale.
+			if err := owners[i].WaitApplied(ctx, mark); err != nil {
+				return replicaFaultUnder(ctx, err)
+			}
 		}
 	}
 	return nil
@@ -1338,19 +1364,18 @@ func (e *Engine) replicaBeforeCursor(ctx context.Context, cursor model.Cursor) e
 	if e.repl == nil {
 		return model.Fail(model.Unavailable)
 	}
-	for slot, group := range e.repl.groups {
-		if e.group(uint16(slot)) == cursor.Group {
-			cut, err := group.ReadIndex(ctx)
-			if err != nil {
-				return replicaFaultUnder(ctx, err)
-			}
-			if cut.Index < cursor.Index {
-				return model.Fail(model.Stale)
-			}
-			return nil
-		}
+	group := e.repl.owner(cursor.Group)
+	if group == nil {
+		return model.Fail(model.Stale)
 	}
-	return model.Fail(model.Stale)
+	cut, err := group.ReadIndex(ctx)
+	if err != nil {
+		return replicaFaultUnder(ctx, err)
+	}
+	if cut.Index < cursor.Index {
+		return model.Fail(model.Stale)
+	}
+	return nil
 }
 
 // AdmissionOutcomes is the durable outcome of every batch the data holds. It reads the whole consumed bucket,

@@ -53,6 +53,14 @@ type metricState struct {
 	variantInput bool
 	regexScope   *regexcompat.Scope
 	budget       *repetitionBudget
+	// perStep disables the union scan; see evalOptions.
+	perStep bool
+	// unions are the retained rows of the union scans of this query, keyed by
+	// range selector; unionHeld is what they charge and unionTried reports that
+	// one was attempted. See range_union.go.
+	unions     map[*RangeExpr]*rangeUnion
+	unionHeld  int64
+	unionTried bool
 }
 
 func (s *metricState) reserve(n int64) error {
@@ -66,9 +74,21 @@ func (s *metricState) reserve(n int64) error {
 	return nil
 }
 
+// evalOptions are the switches the tests flip; Evaluate always runs with the
+// zero value.
+type evalOptions struct {
+	// perStep reads and pipelines every range selector once per grid step, as
+	// the engine did before the union scan. It exists so the differential tests
+	// can compare both paths; Evaluate never sets it.
+	perStep bool
+}
+
 // Evaluate returns retained owned results. The consumer releases
 // value.ResultBytes(result), including successful empty/partial results.
 func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.Account) (result value.Result, diagnostics []syntax.Diagnostic, err error) {
+	return evaluate(ctx, plan, src, account, evalOptions{})
+}
+func evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.Account, opts evalOptions) (result value.Result, diagnostics []syntax.Diagnostic, err error) {
 	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || account == nil || src == nil || src.ProjectID() == (model.ID{}) || plan.Expression.Expr == nil {
 		return result, nil, model.Fail(model.Invalid)
@@ -84,8 +104,9 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 		result, err = EvaluateLogs(ctx, plan, src, Backward, 5000000, account)
 		return result, nil, err
 	}
-	s := &metricState{ctx: ctx, plan: plan, src: src, account: account, budget: newRepetitionBudget()}
+	s := &metricState{ctx: ctx, plan: plan, src: src, account: account, budget: newRepetitionBudget(), perStep: opts.perStep}
 	defer func() {
+		s.dropUnions()
 		value.InheritMetadata(&result, s.metadata)
 		account.Release(s.held)
 		if err == nil {
@@ -114,7 +135,23 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 	index := map[string]int{}
 	for at := start; ; {
 		mark := s.held
-		r, e := s.eval(plan.Expression.Expr, at)
+		var r value.Result
+		var e error
+		if s.perStep {
+			r, e = s.eval(plan.Expression.Expr, at)
+		} else {
+			// A step that overran the account while union scans hold their
+			// rows is evaluated again without them: the per-step path is the
+			// reference for what fits. Every piece of state a failed attempt
+			// may have touched is put back first.
+			budget, metadata := *s.budget, s.metadata
+			r, e = s.eval(plan.Expression.Expr, at)
+			if e != nil && s.unionTried && isQuota(e) {
+				s.dropUnions()
+				*s.budget, s.metadata = budget, metadata
+				r, e = s.eval(plan.Expression.Expr, at)
+			}
+		}
 		if e != nil {
 			return result, nil, e
 		}
@@ -139,7 +176,13 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 			if !ok {
 				cost += value.SeriesBytes(value.Series{Labels: series.Labels}) + int64(len(key)) + 64
 			}
-			if e = s.reserve(cost); e != nil {
+			if e = s.reserve(cost); e != nil && s.unionHeld > 0 && isQuota(e) {
+				// What the union holds is not the step's to spend: release it
+				// and charge the result again, and read per step from here on.
+				s.dropUnions()
+				e = s.reserve(cost)
+			}
+			if e != nil {
 				return result, nil, e
 			}
 			if !ok {
@@ -156,6 +199,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 		}
 		at = model.UnixNano(int64(at) + step)
 	}
+	s.dropUnions()
 	if e := metricSort(result.Matrix, func(i, j int) bool { return value.CompareLabels(result.Matrix[i].Labels, result.Matrix[j].Labels) < 0 }, func() error { return account.Check(ctx) }); e != nil {
 		return result, nil, e
 	}
@@ -235,11 +279,22 @@ func (s *metricState) node(e Expr, at model.UnixNano) (value.Result, error) {
 			if err != nil || right == math.MaxInt64 {
 				return value.Result{}, model.Fail(model.Invalid)
 			}
-			it, err := s.selectEntries(p, model.UnixNano(left+1), model.UnixNano(right+1))
+			rp := RangePlan{Function: n.Name, Range: rg, Pipeline: p, Parameter: parameter, Grouping: n.Grouping, Without: n.Without, checked: true}
+			frame := Frame{Time: at, Profile: s.plan.Profile, Project: s.src.ProjectID(), Account: s.account, budget: s.budget}
+			var r value.Result
+			union, err := s.union(rg, p)
 			if err != nil {
 				return value.Result{}, err
 			}
-			r, err := EvaluateRange(s.ctx, RangePlan{Function: n.Name, Range: rg, Pipeline: p, Parameter: parameter, Grouping: n.Grouping, Without: n.Without, checked: true}, it, Frame{Time: at, Profile: s.plan.Profile, Project: s.src.ProjectID(), Account: s.account, budget: s.budget})
+			if union != nil {
+				r, err = evaluateRange(s.ctx, rp, union.replay(s.account, left, right), frame)
+			} else {
+				it, e := s.selectEntries(p, model.UnixNano(left+1), model.UnixNano(right+1))
+				if e != nil {
+					return value.Result{}, e
+				}
+				r, err = EvaluateRange(s.ctx, rp, it, frame)
+			}
 			value.InheritMetadata(&s.metadata, r)
 			if err == nil {
 				s.held += value.ResultBytes(r)
@@ -311,16 +366,9 @@ func samePipeline(p PipelinePlan, l *LogExpr) bool {
 	return true
 }
 func (s *metricState) selectEntries(p PipelinePlan, start, end model.UnixNano) (EntryIterator, error) {
-	ms := make([]scan.LabelMatcher, len(p.Matchers))
-	for i, m := range p.Matchers {
-		ms[i] = scan.LabelMatcher{Name: m.Name, Op: m.Op, Value: m.Value}
-	}
-	it, err := s.src.Select(s.ctx, scan.LogSelection{Start: start, End: end, Matchers: ms, Profile: s.plan.Profile, Account: s.account, RegexScope: p.RegexScope})
+	it, err := s.selectRows(p, start, end)
 	if err != nil {
 		return nil, err
-	}
-	if it == nil {
-		return nil, model.Fail(model.Corrupt)
 	}
 	return &pipelineEntries{it, p, s.account}, nil
 }

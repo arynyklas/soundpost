@@ -120,6 +120,20 @@ func loadRuleDefinition(st *State, key string) (RuleDefinitionRecord, bool, erro
 	return rec, true, nil
 }
 
+// loadRuleDefinitionRO is loadRuleDefinition against a read-only control state; the record is decoded from a
+// copy of the stored bytes.
+func loadRuleDefinitionRO(ro model.ReadOnlyControl, key string) (RuleDefinitionRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookRuleDefinition, key)
+	if !ok {
+		return RuleDefinitionRecord{}, false, nil
+	}
+	var rec RuleDefinitionRecord
+	if json.Unmarshal(raw, &rec) != nil || ruleKey(rec.Org, rec.Project, rec.Rule) != key {
+		return RuleDefinitionRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return rec, true, nil
+}
+
 // applyRuleDefinitionArm commits one catalogue command (see the file comment).
 func applyRuleDefinitionArm(scope auth.Scope, st *State, cmd Command, operation string, d RuleDefinitionApply) (Effect, error) {
 	reason, ok := cleanReason(d.Reason)
@@ -203,20 +217,18 @@ func applyRuleDefinitionArm(scope auth.Scope, st *State, cmd Command, operation 
 // the project's rule facts. A project the scope does not name is
 // indistinguishable from an absent one.
 func (s *Store) RuleDefinitions(ctx context.Context, scope auth.Scope, project model.ID) (out []RuleDefinitionRecord, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		prefix := scope.OrgID().String() + ":" + project.String() + ":"
-		for key := range st.RuleDefinitions {
-			if !strings.HasPrefix(key, prefix) {
-				continue
-			}
-			rec, _, e := loadRuleDefinition(&st, key)
+		for _, key := range st.BookKeys(model.BookRuleDefinition, scope.OrgID().String()+":"+project.String()+":") {
+			rec, found, e := loadRuleDefinitionRO(st, key)
 			if e != nil {
 				return e
 			}
-			out = append(out, rec)
+			if found {
+				out = append(out, rec)
+			}
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Rule.String() < out[j].Rule.String() })
 		return nil
@@ -226,12 +238,12 @@ func (s *Store) RuleDefinitions(ctx context.Context, scope auth.Scope, project m
 
 // RuleDefinition reads one rule's catalogue record.
 func (s *Store) RuleDefinition(ctx context.Context, scope auth.Scope, project, rule model.ID) (out RuleDefinitionRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadRuleDefinition(&st, ruleKey(scope.OrgID(), project, rule))
+		out, found, e = loadRuleDefinitionRO(st, ruleKey(scope.OrgID(), project, rule))
 		return e
 	})
 	return

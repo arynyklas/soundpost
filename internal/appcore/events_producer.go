@@ -177,7 +177,7 @@ func (p *eventProducer) observe(ctx context.Context, admin, write auth.Scope, sc
 func (p *eventProducer) endpoints(ctx context.Context, org, project model.ID) ([]notify.FeedEndpoint, map[model.ID]model.ID, error) {
 	var out []notify.FeedEndpoint
 	tests := map[model.ID]model.ID{}
-	err := p.app.Control.View(ctx, func(st model.ControlState) error {
+	err := p.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		if _, retired := st.RetiredOrgs[org.String()]; retired {
 			return model.Fail(model.NotFound)
 		}
@@ -453,7 +453,7 @@ func (p *eventProducer) releaseEvents(ctx context.Context, admin auth.Scope, org
 		at model.UnixNano
 	}
 	var found []built
-	err := p.app.Control.View(ctx, func(st model.ControlState) error {
+	err := p.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		if err := admin.ValidateControlState(st); err != nil {
 			return err
 		}
@@ -503,7 +503,7 @@ func (p *eventProducer) releaseEvents(ctx context.Context, admin auth.Scope, org
 // are announced, each once, under distinct delivery IDs (the audit entry ID is the identity).
 func (p *eventProducer) auditEvents(ctx context.Context, org, project model.ID, live map[string]bool, state notify.EventFeedState, baseline bool, now model.UnixNano) ([]notify.FeedEvent, error) {
 	var out []notify.FeedEvent
-	err := p.app.Control.View(ctx, func(st model.ControlState) error {
+	err := p.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		n := uint64(len(st.Audits))
 		if baseline {
 			out = append(out, notify.FeedEvent{At: now, Update: notify.MarkUpdate{AuditTo: n}})

@@ -66,12 +66,13 @@ type CoreViewer interface {
 }
 
 // viewCore reads the control state without the admission books, read only: shared when the store can
-// and is not a wrapper of one, otherwise the whole state (View).
+// and is not a wrapper of one, otherwise the whole state without the admission books (View under
+// model.WithoutBooks): a caller of viewCore does not read the books either way.
 func (s *Service) viewCore(ctx context.Context, fn func(model.ControlState) error) error {
 	if v, ok := s.store.(CoreViewer); ok && v.SharesViewOf(s.store) {
 		return v.ViewCore(ctx, fn)
 	}
-	return s.store.View(ctx, fn)
+	return s.store.View(model.WithoutBooks(ctx), fn)
 }
 
 // viewAdmission is viewCore that also gives the reader the reservation rows.
@@ -392,7 +393,7 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {
 	var out Credential
-	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
+	e := s.viewCore(ctx, func(st model.ControlState) error {
 		if tokenRecord, ok := st.ServerTokens[s.serverTokenDigest(token)]; ok {
 			user, exists := st.Users[tokenRecord.Principal.String()]
 			if !exists || user.Disabled || tokenRecord.Revoked || tokenRecord.Expires <= s.now().Unix() {
@@ -413,7 +414,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Credential, e
 }
 func (s *Service) Session(ctx context.Context, token string) (Session, error) {
 	var out Session
-	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
+	e := s.viewCore(ctx, func(st model.ControlState) error {
 		v, ok := st.Sessions[hashToken(token)]
 		if !ok || v.Expires <= s.now().Unix() || st.Users[v.User.String()].ID == (model.ID{}) || st.Users[v.User.String()].Disabled {
 			return model.Fail(model.Unauthenticated)

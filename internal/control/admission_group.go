@@ -196,12 +196,12 @@ func (s *Store) roundOnce(items []*admissionItem) (left []*admissionItem, lost b
 	var carried []*admissionItem
 	admitted, wrote := 0, 0 // the admission transitions and the sparse ones with records that the proposal carries
 	e := s.db.View(func(tx *bolt.Tx) error {
-		decodes := s.db.decodes.Load()
+		decodes := s.db.decodes.Load() + s.db.memberDecodes.Load()
 		core, err := s.coreState(tx)
 		if err != nil {
 			return err
 		}
-		if sparse && s.db.decodes.Load() != decodes {
+		if sparse && s.db.decodes.Load()+s.db.memberDecodes.Load() != decodes {
 			s.sparseLockedDecodes.Add(1) // the decode warmCore did not leave: the round made it under the lock
 		}
 		if !ledgerLayout(tx.Bucket([]byte("control"))) || !s.StatePatch() {
