@@ -30,7 +30,7 @@ func TestLegacyAppliedWALRebuildsExactPolicyRevision(t *testing.T) {
 	// the predecessor's image. This is not a legacy proposer or ACK adapter.
 	var applied walEntry
 	err = e.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("replica_commands")).Get(commandKey(b.RouteSlot, uint64(receipt.Cursor.Index)))
+		raw := commandAt(tx.Bucket([]byte("replica_commands")), commandKey(b.RouteSlot, uint64(receipt.Cursor.Index)))
 		if raw == nil {
 			return model.Fail(model.Corrupt)
 		}
@@ -53,6 +53,7 @@ func TestLegacyAppliedWALRebuildsExactPolicyRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = predecessor.Update(func(tx *bolt.Tx) error {
+		dropRunsLayout(t, tx)
 		for _, name := range []string{"replica_data", "replica_commands", "scan_pages", "scan_time", "scan_postings", "scan_commits", "scan_integrity"} {
 			if err := tx.DeleteBucket([]byte(name)); err != nil {
 				return err
@@ -86,7 +87,7 @@ func TestLegacyAppliedWALRebuildsExactPolicyRevision(t *testing.T) {
 		t.Fatal("legacy typed row lost or duplicated")
 	}
 	err = e.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("scan_pages")).ForEach(func(_, raw []byte) error {
+		return forEachLogical(tx, "scan_pages", func(_, raw []byte) error {
 			ref, err := parsePageRef(raw)
 			if err != nil {
 				return err
@@ -119,8 +120,7 @@ func TestMissingIndexEntryFailsStartupInsteadOfEmptyResult(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err = e.db.Update(func(tx *bolt.Tx) error {
-				bucket := tx.Bucket([]byte(name))
-				key, _ := bucket.Cursor().First()
+				bucket, key := firstLogical(tx, name)
 				if key == nil {
 					t.Fatal("missing fixture entry")
 				}

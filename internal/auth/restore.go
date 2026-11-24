@@ -536,7 +536,7 @@ func (s *Service) RevalidateInstance(ctx context.Context, scope Scope) error {
 	if _, err := s.Authenticate(ctx, scope.credential.token); err != nil {
 		return err
 	}
-	return s.store.View(ctx, func(st model.ControlState) error {
+	return s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, scope.credential); err != nil {
 			return err
 		}

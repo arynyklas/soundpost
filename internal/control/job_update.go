@@ -462,7 +462,16 @@ func (s *Store) TransactJobs(ctx context.Context, scope auth.Scope, cmd Command)
 		return Result{}, model.Fail(model.Unsupported)
 	}
 	var out Result
-	err := s.updateAs(ctx, writerTransactJobs, func(st *State) error {
+	// The update of one job (the worker's attempt, schedule and correction commands) writes one record of
+	// the job books: it is committed as that record (sparse.go). The catalogue kinds, a correction that
+	// audits and a project a finished deletion covers go through the whole-state funnel.
+	handled, err := s.sparseUpdate(ctx, func(core *State, l *ledgerTx) ([]patchOp, error) {
+		return planJobUpdate(scope, cmd, core, l, &out)
+	})
+	if handled {
+		return out, err
+	}
+	err = s.updateAs(retryLostProposals(ctx), writerTransactJobs, func(st *State) error {
 		job, version, phase, err := applyJobUpdate(scope, st, cmd)
 		if err != nil {
 			return err
@@ -473,17 +482,81 @@ func (s *Store) TransactJobs(ctx context.Context, scope auth.Scope, cmd Command)
 	return out, err
 }
 
+// planJobUpdate is the plan of TransactJobs for the update of one job: applyJobUpdate on a state that holds
+// the records of the project's job books and nothing the update writes besides.
+func planJobUpdate(scope auth.Scope, cmd Command, core *State, l *ledgerTx, out *Result) ([]patchOp, error) {
+	var c JobUpdateCommand
+	if strictPayload(cmd.Payload, &c) != nil || c.Kind == JobKindDefine || c.Kind == JobKindRetire || c.Audit != nil {
+		return nil, errSparseFallback
+	}
+	org := scope.OrgID()
+	if lateErasureMayApply(core, org, c.Project) {
+		return nil, errSparseFallback
+	}
+	if c.Kind == JobKindAdvance {
+		return planJobPosition(scope, cmd, c, core, l, out)
+	}
+	ov := *core
+	ov.JobBooks = l.bookRecords(tableJobBooks, jobProjectPrefix(org, c.Project))
+	ov.Audits = nil
+	key := jobKey(org, c.Project, c.Job)
+	before := ov.JobBooks[key]
+	job, version, phase, err := applyJobUpdate(scope, &ov, cmd)
+	if err != nil {
+		return nil, err
+	}
+	if len(ov.Audits) != 0 {
+		return nil, errSparseFallback
+	}
+	*out = Result{AffectedIDs: []model.ID{job}, Phase: phase, Revision: core.Revision + 1, Cursor: model.Cursor{Group: job, Index: model.Uint64(version)}}
+	after, ok := ov.JobBooks[key]
+	if !ok || bytes.Equal(before, after) {
+		return nil, nil
+	}
+	return []patchOp{{Op: opSet, Path: []string{"JobBooks", key}, Value: after}}, nil
+}
+
+// planJobPosition is planJobUpdate for the advance of a project's resume position (job_position.go): one record
+// of the position book.
+func planJobPosition(scope auth.Scope, cmd Command, c JobUpdateCommand, core *State, l *ledgerTx, out *Result) ([]patchOp, error) {
+	key := jobPositionKey(scope.OrgID(), c.Project)
+	before, held := l.bookRecord(tableJobPositions, key)
+	ov := *core
+	ov.JobPositions = map[string]json.RawMessage{}
+	if held {
+		ov.JobPositions[key] = before
+	}
+	ov.Audits = nil
+	job, version, phase, err := applyJobUpdate(scope, &ov, cmd)
+	if err != nil {
+		return nil, err
+	}
+	*out = Result{AffectedIDs: []model.ID{job}, Phase: phase, Revision: core.Revision + 1, Cursor: model.Cursor{Group: job, Index: model.Uint64(version)}}
+	after, ok := ov.JobPositions[key]
+	if !ok || bytes.Equal(before, after) {
+		return nil, nil
+	}
+	return []patchOp{{Op: opSet, Path: []string{"JobPositions", key}, Value: after}}, nil
+}
+
 // JobBook reads one job through a linearizable control read. The scope is
 // checked before the project is looked up; a project the scope does not name, a
 // retired one and a missing one are indistinguishable, and so is a missing job.
 func (s *Store) JobBook(ctx context.Context, scope auth.Scope, project, job model.ID) (out JobSnapshot, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
+	// Every attempt the job worker applies reads its job first. The read shares the decode of the state
+	// that every other core reader uses instead of decoding the whole blob again (46 % of the server's
+	// CPU in the live profile of L2w20Admission7, 3-4 decodes per attempt); the job record itself is
+	// read from the blob of the same transaction, since that decode holds no job books.
+	err = s.viewJobBook(ctx, jobKey(scope.OrgID(), project, job), func(st State, raw json.RawMessage, ok bool) error {
 		if e := jobReadScope(scope, &st, project); e != nil {
 			return e
 		}
-		rec, ok, e := loadJobRecord(&st, jobKey(scope.OrgID(), project, job))
-		if e != nil || !ok {
-			return e
+		if !ok {
+			return nil
+		}
+		var rec JobRecord
+		if json.Unmarshal(raw, &rec) != nil {
+			return model.Fail(model.Corrupt)
 		}
 		if rec.Org != scope.OrgID() || rec.Project != project || rec.Job != job {
 			return model.Fail(model.Corrupt)

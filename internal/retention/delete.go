@@ -24,10 +24,12 @@ type Service struct {
 	worker WorkerConfig
 	clock  atomic.Pointer[func() time.Time] // Config.Clock until UseClock replaces it
 	mu     sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
-	status WorkerStatus
-	last   struct{ snapshot, expiry time.Time }
+	// settleMu keeps the settlement passes (the worker's own and the faster loop's) from overlapping.
+	settleMu sync.Mutex
+	cancel   context.CancelFunc
+	done     chan struct{}
+	status   WorkerStatus
+	last     struct{ snapshot, expiry time.Time }
 }
 
 // New validates the wiring and registers the control dispatchers (idempotent

@@ -205,7 +205,10 @@ func applyAuditDelta(current *State, d auditDelta) (owe bool) {
 // very revision its last rows are the delta's.
 func (m *replicatedControl) verifyCurrentDelta(d auditDelta) error {
 	return m.store.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
+		raw, err := stateRaw(tx.Bucket([]byte("control")))
+		if err != nil {
+			return err
+		}
 		n := len(d.Audits)
 		// The head and the last rows of the log are read from the bytes; the rest of the state is not
 		// decoded (a restart replays the journal over a state of tens of megabytes).

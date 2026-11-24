@@ -86,7 +86,7 @@ func (s *Service) ResolveElevation(ctx context.Context, c Credential, id model.I
 		return Elevation{}, err
 	}
 	var out Elevation
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		var r elevationRecord
 		if err := json.Unmarshal(st.OIDC["elevation:"+id.String()], &r); err != nil {
 			return model.Fail(model.NotFound)

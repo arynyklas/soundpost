@@ -30,6 +30,7 @@ type fakeFeed struct {
 	subErr     error
 	requests   []storage.SubscribeRequest
 	marks      []model.Cursor
+	lag        atomic.Uint64
 }
 
 type fakeIter struct {
@@ -92,6 +93,7 @@ func (it *fakeIter) Next(ctx context.Context) (storage.ChangePage, error) {
 	}
 }
 func (it *fakeIter) Watermarks() []model.Cursor { return it.feed.marks }
+func (it *fakeIter) Lag() uint64                { return it.feed.lag.Load() }
 func (it *fakeIter) Close() error {
 	it.feed.closeCalls.Add(1)
 	it.once.Do(func() { close(it.closed) })
@@ -1549,6 +1551,46 @@ func TestLiveEvictionKeepsGapEventBound(t *testing.T) {
 	}
 	if len(gap.Gap.After) != 1 || gap.Gap.After[0].Index != 105 || len(gap.Gap.Through) != 1 || gap.Gap.Through[0].Index != 106 {
 		t.Fatalf("the gap must keep the feed gap's exact bound (after 105 through 106): after %+v through %+v", gap.Gap.After, gap.Gap.Through)
+	}
+}
+
+// D97: a live stream asks the committed feed to answer an overrun from durable storage, so a burst faster
+// than the feed's queue does not leave a hole the stream can only announce.
+func TestLiveSubscriptionAsksForCatchUp(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	it, _ := e.mustOpen(t, scope, e.req(`{app="web"}`, project), nil)
+	defer it.Close()
+	if req := e.feed.requests[0]; !req.CatchUp {
+		t.Fatalf("the live subscription must request catch-up from durable storage: %+v", req)
+	}
+}
+
+// D99: the lag bound reaches the feed subscription, and the stream's open and heartbeat events say how far
+// behind the feed it is (absent when caught up).
+func TestLiveHeartbeatCarriesTheFeedLagAndTheLagBoundReachesTheFeed(t *testing.T) {
+	e := newLiveEnv(t, func(l *LiveLimits) { l.Heartbeat = 30 * time.Millisecond; l.CatchUpLag = 77 })
+	_, project, _, scope := fixture(t, e)
+	it, _ := e.mustOpen(t, scope, e.req(`{app="web"}`, project), nil)
+	defer it.Close()
+	if got := e.feed.requests[0].CatchUpLag; got != 77 {
+		t.Fatalf("the configured lag bound did not reach the feed subscription: %d", got)
+	}
+	heartbeat := func() LiveEvent {
+		t.Helper()
+		for {
+			if ev := nextEvent(t, it); ev.Type == LiveHeartbeat {
+				return ev
+			}
+		}
+	}
+	e.feed.lag.Store(5)
+	if ev := heartbeat(); ev.Lag != 5 {
+		t.Fatalf("a heartbeat must carry the feed's lag: %+v", ev)
+	}
+	e.feed.lag.Store(0)
+	if ev := heartbeat(); ev.Lag != 0 {
+		t.Fatalf("a caught-up stream reports no lag: %+v", ev)
 	}
 }
 

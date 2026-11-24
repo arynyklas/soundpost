@@ -78,6 +78,9 @@ type MTLS struct {
 	deferred map[deferKey]*deferredStep
 	// layoutSupport answers QueryLayout of the other members (layout_query.go); nil: the route is forbidden.
 	layoutSupport atomic.Pointer[func() (uint64, bool)]
+	// transfers are the messages being received in parts (transport_parts.go), at most one per sending member and group.
+	partMu    sync.Mutex
+	transfers map[transferKey]*transfer
 }
 
 func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x509.CertPool, sourceIP string) (*MTLS, error) {
@@ -143,6 +146,10 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.serveReadiness(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, snapshotPartPath) {
+		t.serveSnapshotPart(w, r)
+		return
+	}
 	if r.URL.Path == batchPath {
 		t.serveBatch(w, r)
 		return
@@ -151,45 +158,17 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	identity := certificateIdentity(r.TLS.PeerCertificates[0])
-	var group model.ID
-	if group.UnmarshalText([]byte(strings.TrimPrefix(r.URL.Path, raftPath))) != nil {
+	g, sender, ok := t.authenticatePeer(w, r, raftPath)
+	if !ok {
+		return
+	}
+	limit := maxReady()
+	raw, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
+	if err != nil || len(raw) > limit {
 		http.Error(w, "invalid", http.StatusBadRequest)
 		return
 	}
-	t.mu.RLock()
-	g := t.groups[group]
-	t.mu.RUnlock()
-	if g == nil {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	members := g.transportMembers()
-	var sender uint64
-	for _, m := range members.Nodes {
-		if m.NodeIdentity == identity {
-			sender = m.ID
-		}
-	}
-	if sender == 0 {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, maxReadyBytes+1))
-	if err != nil || len(raw) > maxReadyBytes {
-		http.Error(w, "invalid", http.StatusBadRequest)
-		return
-	}
-	message := &pb.Message{}
-	if proto.Unmarshal(raw, message) != nil || message.GetFrom() != sender || message.GetTo() != t.id || raft.IsLocalMsg(message.GetType()) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-	if err = g.Step(r.Context(), message); err != nil {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	t.stepMessage(w, r, g, sender, raw)
 }
 func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 	if m == nil {
@@ -307,6 +286,9 @@ func (t *MTLS) sendOne(out outbound, target Member) error {
 	raw, err := proto.Marshal(out.message)
 	if err != nil {
 		return err
+	}
+	if len(raw) > maxReady() {
+		return t.sendParts(client, target, out.group, raw)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

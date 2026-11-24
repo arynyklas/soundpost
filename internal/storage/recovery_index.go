@@ -18,7 +18,6 @@ import (
 // Reading the original normalized envelope preserves its exact capture-policy
 // revision; current source policy is never substituted for historical metadata.
 func (e *Engine) migrateIndexes(tx *bolt.Tx) error {
-	batches := tx.Bucket([]byte("batches"))
 	indexed := 0
 	for slot := range uint16(64) {
 		cursor := tx.Bucket([]byte("cursors")).Get(slotKey(slot))
@@ -67,7 +66,9 @@ func (e *Engine) migrateIndexes(tx *bolt.Tx) error {
 						return model.Fail(model.Corrupt)
 					}
 					key := batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)
-					if raw := batches.Get(key); raw != nil {
+					if stored, err := tableGet(tx, tblBatches, key); err != nil {
+						return err
+					} else if raw := storedTx(tx, stored); stored != nil {
 						var rows []model.Record
 						if json.Unmarshal(raw, &rows) != nil {
 							return model.Fail(model.Corrupt)
@@ -88,7 +89,11 @@ func (e *Engine) migrateIndexes(tx *bolt.Tx) error {
 			return err
 		}
 	}
-	if indexed != batches.Stats().KeyN {
+	stored := 0
+	if err := tableForEach(tx, tblBatches, func(_, _ []byte) error { stored++; return nil }); err != nil {
+		return err
+	}
+	if indexed != stored {
 		return model.Fail(model.Corrupt)
 	}
 	return nil

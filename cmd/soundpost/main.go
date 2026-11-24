@@ -11,6 +11,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/health"
 	"github.com/arynyklas/soundpost/internal/httpapi"
 	"net/http"
@@ -254,7 +255,11 @@ func run() error {
 		routes = append(routes, register)
 	}
 	early.gate.Open(httpapi.NewServerBehind(proxies, *listen, service, cfg, routes...).Handler)
-	go core.RunFences(ctx)
+	// The fences and the workers read the control state every few seconds and never look at the admission
+	// books (reservations, per-series quotas): they run without them, so what a pass costs does not grow with
+	// the batches admitted so far (control.WithoutBooks).
+	background := control.WithoutBooks(ctx)
+	go core.RunFences(background)
 	// The operator socket of a distributed node (`soundpost membership`); none on single host.
 	if admin, e := serveMembership(*dir, core); e != nil {
 		fmt.Fprintln(os.Stderr, "soundpost: membership socket not started")
@@ -264,7 +269,7 @@ func run() error {
 	// The leader-only background runner (rules, conditions, issue/incident/job
 	// producers, notification delivery) acts as the in-process system principal of
 	// each organization: no human session, no stored token.
-	if e = startWorkers(ctx, core, workers); e != nil {
+	if e = startWorkers(background, core, workers, ready); e != nil {
 		return e
 	}
 	e = <-early.done

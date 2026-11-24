@@ -283,7 +283,7 @@ func (s *Service) ListSavedViews(ctx context.Context, c Credential, org, project
 		return nil, err
 	}
 	out := []SavedView{}
-	err = s.store.View(ctx, func(st model.ControlState) error {
+	err = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
 		}
@@ -415,7 +415,7 @@ func (s *Service) commitSavedView(ctx context.Context, scope Scope, id model.ID,
 		return out, nil
 	}
 	key := SavedViewKey(scope.org, c.Project, res.AffectedIDs[0])
-	err = s.store.View(ctx, func(st model.ControlState) error {
+	err = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
 		}

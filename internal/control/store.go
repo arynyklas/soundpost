@@ -36,6 +36,10 @@ type Store struct {
 	// ReserveAdmission then asks the owner about a key it has no row for before its first update
 	// instead of after an aborted one. A hint only: the update decides on the state it reads.
 	settledSeen atomic.Bool
+	// layoutLedger says whether this file keeps the admission books in the ledger (ledgerLayout); it is
+	// read by every admission before it decides how to commit, and set where the layout changes: Open,
+	// the activation in Apply and a snapshot install.
+	layoutLedger atomic.Bool
 	// boundedGate says whether the bounded-state rules apply (bounded_rules.go); nil: they do.
 	boundedGate atomic.Pointer[func() bool]
 	// auditDeltaGate says whether the audit delta command may be proposed (audit_delta.go); nil: it may not.
@@ -47,6 +51,24 @@ type Store struct {
 	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
 	statePatchGate                atomic.Pointer[func() bool]
 	statePatches, statePatchBytes atomic.Uint64
+	// sparseCommits counts the commands proposed by sparseUpdate (sparse.go).
+	sparseCommits atomic.Uint64
+	// sparseLockedDecodes counts the sparse commits that had to decode the state under the lock.
+	sparseLockedDecodes atomic.Uint64
+	// settleScanRows counts the reservation rows the planning of a settlement decoded (settle.go): the
+	// books are scanned once per SettleAdmissions call, never by the commands that call commits.
+	settleScanRows atomic.Uint64
+	// legacyStatePatchGate says whether every member declared the first protocol of the patch: a patch
+	// may then be proposed against a ledger that holds no record (SetLegacyStatePatchGate); nil: it may not.
+	legacyStatePatchGate atomic.Pointer[func() bool]
+	// admissionYieldUntil and admissionYieldNext are the leader's fairness toward the writers that are not
+	// admission (admission_yield.go), as UnixNano; admissionYieldScale stretches its two durations (0: not
+	// stretched), set by a test alone.
+	admissionYieldUntil, admissionYieldNext, admissionYieldScale atomic.Int64
+	// admissions is the group commit of admission transitions (admission_group.go); admissionRounds and
+	// admissionRoundItems count the rounds proposed and the transitions they carried.
+	admissions                           admissionQueue
+	admissionRounds, admissionRoundItems atomic.Uint64
 	// layoutSupportGate names the members of the control group whose running binary does not read
 	// the contracted index layout (index_layout.go); nil: none is known to.
 	layoutSupportGate atomic.Pointer[func() []string]
@@ -55,6 +77,20 @@ type Store struct {
 	// rawApplies and decodedApplies count the committed commands this store applied to the bytes of
 	// its state (stateRoot, patchRaw) and the ones it had to decode the state for (Apply).
 	rawApplies, decodedApplies atomic.Uint64
+	// updateHolds and updateHeldNS count the times updateMu was taken by a writer and how long it was held
+	// (lockUpdates): what the writers cost the others that wait for it.
+	updateHolds, updateHeldNS atomic.Uint64
+}
+
+// lockUpdates takes updateMu and returns the function that releases it and counts the hold.
+func (s *Store) lockUpdates() func() {
+	s.updateMu.Lock()
+	taken := time.Now()
+	return func() {
+		s.updateHeldNS.Add(uint64(time.Since(taken)))
+		s.updateHolds.Add(1)
+		s.updateMu.Unlock()
+	}
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now
@@ -82,6 +118,15 @@ type State = model.ControlState
 type Command = model.ControlCommand
 type Result = model.ControlResult
 
+// openControlDB opens control.db with durablefs.BoltOptions (D91: no freelist in the commits, 455 KB, 111 pages, in each of the 57
+// commits a second of the gate after its hour; read at open when the last close wrote it and rebuilt from the live tree when it did not).
+// The warm-up of the live tree of a file that carries no freelist comes first (durablefs.WarmBoltTree: the 200,000 nodes of the gate's file
+// are a pass of 26 s on a cold disk when bolt walks them one page fault at a time), then bolt.
+func openControlDB(path string) (*bolt.DB, error) {
+	durablefs.WarmBoltTree(path)
+	return bolt.Open(path, 0600, durablefs.BoltOptions())
+}
+
 // Open opens (or creates) the control.db in dir. In the same write transaction it makes sure the
 // file carries the node-local scrub marker (erase.go, localScrubKey): the key's presence says that
 // a build with the marker has seen this file. A file without the key was written by an earlier
@@ -101,7 +146,7 @@ func Open(dir string) (*Store, error) {
 	if statErr != nil && !fresh {
 		return nil, statErr
 	}
-	db, e := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	db, e := openControlDB(path)
 	if e != nil {
 		return nil, e
 	}
@@ -110,20 +155,27 @@ func Open(dir string) (*Store, error) {
 		return nil, e
 	}
 	s := &Store{db: &trackedDB{DB: db}, dir: dir}
+	registerTracked(s.db)
 	e = db.Update(func(tx *bolt.Tx) error {
 		if !fresh {
 			b := tx.Bucket([]byte("control"))
 			if b == nil || b.Get([]byte("state")) == nil {
 				return model.Fail(model.Corrupt)
 			}
-			return markOpenedFile(b)
+			if e := markOpenedFile(b); e != nil {
+				return e
+			}
+			return migrateLedger(tx)
 		}
 		b, e := tx.CreateBucketIfNotExists([]byte("control"))
 		if e != nil {
 			return e
 		}
 		if b.Get([]byte("state")) != nil {
-			return markOpenedFile(b)
+			if e := markOpenedFile(b); e != nil {
+				return e
+			}
+			return migrateLedger(tx)
 		}
 		token := Random()
 		st := State{Installation: model.NewID(), BootstrapHash: Hash(token), Users: map[string]User{}, Sessions: map[string]Session{}, Orgs: map[string]Org{}, Commands: map[string]Result{}, OIDC: map[string]json.RawMessage{}}
@@ -137,12 +189,18 @@ func Open(dir string) (*Store, error) {
 		if e = putState(b, v); e != nil {
 			return e
 		}
-		return writeLocalScrub(b, localScrub{})
+		if e = writeLocalScrub(b, localScrub{}); e != nil {
+			return e
+		}
+		return ensureLedger(tx)
 	})
 	if e != nil {
+		unregisterTracked(s.db)
 		db.Close()
 		return nil, e
 	}
+	s.noteSettled()
+	s.noteLayout()
 	return s, nil
 }
 func (s *Store) Close() error {
@@ -152,7 +210,15 @@ func (s *Store) Close() error {
 			return err
 		}
 	}
-	return s.db.Close()
+	// A graceful close writes the freelist the commits did not (durablefs.BoltOptions): the next start reads it instead of walking the tree.
+	err := s.db.syncFreelist()
+	if errors.Is(err, bolt.ErrDatabaseNotOpen) {
+		err = nil // closed already
+	}
+	if x := s.db.Close(); err == nil {
+		err = x
+	}
+	return err
 }
 func (s *Store) BootstrapToken() (string, error) {
 	b, e := os.ReadFile(filepath.Join(s.dir, "bootstrap.token"))
@@ -161,7 +227,42 @@ func (s *Store) BootstrapToken() (string, error) {
 func (s *Store) RemoveBootstrapFile() error {
 	return durablefs.Remove(filepath.Join(s.dir, "bootstrap.token"))
 }
-func (s *Store) View(ctx context.Context, fn func(State) error) error {
+
+// head is the installation and the revision of the committed state, read from the keys that hold them
+// (the state is not decoded, and neither is the ledger): what a start needs to name its journal.
+func (s *Store) head() (installation model.ID, revision model.Revision, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		ctrl := tx.Bucket([]byte("control"))
+		if ctrl == nil {
+			return model.Fail(model.Corrupt)
+		}
+		installation, revision, err = stateHead(ctrl)
+		return err
+	})
+	return
+}
+
+// Installation is the identity of the installation this file belongs to. It reads the committed file
+// directly, without the read barrier of the replication group, so that it can be asked before the group
+// is opened.
+func (s *Store) Installation() (model.ID, error) {
+	installation, _, err := s.head()
+	return installation, err
+}
+
+// DataInitialized says whether the installation's data engine was initialized (ControlState.DataInitialized),
+// read from the state blob like Installation: the open of the application asks it before any group exists.
+func (s *Store) DataInitialized() (initialized bool, err error) {
+	err = s.viewCore(context.Background(), func(st State) error { initialized = st.DataInitialized; return nil })
+	return
+}
+
+// viewCore is View for a reader of the members the state blob holds (the organizations, the artifact
+// intents, the deletions, the audit log): the read barrier and the transaction are View's, but no member
+// of the ledger is assembled into the state (the admission books, the job and issue books, the grouping
+// issues and the applied-command log come empty, in a file that keeps them in the ledger). A start reads
+// the state several times before it serves, and the ledger of a busy installation is most of the file.
+func (s *Store) viewCore(ctx context.Context, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
@@ -172,21 +273,65 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		var st State
-		if e := json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st); e != nil {
+		if readState(tx.Bucket([]byte("control")), &st) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		return fn(st)
 	})
 }
 
+// View gives fn the committed state, with the admission books assembled into it (Reservations,
+// AdmissionKeys, Quotas, Settlement) unless ctx came from WithoutBooks. The job and issue books (JobBooks,
+// IssueBooks) are always assembled: a reader that asked not to carry the admission books may still look at
+// them (the retention worker's projections, a cutover's checkpoints). The State is the reader's own.
+func (s *Store) View(ctx context.Context, fn func(State) error) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if s.repl != nil {
+		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
+			return replicaFaultUnder(ctx, err)
+		}
+	}
+	books := model.WantsBooks(ctx)
+	return s.db.View(func(tx *bolt.Tx) error {
+		var st State
+		if books {
+			if e := loadLogical(tx, &st); e != nil {
+				return e
+			}
+		} else {
+			ctrl := tx.Bucket([]byte("control"))
+			if readState(ctrl, &st) != nil {
+				return model.Fail(model.Corrupt)
+			}
+			if ledgerLayout(ctrl) {
+				l, err := openLedger(tx)
+				if err != nil {
+					return err
+				}
+				m, err := l.membersOf(scopeBooks)
+				if err != nil {
+					return err
+				}
+				attachScope(&st, m, scopeBooks)
+			}
+		}
+		return fn(st)
+	})
+}
+
 // ViewShared is View for a reader that only reads. Instead of a decode of its own it is given the
-// decode of the committed revision that every concurrent shared reader uses, through the read-only
+// decode of the committed state that every concurrent shared reader uses, through the read-only
 // interface (model.ReadOnlyControl), which has no way to change it or to keep part of it: decoding
-// the whole state once per read made a pass of the background workers cost O(projects squared).
-// The linearizable read barrier is the same as View's, and so is the snapshot: the state is the
-// one of the bolt transaction the read runs in, so a reader sees one whole revision, never a mix.
-// fn must not retain the ReadOnlyControl past its return. A caller that changes what it reads, or
-// needs the State itself, uses View.
+// the whole state once per read made a pass of the background workers cost O(projects squared). The
+// decode is the one coreState keeps: it is made again only when a commit changed the blob other than
+// by stepping the revision (an admission round does not), so a reader on the append path of the data
+// engine (ActiveDeletions, once per batch) does not decode 1.8 MB for every control commit that went
+// before it. The linearizable read barrier is the same as View's, and so is the snapshot: the state
+// is the one of the bolt transaction the read runs in, so a reader sees one whole revision, never a
+// mix. The admission ledger is not part of it. fn must not retain the ReadOnlyControl past its
+// return. A caller that changes what it reads, or needs the State itself, uses View.
 func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
@@ -197,15 +342,17 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
-		if d := s.db.decoded.Load(); d != nil && d.txid == tx.ID() {
-			return fn(model.ReadOnlyOf(d.state))
+		st, err := s.coreState(tx)
+		if err != nil {
+			return err
 		}
-		st := new(State)
-		if e := json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), st); e != nil {
-			return model.Fail(model.Corrupt)
+		if ledgerLayout(tx.Bucket([]byte("control"))) {
+			l, err := openLedger(tx)
+			if err != nil {
+				return err
+			}
+			return fn(model.ReadOnlyOfWith(st, ledgerBookSource{l}))
 		}
-		s.db.decodes.Add(1)
-		s.db.publish(&decodedState{txid: tx.ID(), state: st})
 		return fn(model.ReadOnlyOf(st))
 	})
 }
@@ -219,7 +366,7 @@ func (s *Store) SharesViewOf(c auth.ControlStore) bool { return c == auth.Contro
 // Update commits fn as one control transition. It is an authority transition: it moves
 // AuthorityRevision. The writers that are known not to change authority go through updateAs.
 func (s *Store) Update(ctx context.Context, fn func(*State) error) error {
-	return s.update(ctx, true, fn)
+	return s.update(ctx, true, scopeAll, fn)
 }
 
 // errReplayed is returned by the transition of Transact when the command was already applied
@@ -242,15 +389,14 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 	// checks are the ones the update function makes (scope against the state, then the owner
 	// binding); a first submission racing this read finds the other's result in the update.
 	replayed := false
-	if e := s.View(ctx, func(st State) error {
-		v, ok := st.Commands[cmd.CommandID.String()]
-		if !ok {
+	if e := s.viewCommand(ctx, cmd.CommandID.String(), func(st *State, v Result, owner string, found bool) error {
+		if !found {
 			return nil
 		}
-		if err := scope.ValidateControlState(st); err != nil {
+		if err := scope.ValidateControlState(*st); err != nil {
 			return err
 		}
-		if st.CommandOwners[cmd.CommandID.String()] != scope.PrincipalID().String()+":"+scope.OrgID().String()+":"+cmd.Kind {
+		if owner != scope.PrincipalID().String()+":"+scope.OrgID().String()+":"+cmd.Kind {
 			return model.Fail(model.NotFound)
 		}
 		out, replayed = v, true
@@ -334,11 +480,21 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 		// The deletion saga, holds and retention policies of one organization write rows it owns: when
 		// that is all the commit changed, it moves the organization's own authority revision and leaves
 		// the installation's alone (F-10.05-2), so another organization's views are not made stale by it.
+		// Judged by what it changed in every member, the applied-command log included (booksOfOrg), it is
+		// given the whole log rather than the records of its own command (withCommandKey): a record it
+		// removes or edits is then a write the commit sees, and it moves the installation-wide revision.
 		e = s.updateOrgScoped(ctx, orgRetention, func(st *State, name func(model.ID)) error {
 			return apply(st, func() { name(scope.OrgID()) })
 		})
 	} else {
-		e = s.update(ctx, transactBumps(cmd.Kind), func(st *State) error { return apply(st, func() {}) })
+		ctx = withCommandKey(ctx, cmd.CommandID.String()) // applies one command: reads and writes its records and no other
+		members := membersOfKind(cmd)
+		if members&scopeBooks == 0 {
+			// The handler commits an effect: when a finished deletion exists it re-runs the erasure over the books
+			// too (eraseLateEffect), so it is given them then (replicatedUpdateOnce).
+			ctx = context.WithValue(ctx, lateErasureBooksKey{}, true)
+		}
+		e = s.update(ctx, transactBumps(cmd.Kind), members, func(st *State) error { return apply(st, func() {}) })
 	}
 	if legacy {
 		if f := (*model.Fault)(nil); errors.As(e, &f) && f.Code == model.Conflict {

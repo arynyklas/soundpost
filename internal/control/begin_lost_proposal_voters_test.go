@@ -41,6 +41,14 @@ func beginUnderSaturatingIntake(t *testing.T, patch bool) {
 			s.SetStatePatchGate(func() bool { return true })
 		}
 	}
+	if raceEnabled {
+		// A Begin attempt under the race detector takes several times as long between its read and its proposal, so the window in which the
+		// leader holds admission back for a writer that lost (admission_yield.go, sized for a plain build) closes before the loser proposes
+		// again: the window of eight times the length is the one this build's attempts need. The product is the same code in both builds.
+		for _, s := range v.stores {
+			s.SetAdmissionYieldScaleForTest(8)
+		}
+	}
 	for id := uint64(2); id <= 3; id++ {
 		f := v.fx[id]
 		sess, err := f.svc.Login(f.ctx, "owner@example.test", "a long test password 2026", "")

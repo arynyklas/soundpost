@@ -19,4 +19,9 @@ import "github.com/arynyklas/soundpost/internal/replica"
 // The retry table beside it keeps an entry for replica.DefaultRetryWindow (24 h) or
 // replica.DefaultRetryMax (100 000) entries, whichever bounds first; a retry older than that is
 // proposed as a fresh command, which every control command's expected revision rejects.
-var DefaultJournalCadence = replica.Cadence{Commands: 4096, Bytes: 8 << 20}
+//
+// The cut writes the whole state, and the state grows with the admission reservations not yet settled
+// (170 MB at 100,000 batches): the cadence amortizes, its bounds growing to half the size of the last
+// snapshot (replica.Cadence.Amortize), so a large state is cut when it has journaled an eighth to a
+// half of its size, not every 8 MiB (24 % of the server's CPU at the single-host load, L2w20Admission7).
+var DefaultJournalCadence = replica.Cadence{Commands: 4096, Bytes: 8 << 20, Amortize: true}

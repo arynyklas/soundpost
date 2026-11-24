@@ -56,6 +56,8 @@ func TestShippedManifestPinsTheKernelBuildConfigAndFlagsOfEveryExercisedRow(t *t
 				t.Errorf("%s was exercised on a real kernel but the manifest still says not_run", key)
 			}
 		}
+		// D10 (linux/amd64 is the release): a row of another platform is out_of_release_scope instead of not_run, and like not_run it
+		// pins no build because nothing of it was exercised; TestShippedManifestIsTheReleaseGateInput pins which rows are out of scope.
 		if row.State == "not_run" || row.State == "out_of_release_scope" {
 			if row.KernelBuild != nil || row.RuntimeBuildFlags != nil {
 				t.Errorf("%s is %s but pins a build: nothing was exercised", key, row.State)

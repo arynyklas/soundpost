@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -57,9 +58,11 @@ func (e *Engine) initStorage() error {
 	err := e.db.Update(func(tx *bolt.Tx) error {
 		marker := tx.Bucket([]byte("meta")).Get([]byte("scan_index_version"))
 		initialized := marker != nil
-		if initialized && (len(marker) != 1 || marker[0] != 1) {
+		if initialized && (len(marker) != 1 || marker[0] != scanIndexClassic && marker[0] != scanIndexRuns && marker[0] != scanIndexRows && marker[0] != scanIndexPayload) {
 			return model.Fail(model.Corrupt)
 		}
+		e.runsLayout.Store(initialized && marker[0] != scanIndexClassic)
+		e.payloadOn.Store(initialized && marker[0] == scanIndexPayload)
 		if !initialized && tx.Bucket([]byte("meta")).Get([]byte("replica_format")) != nil {
 			return model.Fail(model.Corrupt)
 		}
@@ -72,6 +75,26 @@ func (e *Engine) initStorage() error {
 			}
 			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 				return err
+			}
+		}
+		if e.runsLayout.Load() {
+			if initialized && tx.Bucket([]byte(runsRegistry)) == nil {
+				return model.Fail(model.Corrupt)
+			}
+			if _, err := tx.CreateBucketIfNotExists([]byte(runsRegistry)); err != nil {
+				return err
+			}
+			for _, name := range []string{"scan_time", "scan_postings", rowsIndex} {
+				if _, err := removeBuildingRuns(tx, name); err != nil {
+					return err
+				}
+			}
+			if initialized && marker[0] == scanIndexRuns {
+				// A file contracted before the row store: its rows stay where they are, the legacy buckets,
+				// and new ones go to runs; a build that does not know the runs must not open it.
+				if err := tx.Bucket([]byte("meta")).Put([]byte("scan_index_version"), []byte{scanIndexRows}); err != nil {
+					return err
+				}
 			}
 		}
 		if !initialized {
@@ -141,14 +164,14 @@ func (e *Engine) initStorage() error {
 		if err := e.migrateIndexes(tx); err != nil {
 			return err
 		}
-		return meta.Put([]byte("scan_index_version"), []byte{1})
+		return meta.Put([]byte("scan_index_version"), []byte{scanIndexClassic})
 	})
 	if err != nil {
 		return err
 	}
 	return e.db.View(func(tx *bolt.Tx) error {
 		if e.ver.rec != nil {
-			if err := e.validateIndexTail(tx); err != nil {
+			if err := e.validateIndexTail(tx, nil, &e.ver.entries); err != nil {
 				return err
 			}
 		} else if err := validateIndexIntegrity(tx); err != nil {
@@ -268,7 +291,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 	bounds := map[string]*segmentBounds{}
 	seen := 0
 	err := e.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("scan_pages")).ForEach(func(_, b []byte) error {
+		return tableForEach(tx, tblPages, func(_, b []byte) error {
 			if ctx.Err() != nil || e.closing.Load() {
 				return model.Fail(model.Cancelled)
 			}
@@ -363,14 +386,29 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		return 0, model.Fail(model.Cancelled)
 	}
 	err = e.db.Update(func(tx *bolt.Tx) error {
+		kvs := make([]rowKV, 0, len(updates))
 		for _, p := range updates {
 			b, err := pageRefBytes(p)
 			if err != nil {
 				return err
 			}
-			if err = tx.Bucket([]byte("scan_pages")).Put(p.ID[:], b); err != nil {
-				return err
+			kvs = append(kvs, rowKV{Key: p.ID[:], Value: b})
+		}
+		rows, err := rowsOf(tx)
+		if err != nil {
+			return err
+		}
+		for _, p := range updates {
+			if old := rows.Get(tblPages, p.ID[:]); old != nil {
+				if prev, perr := parsePageRef(old); perr == nil && !bytes.Equal(prev.Log, p.Log) {
+					if err = owePayloadScrub(tx, prev.Log); err != nil { // the hot page now lives in a segment
+						return err
+					}
+				}
 			}
+		}
+		if err = rows.SetMany(tblPages, kvs); err != nil {
+			return err
 		}
 		return tx.Bucket([]byte("meta")).Put([]byte("segment_manifest"), raw)
 	})

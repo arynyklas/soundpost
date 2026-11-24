@@ -550,24 +550,14 @@ type NormalizedBatch struct {
 	Series      []string             `json:"series"`
 }
 
+// CanonicalJSON is the encoding of v with object members sorted by key, numbers as written and no HTML
+// escaping (canonicalizeJSON; canonicalJSONReference in the tests is the generic round trip it replaces).
 func CanonicalJSON(v any) ([]byte, error) {
 	b, e := json.Marshal(v)
 	if e != nil {
 		return nil, e
 	}
-	var x any
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.UseNumber()
-	if e = d.Decode(&x); e != nil {
-		return nil, e
-	}
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	enc.SetEscapeHTML(false)
-	if e = enc.Encode(x); e != nil {
-		return nil, e
-	}
-	return bytes.TrimSuffix(out.Bytes(), []byte{'\n'}), nil
+	return canonicalizeJSON(b)
 }
 func StrictJSON(b []byte, v any) error {
 	if ValidateJSON(b) != nil {

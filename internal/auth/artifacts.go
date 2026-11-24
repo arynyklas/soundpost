@@ -176,7 +176,7 @@ func (scope Scope) RevalidateArtifact(ctx context.Context, m model.BlobManifest,
 	if err := scope.service.Revalidate(ctx, scope); err != nil {
 		return err
 	}
-	return scope.service.store.View(ctx, func(st model.ControlState) error { return scope.ValidateArtifactState(st, m, write) })
+	return scope.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error { return scope.ValidateArtifactState(st, m, write) })
 }
 func (scope Scope) ArtifactPolicy(ctx context.Context, project, source, build model.ID, private bool) (uint64, model.Revision, error) {
 	if scope.service == nil {
@@ -184,7 +184,7 @@ func (scope Scope) ArtifactPolicy(ctx context.Context, project, source, build mo
 	}
 	var max uint64
 	var rev model.Revision
-	err := scope.service.store.View(ctx, func(st model.ControlState) error {
+	err := scope.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		src := st.Sources[source.String()]
 		m := model.BlobManifest{Org: scope.org, Project: project, Source: source, Build: build, PolicyEpoch: model.Uint64(scope.epoch), PolicyRevision: src.Policy.Revision, PrivateSources: private}
 		if e := scope.ValidateArtifactState(st, m, true); e != nil {
@@ -201,7 +201,7 @@ func (scope Scope) ValidateBlobReservation(ctx context.Context, m model.BlobMani
 		return model.ArtifactQuotaReservation{}, model.Fail(model.NotFound)
 	}
 	var out model.ArtifactQuotaReservation
-	err := scope.service.store.View(ctx, func(st model.ControlState) error {
+	err := scope.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := scope.ValidateArtifactState(st, m, true); err != nil {
 			return err
 		}
@@ -238,7 +238,7 @@ func (scope Scope) ValidateArtifactGC(ctx context.Context, proof model.ArtifactG
 	if scope.service == nil {
 		return model.Fail(model.Forbidden)
 	}
-	return scope.service.store.View(ctx, func(st model.ControlState) error {
+	return scope.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := scope.ValidateArtifactCleanup(st, proof.Manifest); err != nil {
 			return err
 		}

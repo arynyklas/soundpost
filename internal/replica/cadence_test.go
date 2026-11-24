@@ -228,3 +228,95 @@ func treeState(t *testing.T, dir string) string {
 	}
 	return b.String()
 }
+
+// A cut of a machine that writes its whole state costs the size of the state: the bounds of an amortizing
+// cadence grow with the snapshot of the last cut (half of it in journal), a plain one never does.
+func TestAmortizingCadenceScalesWithTheLastSnapshot(t *testing.T) {
+	g := &Group{cadence: Cadence{Commands: 100, Bytes: 8 << 20, Amortize: true}}
+	g.sinceBytes = 9 << 20
+	if !g.cutDue() {
+		t.Fatal("9 MiB of journal over an 8 MiB bound is due with no snapshot size known")
+	}
+	g.cutBytes = 160 << 20 // the last cut wrote 160 MB: 80 MiB of journal may accumulate
+	if g.cutDue() {
+		t.Fatal("9 MiB of journal is not due after a 160 MB snapshot")
+	}
+	g.sinceBytes = 81 << 20
+	if !g.cutDue() {
+		t.Fatal("81 MiB of journal is due after a 160 MB snapshot")
+	}
+	g.sinceBytes, g.sinceCommands = 0, 900
+	if g.cutDue() {
+		t.Fatal("900 commands are not due when the command bound grew to 1000 with the snapshot")
+	}
+	g.sinceCommands = 1000
+	if !g.cutDue() {
+		t.Fatal("1000 commands are due")
+	}
+	plain := &Group{cadence: Cadence{Commands: 100, Bytes: 8 << 20}, cutBytes: 160 << 20}
+	plain.sinceBytes = 9 << 20
+	if !plain.cutDue() {
+		t.Fatal("a cadence that does not amortize ignores the snapshot size")
+	}
+}
+
+// The 64 data groups of a node are loaded alike and cut at the same bound; each is given a share of the bounds
+// (Cadence.Stagger) so the cuts of a node fall one after another (L2w20Admission19, L2w20Admission20). A share
+// scales both bounds, never below one command or byte, and 0 or the whole base is the whole bound.
+func TestStaggeredCadenceCutsAtItsShareOfTheBounds(t *testing.T) {
+	due := func(c Cadence, commands uint64, bytes int64) bool {
+		g := &Group{cadence: c, sinceCommands: commands, sinceBytes: bytes}
+		return g.cutDue()
+	}
+	base := Cadence{Commands: 2048, Bytes: 16 << 20}
+	half := base
+	half.Stagger = StaggerBase / 2
+	if due(half, 1023, 0) || !due(half, 1024, 0) {
+		t.Fatal("a share of 512/1024 cuts at 1024 of 2048 commands, not before")
+	}
+	if due(half, 0, 8<<20-1) || !due(half, 0, 8<<20) {
+		t.Fatal("a share of 512/1024 cuts at 8 MiB of a 16 MiB bound, not before")
+	}
+	for _, whole := range []uint16{0, StaggerBase, StaggerBase + 7} {
+		c := base
+		c.Stagger = whole
+		if due(c, 2047, 16<<20-1) || !due(c, 2048, 0) || !due(c, 0, 16<<20) {
+			t.Fatalf("a share of %d is the whole bound", whole)
+		}
+	}
+	tiny := Cadence{Commands: 1, Bytes: 1, Stagger: 1}
+	if due(tiny, 0, 0) || !due(tiny, 1, 0) || !due(tiny, 0, 1) {
+		t.Fatal("a share never takes a bound below one command or byte")
+	}
+	grown := &Group{cadence: Cadence{Commands: 100, Bytes: 8 << 20, Amortize: true, Stagger: StaggerBase / 2}, cutBytes: 160 << 20}
+	grown.sinceBytes = 39 << 20
+	if grown.cutDue() {
+		t.Fatal("the share applies to the grown bound: 80 MiB halved is 40 MiB")
+	}
+	grown.sinceBytes = 40 << 20
+	if !grown.cutDue() {
+		t.Fatal("40 MiB is due at half of an 80 MiB amortized bound")
+	}
+}
+
+// Two groups of one cadence that differ only in their share cut at different points of the same load: the
+// smaller share cuts first, the other has not reached its bound.
+func TestGroupsWithDifferentSharesCutAtDifferentCommands(t *testing.T) {
+	early, em := openBounded(t, Config{Cadence: Cadence{Commands: 20, Stagger: StaggerBase / 2}})
+	late, lm := openBounded(t, Config{Cadence: Cadence{Commands: 20, Stagger: StaggerBase * 3 / 4}})
+	// 12 commands: past 10 (half of 20), short of 15 (three quarters of 20).
+	for i := range 12 {
+		putWhole(t, early, em, i)
+		putWhole(t, late, lm, i)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for early.CadenceCuts() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("12 commands at 512/1024 of a 20 command bound did not cut")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := late.CadenceCuts(); got != 0 {
+		t.Fatalf("a group at 768/1024 of a 20 command bound cut %d times at 12 commands", got)
+	}
+}

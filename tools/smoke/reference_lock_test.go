@@ -84,6 +84,8 @@ func TestReferenceLockMatchesSDKLocks(t *testing.T) {
 // variable, and the smoke refuses an unpinned one). A first-party image is built from this tree, so it has no digest until it is built:
 // it is `${REFERENCE_{NODE,TOOLS,ESTATE}_IMAGE:?...}`, a variable with no default that the run sets to the id of the image it built
 // (the smoke refuses anything that is not `sha256:<64 hex>`). Never a tag a registry could move; every service says `pull_policy: never`.
+// The second form exists because of 07.04#12 (the compose file covers the whole estate, TestReferenceComposeCoversTheWholeEstate: the node,
+// the provisioning tool and the applications are images built from this tree); D78's backing-services-only file had third-party images only.
 func TestReferenceComposeRunsOnlyDigestPinnedImages(t *testing.T) {
 	c, text := readReferenceCompose(t)
 	if strings.Contains(text, "\r") {

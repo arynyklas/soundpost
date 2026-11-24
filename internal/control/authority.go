@@ -123,6 +123,13 @@ const (
 	// DeleteGenerations counter, the retired project set) is NOT masked and keeps bumping, as do
 	// the GC fence callers (they use the unclassified Update).
 	writerArtifactLedger writer = "ArtifactLedger"
+	// writerIssueHold: the holds of the issue producer (UpdateIssueHolds): one ledger entry per
+	// (issue, map) taken while an issue is open and dropped when it is resolved or ignored. It
+	// writes exactly what writerArtifactLedger writes and is masked the same way. It is a
+	// writer of its own because the decision to take or drop a hold reads the workflow of the
+	// issue in the grouping issues of the books, which the book-free ledger writer is not given:
+	// a hold evaluated over a state without them finds no issue, so it never releases one.
+	writerIssueHold writer = "IssueHold"
 	// writerExpireControlLog: the control log expiry (ExpireControlLog, retention.go). It drops
 	// audit rows past their retention and applied-command rows past the dedup window, with the
 	// owner and time rows of those commands; it writes no grant, policy, hold, deletion, access
@@ -176,6 +183,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerAttestControl:       "a voter's control residue attestation record (evidence about its own files)",
 	writerSessionCreate:       "a new session record for an existing user, with the one-time factor it consumed (LastTOTP raised, a recovery hash spent); no other user field and no existing session changed",
 	writerArtifactLedger:      "artifact reference ledger and index entry (retention bookkeeping, not access state)",
+	writerIssueHold:           "artifact reference ledger and index entry of an issue's hold on a map, decided by the workflow of the issue (retention bookkeeping, not access state)",
 	writerExpireControlLog:    "expired audit rows and applied-command rows (log retention, not access state)",
 	writerSweepExpired:        "expired pending login, elevation and session records (already refused everywhere)",
 	writerPendingLogin:        "a pending OIDC login record added or consumed (authenticates nobody; no access state)",
@@ -208,23 +216,118 @@ var retentionKinds = map[CommandKind]bool{
 	KindRecordEvidenceGap: true,
 }
 
+// ledgerWriters are the writers whose transition reads or writes the admission ledger (ledger.go):
+// their state carries the ledger members, assembled and written back record by record. Every other
+// classified writer gets the state without them.
+var ledgerWriters = map[writer]bool{
+	writerReserveAdmission:    true,
+	writerFinalizeAdmission:   true,
+	writerCancelAdmission:     true,
+	writerReconcileAdmissions: true,
+	writerSettleAdmissions:    true,
+	writerReserveArtifact:     true,
+}
+
+// bookFreeWriters are the writers whose transition neither reads nor writes the job and issue books: they
+// get the state without them. Every other writer (the two that write them, an erasure, an administrator's
+// command, an unclassified one) gets them assembled, because a transition that was not written for the
+// layout may look at them, and what a transition does not name is not read back for it.
+var bookFreeWriters = map[writer]bool{
+	writerReserveAdmission:    true,
+	writerFinalizeAdmission:   true,
+	writerCancelAdmission:     true,
+	writerReconcileAdmissions: true,
+	writerSettleAdmissions:    true,
+	writerReserveArtifact:     true,
+	writerPublishArtifact:     true,
+	writerRedactNoop:          true,
+	writerReplayIndex:         true,
+	writerAttestControl:       true,
+	writerSessionCreate:       true,
+	writerArtifactLedger:      true,
+	writerExpireControlLog:    true,
+	writerSweepExpired:        true,
+	writerPendingLogin:        true,
+	writerAuditAppend:         true,
+}
+
+// commandFreeWriters are the writers whose transition neither reads nor writes the applied-command log
+// (Commands, CommandOwners): the bookFreeWriters but the control log expiry, the job book writer and
+// the issue hold writer. Every other writer gets the log assembled.
+var commandFreeWriters = func() map[writer]bool {
+	free := map[writer]bool{writerTransactJobs: true, writerIssueHold: true}
+	for w := range bookFreeWriters {
+		if w != writerExpireControlLog {
+			free[w] = true
+		}
+	}
+	return free
+}()
+
+// membersOfWriter is the ledger members the transition of writer w names.
+func membersOfWriter(w writer) (m memberScope) {
+	if ledgerWriters[w] {
+		m |= scopeAdmission
+	}
+	if !bookFreeWriters[w] {
+		m |= scopeBooks
+	}
+	if !commandFreeWriters[w] {
+		m |= scopeCommands
+	}
+	return m
+}
+
+// bookFreeKinds are the Transact kinds whose handler neither reads nor writes the job and issue books or the
+// grouping issues.
+var bookFreeKinds = map[CommandKind]bool{
+	KindApplyCondition:      true,
+	KindApplyRuleEvaluation: true,
+	KindIncidentAction:      true,
+	KindClaimDelivery:       true,
+	KindCompleteDelivery:    true,
+	KindRegisterRelease:     true,
+	KindSavedView:           true,
+}
+
+// membersOfKind is the ledger members the generic Transact commit of a command names: the log of applied
+// commands (a command records itself in it, and a retry is answered from it) and the books unless the handler
+// is book free. The delivery commands are book-free except the cutover arm of the claim kind: the barrier is
+// verified against the project's issue book (the checkpoints) and its jobs.
+func membersOfKind(cmd Command) memberScope {
+	k := CommandKind(cmd.Kind)
+	if !bookFreeKinds[k] {
+		return scopeBooks | scopeCommands
+	}
+	if k == KindClaimDelivery {
+		var head struct {
+			Operation string `json:"operation"`
+		}
+		if json.Unmarshal(cmd.Payload, &head) != nil || head.Operation == DeliveryOpCutover {
+			return scopeBooks | scopeCommands
+		}
+	}
+	return scopeCommands
+}
+
 // updateAs is Update for a classified writer: a writer on nonAuthorityWriters leaves
 // AuthorityRevision alone, any other name bumps.
 func (s *Store) updateAs(ctx context.Context, w writer, fn func(*State) error) error {
 	_, keep := nonAuthorityWriters[w]
-	return s.update(ctx, !keep, fn)
+	return s.update(ctx, !keep, membersOfWriter(w), fn)
 }
 
 // update is the one entry to replicatedUpdate: bump says whether the transition moves
-// AuthorityRevision. Update (the exported, unclassified entry) always bumps.
-func (s *Store) update(ctx context.Context, bump bool, fn func(*State) error) error {
+// AuthorityRevision, members which of the ledger's members it names. Update (the exported,
+// unclassified entry) always bumps and always names all of them.
+func (s *Store) update(ctx context.Context, bump bool, members memberScope, fn func(*State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
 	if s.repl == nil {
 		return model.Fail(model.Unavailable)
 	}
-	return s.replicatedUpdate(ctx, bump, nil, guardAttestations(fn))
+	return s.replicatedUpdate(ctx, bump, nil, members, guardAttestations(fn))
 }
 
 // authorityFloor is the oldest caller view a retention command may carry. A state that was
@@ -298,7 +401,7 @@ func transactBumps(kind string) bool {
 // state. Without it a legacy installation would stay strict, and so starvable, until its first
 // authority write. It commits nothing when the field is already set.
 func (s *Store) healLegacyAuthority(ctx context.Context) error {
-	err := s.update(ctx, true, func(st *State) error {
+	err := s.update(ctx, true, 0, func(st *State) error {
 		if st.AuthorityRevision != 0 || st.Revision == 0 {
 			return errNothingToSettle
 		}
@@ -443,6 +546,16 @@ func (s *Store) UpdateArtifactReferences(ctx context.Context, fn func(*State) er
 	return s.updateAsGuarded(ctx, writerArtifactLedger, stateWithoutArtifactLedger, fn)
 }
 
+// UpdateIssueHolds is UpdateArtifactReferences for the holds of the issue producer (artifacts
+// HoldIssues and SettleIssues). The same ledger mask applies, so a commit that wrote nothing but
+// ledger and ledger-index entries leaves AuthorityRevision alone; what differs is the state fn is
+// given: it carries the job and issue books and the grouping issues, because a hold is taken or
+// released by the workflow of the issue as the transaction sees it (issueWorkflow), and a state
+// without them answers "unknown issue" for every issue.
+func (s *Store) UpdateIssueHolds(ctx context.Context, fn func(*State) error) error {
+	return s.updateAsGuarded(ctx, writerIssueHold, stateWithoutArtifactLedger, fn)
+}
+
 // stateWithoutSessionsAndFactors is the canonical encoding of st with the Sessions map removed and
 // the one-time factor state (LastTOTP, Recovery) of every user zeroed.
 func stateWithoutSessionsAndFactors(st *State) ([]byte, error) {
@@ -524,7 +637,7 @@ func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State)
 // and returns a check run after it; a false check bumps like a mask difference.
 func (s *Store) updateAsGuardedChecked(ctx context.Context, w writer, mask func(*State) ([]byte, error), preserve func(*State) func(*State) bool, fn func(*State) error) error {
 	if _, keep := nonAuthorityWriters[w]; !keep {
-		return s.update(ctx, true, fn)
+		return s.update(ctx, true, membersOfWriter(w), fn)
 	}
 	if e := ctx.Err(); e != nil {
 		return e
@@ -536,7 +649,7 @@ func (s *Store) updateAsGuardedChecked(ctx context.Context, w writer, mask func(
 		fn = guardAttestations(fn) // only the attestation writer may change an attestation
 	}
 	force := false
-	return s.replicatedUpdate(ctx, false, &force, func(st *State) error {
+	return s.replicatedUpdate(ctx, false, &force, membersOfWriter(w), func(st *State) error {
 		before, err := mask(st)
 		var holds func(*State) bool
 		if preserve != nil {

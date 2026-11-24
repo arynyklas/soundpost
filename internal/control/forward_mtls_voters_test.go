@@ -178,8 +178,8 @@ func TestAFollowerForwardsControlCommandsToTheLeaderOverTheMTLSMesh(t *testing.T
 		if hits := v.fx[id].raftHits(erased); len(hits) != 0 {
 			t.Fatalf("voter %d holds the erased payload after its pass over the mesh: %v", id, hits)
 		}
-		if hits := v.fx[id].raftHits(kept); !contains(hits, "raft-control/ready.wal") {
-			t.Fatalf("voter %d lost a payload no deletion covers: %v", id, hits)
+		if !v.fx[id].stateHolds(kept) { // the journal no longer keeps the state (compact snapshot, D86): the state does
+			t.Fatalf("voter %d lost a payload no deletion covers", id)
 		}
 		if got := v.stores[id].ResidualStores(); len(got) != 0 {
 			t.Fatalf("voter %d after its own pass: %v", id, got)

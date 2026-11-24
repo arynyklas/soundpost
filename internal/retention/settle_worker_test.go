@@ -53,3 +53,27 @@ func TestWorkerSettlesConsumedReservationsOfSealedWindows(t *testing.T) {
 		t.Fatalf("a second pass settled %d more windows", again.SettledWindows-st.SettledWindows)
 	}
 }
+
+// Control state must stay bounded under sustained load: the consumed reservations of a sealed window are
+// settled by the next pass of the worker (one minute), not by the hourly expiry pass. At the single-host
+// gate (~300 batches per second) an hour of unsettled rows is ~1 GB of control state and every
+// control snapshot cut rewrites it (L2w20Admission6: 2 KB per admitted batch, nothing ever settled).
+func TestWorkerSettlesOnEveryPassNotOnlyOnTheExpirySchedule(t *testing.T) {
+	old := storage.SetSnapshotWindow(2)
+	t.Cleanup(func() { storage.SetSnapshotWindow(old) })
+	f := newFx(t, options{controlResiduals: true})
+	f.run() // the first pass runs the expiry schedule: nothing to settle yet
+	for i := range 40 {
+		if _, _, err := f.append(int64(100+i), "series"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.store.ReconcileAdmissions(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(time.Minute) // far below the expiry interval
+	f.run()
+	if st := f.svc.Status(); st.SettledWindows == 0 || st.SettledReservations == 0 {
+		t.Fatalf("a pass a minute after the last one settled nothing: %+v", st)
+	}
+}

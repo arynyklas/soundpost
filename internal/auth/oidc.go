@@ -237,7 +237,7 @@ func sweepExpiredState(st *model.ControlState, now int64) (removed int) {
 // unauthenticated routes use it before any outbound fetch or state write.
 func (s *Service) OIDCCapacity(ctx context.Context) error {
 	now := s.now().Unix()
-	return s.store.View(ctx, func(st model.ControlState) error {
+	return s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if livePendingOIDC(st, now) >= pendingOIDCCap || sourceFull(st, now, oidcSource(ctx)) {
 			return errOIDCFull()
 		}
@@ -253,7 +253,7 @@ func (s *Service) OIDCCapacity(ctx context.Context) error {
 func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 	now := s.now().Unix()
 	pending := false
-	if err := s.store.View(ctx, func(st model.ControlState) error {
+	if err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		for k, raw := range st.OIDC {
 			if expiredOIDC(k, raw, now) {
 				pending = true

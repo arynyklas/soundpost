@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -39,7 +40,8 @@ func (v *controlVoters) receiptOn(id uint64) []string {
 
 // erasedWithVoter3Idle runs the three-voter erasure the tests below start from: the payload is
 // on all three voters, the project is retired on the leader, voters 1 and 2 hold it no more once
-// they ran their own scrub and pass; voter 3 has applied the erasure and has run nothing.
+// they ran their own scrub and pass; voter 3 has applied the erasure and has run nothing, so its journal
+// holds the commands that carried the payload and its control.db a copy of it in a free page (plantCopy).
 func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	v.t.Helper()
 	leader := v.fx[1]
@@ -55,12 +57,15 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	// fixture costs the square of the round count (measured under -race on 8 vCPU: 40 rounds took 76 s
 	// before the saga even started and the whole three-voter package ran for hours, with the leader moving
 	// off voter 1 mid-fixture: "stale"). The race build keeps the same sequence of events (writes, saga,
-	// passes, scrub) with fewer rounds; the "fixture invalid" checks below still prove voter 3 holds a copy.
+	// passes, scrub) with fewer rounds. The rounds put the payload in every journal and replace the state
+	// of every control.db many times, so each file has older copies of it in free pages for the scrubs to
+	// zero; whether any of them is still there when the fixture ends is up to bbolt's allocator, so the
+	// fixture does not leave it to the rounds that voter 3's control.db holds a copy (plantCopy below).
 	rounds := 40
 	if raceEnabled {
 		rounds = 10
 	}
-	for round := range rounds { // the replaced state spans freed pages that later writes do not all reuse
+	for round := range rounds {
 		if v.beforeRound != nil {
 			v.beforeRound(round)
 		}
@@ -86,6 +91,28 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 		if got := v.stores[id].ResidualStores(); len(got) != 0 {
 			v.t.Fatalf("fixture invalid: voter %d's own residue after its own pass and scrub: %v", id, got)
 		}
+	}
+	v.await(3, v.mustRevision(1))
+	v.plantCopy(3, canary)
+}
+
+// plantCopy leaves a copy of the erased payload in a free page of voter id's control.db, where the state an
+// erasure replaced leaves it, and asserts at page level that it is there. The tests that start from the
+// erasure hold voter 3 to such a copy, and the rounds above do not guarantee one: a commit that changes the
+// state blob writes it into the lowest run of free pages that fits it, so the erasure and the commits after
+// it overwrite the runs that hold whole older copies of the state, and what outlives them are fragments too
+// short for the blob. Whether any exists depends on where bbolt placed the pages, which differs between runs
+// of the very same commits, and in some runs none did. The copy is constructed instead (as in
+// TestAFollowerThatReplayedTheErasureScrubsItsOwnFile) as the last write the fixture makes to the file:
+// commits allocate lowest-first, so it outlives the few that voter id applies before a test looks for it.
+func (v *controlVoters) plantCopy(id uint64, canary string) {
+	v.t.Helper()
+	page, err := v.stores[id].PlantInFreePagesForTest(canary, 64, false)
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	if free, err := v.stores[id].FreePagesHoldingForTest(canary); err != nil || !slices.Contains(free, page) {
+		v.t.Fatalf("fixture invalid: voter %d's free pages holding the payload are %v (err %v), want page %d among them", id, free, err, page)
 	}
 }
 

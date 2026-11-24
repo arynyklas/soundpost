@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
 
@@ -38,8 +37,8 @@ func enableSingleWith(t *testing.T, s *Store, directory string, cadence replica.
 // machine; Campaign and Ready then only elect and run one ReadIndex round.
 func enableSingleTimed(t testing.TB, s *Store, directory string, cadence replica.Cadence) openPhases {
 	t.Helper()
-	var id model.ID
-	if err := s.View(context.Background(), func(st State) error { id = st.Installation; return nil }); err != nil {
+	id, err := s.Installation()
+	if err != nil {
 		t.Fatal(err)
 	}
 	var p openPhases

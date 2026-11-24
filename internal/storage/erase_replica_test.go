@@ -210,7 +210,23 @@ func TestSnapshotCutFinishesAnOwedRedactionFirst(t *testing.T) {
 	}
 	x.cut()
 	x.maintain(pred)
-	x.requireNoCopy("after a cut that finished the owed redaction", eraseCanary)
+	// The cut and the sequence after it clean the replication layer; the apply database and the payload log keep their owed zeroing
+	// until the erasure pass that owes it runs (the worker's next pass), so that is not asserted before it. D89: record payloads live
+	// in the owned payload log, outside bbolt, and an erased record's bytes there are zeroed by the pass's scrub (scrubPayload, after
+	// redactReplica, which this test interrupts), not by a cut. The scrub is owed durably and ResidualStores names it (ResidualApplyDB,
+	// redact.go) until it ran, so the window between the cut and the pass is reported, not silent; it is not bounded in time here, it
+	// lasts until the worker's next pass. Before D89 the erased bytes sat in apply.db's buckets, which the erasing transaction itself
+	// emptied, so the old check after the cut had nothing left to find there (the old rawHits did not read free pages or the log).
+	if hits := x.raftHits(eraseCanary); len(hits) != 0 {
+		t.Fatalf("after a cut that finished the owed redaction: %s survives in the replication layer: %v", eraseCanary, hits)
+	}
+	if hits := x.snapshotStateHits(eraseCanary); len(hits) != 0 {
+		t.Fatalf("after a cut that finished the owed redaction: %s survives in a snapshot's machine state: %v", eraseCanary, hits)
+	}
+	if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil {
+		t.Fatalf("the worker's next pass: %v", err)
+	}
+	x.requireNoCopy("after a cut that finished the owed redaction and the worker's next pass", eraseCanary)
 	x.requireReceipt("after the cut", hit)
 }
 

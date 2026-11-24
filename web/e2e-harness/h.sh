@@ -111,6 +111,9 @@ up() {
 		( cd "$ROOT" && go build -o "$T/oidc" ./web/fixtures/oidc )
 		setsid nohup "$T/oidc" --listen 127.0.0.1:$OPORT --issuer "$issuer" --callback "$ORIGIN/api/v1/oidc/callback" --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" >"$T/oidc.log" 2>&1 </dev/null &
 		echo $! >"$T/oidc.pid"; sleep 2
+		# A fixture of an earlier run that still holds $OPORT makes this one exit at once (address in use) and every OIDC spec would then talk to the
+		# old fixture, whose certificate and callback belong to that run: stop here instead, naming the port.
+		kill -0 "$(cat "$T/oidc.pid")" 2>/dev/null || { echo "OIDC fixture did not start on 127.0.0.1:$OPORT (port held by another process? set E2E_OIDC_PORT):" >&2; cat "$T/oidc.log" >&2; exit 1; }
 	fi
 	rm -rf "$DATA" "$T/fault"; mkdir -p "$DATA" "$T/fault"
 	notify_args=""

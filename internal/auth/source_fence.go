@@ -27,7 +27,7 @@ func (s *Service) DrainSourceFences(ctx context.Context) error {
 	}
 	var pending []model.SourceFence
 	if e := model.RetryWhileStale(ctx, func() error {
-		return s.store.View(ctx, func(st model.ControlState) error {
+		return s.viewCore(ctx, func(st model.ControlState) error {
 			for _, f := range st.SourceFences {
 				if f.Phase == "fencing" {
 					pending = append(pending, f)
@@ -84,7 +84,7 @@ func (s *Service) SourceOperation(ctx context.Context, c Credential, id model.ID
 		return model.SourceFence{}, model.Fail(model.NotFound)
 	}
 	var out model.SourceFence
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if e := s.validateCredentialState(st, c); e != nil {
 			return e
 		}

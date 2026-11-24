@@ -218,9 +218,9 @@ func TestDiskPressureACKedRetryAndDataSurviveFullDisk(t *testing.T) {
 		var pages int
 		var receipts, batches []byte
 		engine.db.View(func(tx *bolt.Tx) error {
-			pages = tx.Bucket([]byte("scan_pages")).Stats().KeyN
-			tx.Bucket([]byte("receipts")).ForEach(func(k, v []byte) error { receipts = append(append(receipts, k...), v...); return nil })
-			tx.Bucket([]byte("batches")).ForEach(func(k, v []byte) error { batches = append(append(batches, k...), v...); return nil })
+			pages = logicalCount(t, tx, "scan_pages")
+			forEachLogical(tx, "receipts", func(k, v []byte) error { receipts = append(append(receipts, k...), v...); return nil })
+			forEachLogical(tx, "batches", func(k, v []byte) error { batches = append(append(batches, k...), v...); return nil })
 			return nil
 		})
 		return pages, receipts, batches

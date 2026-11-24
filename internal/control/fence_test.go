@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,7 +49,12 @@ func (f *fenceFx) write(attempt func() error) error {
 	return f.retry(attempt)
 }
 
-func newFenceFx(t *testing.T) *fenceFx { return newFenceFxWith(t, true, false) }
+// newFenceFx is the fixture of a group that has not declared the state patch protocol (every command is a
+// replacement), unless SOUNDPOST_TEST_FENCE_PATCH is set: the suites of the writers of the job and issue
+// books run both ways (the sparse commit of those writers needs the patch gate and the ledger layout).
+func newFenceFx(t *testing.T) *fenceFx {
+	return newFenceFxWith(t, true, os.Getenv("SOUNDPOST_TEST_FENCE_PATCH") != "")
+}
 
 // newFenceFxPatch is newFenceFx proposing every command as a state patch (the gate of a group whose
 // members all declared protocol 5 is open): the mode in which the per-organization authority revision

@@ -28,7 +28,7 @@ func TestHistoricalReceiptLookupAfterPolicyDeleteAndRevocation(t *testing.T) {
 	// Historical deletion removes rows, never the receipt. A current source's
 	// ownership credential remains valid independently of new-admission policy.
 	e = engine.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("batches")).Delete(batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID))
+		return deleteLogical(tx, "batches", batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID))
 	})
 	if e != nil {
 		t.Fatal(e)
@@ -188,7 +188,7 @@ func TestOrderedMetricConflictRejectsWholeBatch(t *testing.T) {
 	}
 	rows := 0
 	engine.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("batches")).ForEach(func(_, v []byte) error { var r []model.Record; json.Unmarshal(v, &r); rows += len(r); return nil })
+		return forEachLogical(tx, "batches", func(_, v []byte) error { var r []model.Record; json.Unmarshal(v, &r); rows += len(r); return nil })
 	})
 	if rows != 1 {
 		t.Fatal("identical equal-time samples multiplied")

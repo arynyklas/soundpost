@@ -494,10 +494,22 @@ func TestRetentionCommandThatWritesAcrossOrganizationsKeepsTheGlobalBump(t *test
 		}},
 		{name: "an existing command row removed", global: true, write: func(f *fenceFx, _ model.ID, st *control.State) {
 			f.ownRows(st)
-			for k := range st.Commands {
-				delete(st.Commands, k)
-				break
-			}
+			delete(st.Commands, f.appliedCommand(st))
+		}},
+		{name: "an existing command row edited", global: true, write: func(f *fenceFx, _ model.ID, st *control.State) {
+			f.ownRows(st)
+			k := f.appliedCommand(st)
+			r := st.Commands[k]
+			r.Phase += "x"
+			st.Commands[k] = r
+		}},
+		{name: "an existing command owner removed", global: true, write: func(f *fenceFx, _ model.ID, st *control.State) {
+			f.ownRows(st)
+			delete(st.CommandOwners, f.appliedCommand(st))
+		}},
+		{name: "an existing command owner edited", global: true, write: func(f *fenceFx, _ model.ID, st *control.State) {
+			f.ownRows(st)
+			st.CommandOwners[f.appliedCommand(st)] += "x"
 		}},
 	}
 	for _, c := range cases {
@@ -533,6 +545,18 @@ func TestRetentionCommandThatWritesAcrossOrganizationsKeepsTheGlobalBump(t *test
 			}
 		})
 	}
+}
+
+// appliedCommand is the key of a command that was applied before the transition under test. A transition
+// that changes the log of applied commands has to be given a record of it to change: one that is given none
+// writes nothing, and a case that expects the commit to be an installation-wide write would pass or fail
+// for the wrong reason.
+func (f *fenceFx) appliedCommand(st *control.State) string {
+	for k := range st.Commands {
+		return k
+	}
+	f.t.Errorf("the transition is given no applied command to change (%d records)", len(st.Commands))
+	return ""
 }
 
 // ownRows is the write every case above makes: rows the organization owns in each retention table

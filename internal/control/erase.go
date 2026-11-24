@@ -679,8 +679,21 @@ func markOpenedFile(control *bolt.Bucket) error {
 var stateSealKey = []byte("state_seal")
 
 // putState writes the state and its seal in the caller's transaction; every state write goes
-// through it.
+// through it. raw is the encoding of the whole state; a file of layout 2 keeps its revision outside the
+// blob (state_layout.go) and putState splits it. It marks the write as one that changed the blob
+// (coreState): a write that only steps the revision and the clock (putStateKeep of a file that keeps them
+// in the blob, putStep of layout 2) is the one exception.
 func putState(control *bolt.Bucket, raw []byte) error {
+	if ledgerLayout(control) {
+		return putStateLayout(control, raw)
+	}
+	markCoreChanged(control.Tx())
+	return putStateKeep(control, raw)
+}
+
+// putStateKeep is putState for a write that changes nothing in the blob but its revision and its
+// revision clock.
+func putStateKeep(control *bolt.Bucket, raw []byte) error {
 	if err := control.Put([]byte("state"), raw); err != nil {
 		return err
 	}
@@ -689,6 +702,9 @@ func putState(control *bolt.Bucket, raw []byte) error {
 
 func sealState(control *bolt.Bucket) error {
 	sum := sha256.Sum256(control.Get([]byte("state")))
+	if err := control.Put(ledgerSealKey, sum[:]); err != nil {
+		return err
+	}
 	return control.Put(stateSealKey, sum[:])
 }
 
@@ -709,12 +725,32 @@ func sealState(control *bolt.Bucket) error {
 // installed one after canonical re-encoding owes nothing, whatever the log names. Every other
 // install over a clean file whose log names an erasure still owes, even over a different state
 // of the same lineage: a cost this rule does not remove, one bounded scrub per such install.
-func oweInstalledScrub(control *bolt.Bucket, installed State) error {
+//
+// installed is the whole logical state, the admission ledger included, and so is the file's own state
+// it is compared with (the ledger's records assembled): an install that differs from what the file
+// holds in the ledger alone is a different state and owes like any other.
+func oweInstalledScrub(tx *bolt.Tx, installed State) error {
+	control := tx.Bucket([]byte("control"))
 	local := readLocalScrub(control)
 	var current State
-	readable := json.Unmarshal(control.Get([]byte("state")), &current) == nil
-	if control.Get(localScrubKey) != nil && !local.owed && readable && len(owedScrubs(current.Audits)) == 0 && sameState(current, installed) {
-		return nil
+	readable := readState(control, &current) == nil
+	if control.Get(localScrubKey) != nil && !local.owed && readable && len(owedScrubs(current.Audits)) == 0 {
+		if ledgerLayout(control) {
+			l, err := openLedger(tx)
+			if err != nil {
+				return err
+			}
+			held, err := l.members()
+			if err != nil {
+				return err
+			}
+			attachLedger(&current, held)
+		}
+		normalizeLedger(&current)
+		normalizeLedger(&installed)
+		if sameState(current, installed) {
+			return nil
+		}
 	}
 	owed := local.owed || namesErasure(installed.Audits) || !readable || len(owedScrubs(current.Audits)) != 0
 	if !owed {
@@ -749,7 +785,7 @@ func (s *Store) settleLocalScrub(generation uint64) error {
 func (s *Store) scrubState() (st State, local localScrub, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		control := tx.Bucket([]byte("control"))
-		if json.Unmarshal(control.Get([]byte("state")), &st) != nil {
+		if readState(control, &st) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		local = readLocalScrub(control)
@@ -758,13 +794,17 @@ func (s *Store) scrubState() (st State, local localScrub, err error) {
 	return
 }
 
+// localState is the committed state, the admission ledger included.
 func (s *Store) localState() (st State, err error) {
-	err = s.db.View(func(tx *bolt.Tx) error {
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
-			return model.Fail(model.Corrupt)
-		}
-		return nil
-	})
+	err = s.db.View(func(tx *bolt.Tx) error { return loadLogical(tx, &st) })
+	return
+}
+
+// localCore is the committed state without any member of the ledger (the books, the grouping issues, the
+// applied-command log): what a reader of the audit log, the deletions and the attestation records needs.
+// It does not read the ledger, which at the size of a busy installation is most of the file.
+func (s *Store) localCore() (st State, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error { return readState(tx.Bucket([]byte("control")), &st) })
 	return
 }
 
@@ -772,8 +812,8 @@ func (s *Store) localState() (st State, err error) {
 // produced it, read in one transaction (a command's state and its index commit together).
 func (s *Store) localStateAt() (st State, physical uint64, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
-			return model.Fail(model.Corrupt)
+		if err := loadLogical(tx, &st); err != nil {
+			return err
 		}
 		physical = appliedPhysical(tx)
 		return nil

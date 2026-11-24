@@ -14,7 +14,7 @@ func (s *Service) AllowsBrowserOrigin(ctx context.Context, origin string) bool {
 		return false
 	}
 	allowed := false
-	s.store.View(ctx, func(st model.ControlState) error {
+	s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		for _, src := range st.Sources {
 			if !src.Browser || src.Revoked || src.Retired || int64(src.Expires) <= s.now().UnixNano() {
 				continue
@@ -78,7 +78,7 @@ func (s *Service) SourceConfiguration(ctx context.Context, c SourceCredential) (
 	var sealed string
 	var epoch uint64
 	var admissionAllowed bool
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.checkSource(st, c, false); err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ func (s *Service) SourceConfiguration(ctx context.Context, c SourceCredential) (
 	}
 	pub := ed25519.PrivateKey(key).Public().(ed25519.PublicKey)
 	id := "installation-" + model.HashCanonical(pub).String()[:32]
-	e = s.store.View(ctx, func(st model.ControlState) error {
+	e = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.checkSource(st, c, false); err != nil {
 			return err
 		}

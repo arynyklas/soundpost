@@ -58,7 +58,7 @@ func (e *Engine) markRedact(slot uint16) {
 // original payload (ResidualStores).
 func stampRedactFloorTx(tx *bolt.Tx, slot uint16) error {
 	meta := tx.Bucket([]byte("replica_data"))
-	applied := getUint(meta, metaKey(slot, "physical"))
+	applied := getCounter(tx, slot, "physical")
 	if applied <= getUint(meta, metaKey(slot, redactFloorKey)) {
 		return nil
 	}

@@ -20,10 +20,22 @@ func (e *Engine) VerifyFinalization(ctx context.Context, r model.FinalizeAdmissi
 	}
 	return e.db.View(func(tx *bolt.Tx) error {
 		var consumed model.AdmissionReservation
-		raw := tx.Bucket([]byte("consumed")).Get([]byte(r.ReservationID.String()))
+		raw, err := tableGet(tx, tblConsumed, []byte(r.ReservationID.String()))
+		if err != nil {
+			return err
+		}
 		if raw == nil || json.Unmarshal(raw, &consumed) != nil || consumed.Cursor == nil || *consumed.Cursor != r.Cursor {
 			return model.Fail(model.Forbidden)
 		}
 		return nil
 	})
+}
+
+// putConsumed records the consumed reservation id of an acknowledged batch in the row store (a re-applied batch replaces it).
+func putConsumed(rows *rowStore, id model.ID, raw []byte) error {
+	key := []byte(id.String())
+	if rows.Get(tblConsumed, key) != nil {
+		return rows.Set(tblConsumed, key, raw)
+	}
+	return rows.Insert(tblConsumed, key, raw)
 }

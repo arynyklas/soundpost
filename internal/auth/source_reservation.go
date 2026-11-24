@@ -6,30 +6,47 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
+
 	"github.com/arynyklas/soundpost/internal/model"
 )
+
+// SameReservation says whether two reservation rows are the same row: every field equal, a missing series
+// list told from an empty one as the encoding tells them (null and []). It is what comparing the
+// canonical encodings of the two said, without encoding either: the supplied row of a batch is checked
+// against the authoritative one on every append.
+func SameReservation(a, b model.AdmissionReservation) bool {
+	if a.ID != b.ID || a.Org != b.Org || a.Project != b.Project || a.Source != b.Source || a.Producer != b.Producer || a.Batch != b.Batch || a.Slot != b.Slot || a.Hash != b.Hash || a.PolicyEpoch != b.PolicyEpoch || a.Bytes != b.Bytes || a.State != b.State {
+		return false
+	}
+	if (a.Series == nil) != (b.Series == nil) || !slices.Equal(a.Series, b.Series) {
+		return false
+	}
+	if (a.Cursor == nil) != (b.Cursor == nil) {
+		return false
+	}
+	return a.Cursor == nil || *a.Cursor == *b.Cursor
+}
 
 func (scope Scope) ValidateReservation(ctx context.Context, b model.NormalizedBatch) error {
 	if scope.service == nil {
 		return model.Fail(model.Forbidden)
 	}
-	return scope.service.store.View(ctx, func(st model.ControlState) error {
+	return scope.service.viewAdmission(ctx, func(st model.ControlState, rows AdmissionReader) error {
 		if e := scope.ValidateSourceState(st, b.Project, b.Source, true); e != nil {
 			return e
 		}
-		r, ok := st.Reservations[b.Reservation.ID.String()]
+		r, ok, err := rows.Reservation(b.Reservation.ID.String())
+		if err != nil {
+			return err
+		}
 		if !ok || r.State == "cancelled" || r.Org != scope.org || r.Org != b.Org || r.Project != b.Project || r.Source != b.Source || r.Producer != b.Producer || r.Batch != b.ID || r.Slot != b.RouteSlot || r.Hash != b.Hash || r.PolicyEpoch != b.PolicyEpoch || r.Bytes != model.Uint64(len(b.Canonical)) {
 			return model.Fail(model.Forbidden)
 		}
 		if r.State != "reserved" {
 			return model.Fail(model.Conflict)
 		}
-		authoritative, e := model.CanonicalJSON(r)
-		if e != nil {
-			return model.Fail(model.Corrupt)
-		}
-		supplied, e := model.CanonicalJSON(b.Reservation)
-		if e != nil || !bytes.Equal(authoritative, supplied) {
+		if !SameReservation(r, b.Reservation) {
 			return model.Fail(model.Forbidden)
 		}
 		src := st.Sources[b.Source.String()]
@@ -66,8 +83,11 @@ func (scope Scope) Reservation(ctx context.Context, id model.ID) (model.Admissio
 		return model.AdmissionReservation{}, model.Fail(model.Forbidden)
 	}
 	var out model.AdmissionReservation
-	e := scope.service.store.View(ctx, func(st model.ControlState) error {
-		r, ok := st.Reservations[id.String()]
+	e := scope.service.viewAdmission(ctx, func(st model.ControlState, rows AdmissionReader) error {
+		r, ok, err := rows.Reservation(id.String())
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return model.Fail(model.NotFound)
 		}

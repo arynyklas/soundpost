@@ -85,7 +85,7 @@ func TestStartWorkersRefusesARecordingCredentialThatIsNotASource(t *testing.T) {
 	settings.recordingSecret = "NOT-A-SOURCE-CREDENTIAL-1234567890"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = startWorkers(ctx, app, settings)
+	err = startWorkers(ctx, app, settings, nil)
 	if err == nil || !strings.Contains(err.Error(), "recording source") || strings.Contains(err.Error(), "NOT-A-SOURCE") {
 		t.Fatalf("a credential that is not a source: %v", err)
 	}

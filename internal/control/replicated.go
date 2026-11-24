@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
@@ -89,16 +90,16 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 		if len(c.Members.Nodes) != 1 {
 			return nil, model.Fail(model.Invalid)
 		}
-		seed, err := m.Snapshot()
+		// The state is snapshotted into a seed only when a fresh journal is created from it (SeedFunc): a
+		// journal that exists ignores it, and at the size of a busy installation building the seed and
+		// decoding it to read the revision was most of what a restart did before the groups opened. The
+		// revision the journal starts at is read from the keys of the file that hold it.
+		_, revision, err := s.head()
 		if err != nil {
 			return nil, err
 		}
-		c.Seed = seed
-		var snapshot controlSnapshot
-		if model.StrictJSON(seed, &snapshot) != nil {
-			return nil, model.Fail(model.Corrupt)
-		}
-		c.Application = uint64(snapshot.State.Revision)
+		c.SeedFunc = m.Snapshot
+		c.Application = uint64(revision)
 	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	m.done = make(chan struct{})
@@ -110,6 +111,7 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 	m.group = group
 	s.repl = m
 	go m.withdrawLoop()
+	s.registerDiag(group, c.Directory)
 	return group, nil
 }
 func (s *Store) ReplicationSeed() ([]byte, uint64, error) {
@@ -141,14 +143,39 @@ func retryLostProposals(ctx context.Context) context.Context {
 	return context.WithValue(ctx, lostProposalRetryKey{}, true)
 }
 
-func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn func(*State) error) error {
+// unnamedError is what replicatedUpdateOnce answers when a transition that did not name some of the
+// ledger's members (the admission books, the job and issue books) changed them anyway: replicatedUpdate
+// then runs it again with them assembled, as every transition did before they had records of their own.
+type unnamedError struct{ need memberScope }
+
+func (e *unnamedError) Error() string {
+	return "control: a writer that did not name the ledger changed it"
+}
+
+// replicatedUpdate runs fn as one control transition. members says which of the ledger's members fn
+// reads or writes: the admission books (Reservations, AdmissionKeys, Quotas, Settlement) and the job and
+// issue books (JobBooks, IssueBooks). They are assembled into the state fn is given and what fn leaves is
+// written back record by record. A transition that does not name them gets the state without them, which
+// is what keeps a command that has nothing to do with admission from reading the books of every batch
+// ever admitted, and one that has nothing to do with the workers from reading their books. One that
+// changes them anyway (a handler registered by a caller that does not know the layout) is run again on the
+// state with them: fn re-judges the state it is given, as it does when a proposal is lost
+// (retryLostProposals), so the second run is as good as the first and the cost of naming the ledger is
+// paid only by the transition that needs it.
+func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, members memberScope, fn func(*State) error) error {
 	attempts := 1
 	if ctx.Value(lostProposalRetryKey{}) != nil {
 		attempts = maxLostProposals
 	}
 	for attempt := 1; ; attempt++ {
 		var lost bool
-		err := s.replicatedUpdateOnce(ctx, bump, force, fn, &lost)
+		err := s.replicatedUpdateOnce(ctx, bump, force, members, fn, &lost)
+		var unnamed *unnamedError
+		if errors.As(err, &unnamed) && members|unnamed.need != members {
+			members |= unnamed.need
+			attempt--
+			continue
+		}
 		if !lost || attempt >= attempts || ctx.Err() != nil {
 			return err
 		}
@@ -157,23 +184,74 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 
 // replicatedUpdateOnce is one read-compute-propose round; lost reports that the proposal was refused
 // as stale (another command committed since the read).
-func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool, fn func(*State) error, lost *bool) error {
-	s.updateMu.Lock()
-	defer s.updateMu.Unlock()
+func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool, members memberScope, fn func(*State) error, lost *bool) error {
+	defer s.lockUpdates()()
 	r := s.repl
 	if _, err := r.group.ReadIndex(ctx); err != nil {
 		return replicaFaultUnder(ctx, err)
 	}
 	var st State
 	var oldRaw []byte // the encoding of the state read, kept only when the command is a patch
-	patch := s.StatePatch()
+	var layout bool   // the file keeps its books in the ledger (ledgerLayout)
+	var oldLedger, heldLedger ledgerMembers
+	// window is the command whose records the log was reduced to when the transition read it ("": the whole log).
+	var window string
+	var layoutBaseOf string // the digest ledgerBase names for the state read (layout 2)
+	// A command is a patch once every member declared the first protocol of it (SetLegacyStatePatchGate)
+	// when the books are in the blob, as the previous release holds them and the patch names the digest it
+	// computes. When they are in the ledger, the digest and the ledger commands need the protocol of that
+	// layout (SetStatePatchGate): a contracted installation has no previous release among its members.
+	// Otherwise the command is the whole-state replacement every release applies.
+	ledgerPatch := s.StatePatch()
+	patch := ledgerPatch || s.legacyStatePatch()
 	if err := s.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
-		if json.Unmarshal(raw, &st) != nil {
-			return model.Fail(model.Corrupt)
+		ctrl := tx.Bucket([]byte("control"))
+		if err := readState(ctrl, &st); err != nil {
+			return err
+		}
+		if layout = ledgerLayout(ctrl); layout {
+			patch = ledgerPatch
+			if members&scopeBooks == 0 && ctx.Value(lateErasureBooksKey{}) != nil && hasFinishedDeletion(&st) {
+				members |= scopeBooks
+			}
+			l, err := openLedger(tx)
+			if err != nil {
+				return err
+			}
+			layoutBaseOf = layoutBase(ctrl, l.acc)
+			if members != 0 {
+				if patch {
+					window = commandKeyOf(ctx) // a replacement carries the whole state, the whole log with it
+				}
+				m, err := l.membersOfKeyed(members, window)
+				if err != nil {
+					return err
+				}
+				attachScope(&st, m, members)
+				if patch {
+					// fn changes the maps it is given in place: what it started from is a second assembly.
+					if oldLedger, err = l.membersOfKeyed(members, window); err != nil {
+						return err
+					}
+				}
+				writableCommands(&st, members)
+			}
+			if rest := scopeAll &^ members; !patch && rest != 0 {
+				// a replacement carries the whole state, the rest of the ledger as it is
+				if heldLedger, err = l.membersOf(rest); err != nil {
+					return err
+				}
+			}
 		}
 		if patch {
-			oldRaw = bytes.Clone(raw)
+			if layout {
+				var err error
+				if oldRaw, err = stateRaw(ctrl); err != nil {
+					return err
+				}
+			} else {
+				oldRaw = bytes.Clone(ctrl.Get(stateKey))
+			}
 		}
 		return nil
 	}); err != nil {
@@ -182,6 +260,15 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	expected, priorAuthority, priorFloor := st.Revision, st.AuthorityRevision, installationFloor(&st)
 	if err := fn(&st); err != nil {
 		return err
+	}
+	var newLedger ledgerMembers
+	if layout {
+		if need := unnamedMembers(&st, members); need != 0 {
+			return &unnamedError{need: need}
+		}
+		if members != 0 {
+			newLedger = detachScope(&st, members).normalized()
+		}
 	}
 	if expected == ^model.Revision(0) {
 		return model.Fail(model.Unavailable)
@@ -198,10 +285,33 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	// to have changed only what its class owns for it (settleOrgAuthority); every other case, a
 	// replacement included, is an ordinary bump.
 	var newRaw []byte // the encoding of st, when settleOrgAuthority made it
+	var base string
+	var ledgerOps []patchOp
+	var err error
+	switch {
+	case oldRaw != nil && !layout:
+		// The books are in the blob, as the previous release holds them: the digest is the one it computes.
+		if base, err = patchBase(oldRaw); err != nil {
+			return err
+		}
+	case oldRaw != nil:
+		base = layoutBaseOf
+		if members != 0 {
+			ledgerOps = diffLedger(oldLedger.normalized(), newLedger)
+		}
+	case !layout:
+	default:
+		attachScope(&st, newLedger, members)
+		attachScope(&st, heldLedger, scopeAll&^members)
+	}
 	switch scope, _ := ctx.Value(orgScopeKey{}).(*orgScope); {
 	case bump || force != nil && *force:
 		st.AuthorityRevision = st.Revision
-	case scope != nil && oldRaw != nil && scope.named:
+	// The books of admission are no row an organization's retention or admin command owns: settleOrgAuthority
+	// compares the blobs, which hold none of them, so a ledger the transition changed is judged here. The job
+	// and issue books are rows of the organization (orgRetentionTables) that a retention transition owns:
+	// their records are judged here by the key, as settleOrgAuthority judges them in a blob that holds them.
+	case scope != nil && oldRaw != nil && scope.named && (len(ledgerOps) == 0 || booksOfOrg(ledgerOps, scope, oldLedger, window)):
 		newRaw = settleOrgAuthority(&st, oldRaw, scope, priorFloor)
 	case scope != nil:
 		st.AuthorityRevision = st.Revision
@@ -212,7 +322,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	if err != nil {
 		return err
 	}
-	payload, err := s.controlPayload(oldRaw, newRaw, expected, &st, keys)
+	payload, err := s.controlPayload(oldRaw, newRaw, expected, &st, keys, base, ledgerOps)
 	if err != nil {
 		return err
 	}
@@ -224,6 +334,94 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 		*lost = true
 	}
 	return replicaFault(err)
+}
+
+// lateErasureBooksKey marks the context of an effect commit that does not name the books: an effect
+// re-runs the erasure of every finished deletion over the state it changed (eraseLateEffect), the books
+// of the jobs and issues included, so with such a deletion in the state the books are assembled for it.
+type lateErasureBooksKey struct{}
+
+// hasFinishedDeletion says whether some deletion operation of st has completed or failed.
+func hasFinishedDeletion(st *State) bool {
+	for _, op := range st.Deletions {
+		if op.Phase == model.DeletePhaseComplete || op.Phase == model.DeletePhaseFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// unnamedMembers is the members of the ledger that st holds although the transition did not name them
+// (they are empty in the state a transition that does not name them is given).
+func unnamedMembers(st *State, named memberScope) (need memberScope) {
+	if named&scopeAdmission == 0 && (st.Reservations != nil || st.AdmissionKeys != nil || st.Quotas != nil || st.Settlement != nil) {
+		need |= scopeAdmission
+	}
+	if named&scopeBooks == 0 && (st.JobBooks != nil || st.IssueBooks != nil || st.GroupingIssues != nil) {
+		need |= scopeBooks
+	}
+	if named&scopeCommands == 0 && (len(st.Commands) != 0 || len(st.CommandOwners) != 0) {
+		need |= scopeCommands
+	}
+	return need
+}
+
+// writableCommands gives a transition that names the applied-command log maps to write into: a record is
+// written into an empty log as into any other.
+func writableCommands(st *State, members memberScope) {
+	if members&scopeCommands == 0 {
+		return
+	}
+	if st.Commands == nil {
+		st.Commands = map[string]model.ControlResult{}
+	}
+	if st.CommandOwners == nil {
+		st.CommandOwners = map[string]string{}
+	}
+}
+
+type commandKeyKey struct{}
+
+// withCommandKey marks ctx so that a transition that names the applied-command log reads and writes the
+// records of the command id only (a transition that applies one command: transactCommit).
+func withCommandKey(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, commandKeyKey{}, id)
+}
+
+func commandKeyOf(ctx context.Context) string {
+	id, _ := ctx.Value(commandKeyKey{}).(string)
+	return id
+}
+
+// booksOfOrg says whether every op writes what the class of scope owns for the organization it named: a record
+// of the command log that the transition adds (any class commits its command's record, and only adds: a record
+// that is in the log when the transition starts is neither removed nor changed by it, an edit of the log of
+// applied commands being no write of an organization), or a record of the job or issue books or a grouping issue
+// of the organization, which the retention class owns. before is the ledger the transition started from, window
+// the command the log was reduced to when the transition read it (a transition that sees one record cannot tell
+// whether another is in the log: it adds that record and no other).
+func booksOfOrg(ops []patchOp, scope *orgScope, before ledgerMembers, window string) bool {
+	org := scope.org.String()
+	for _, op := range ops {
+		if len(op.Path) != 2 || !bookRoot(op.Path[0]) {
+			return false
+		}
+		key := op.Path[1]
+		if op.Path[0] == "Commands" || op.Path[0] == "CommandOwners" {
+			_, held := before.Commands[key]
+			if op.Path[0] == "CommandOwners" {
+				_, held = before.CommandOwners[key]
+			}
+			if op.Op != opSet || held || window != "" && key != window {
+				return false
+			}
+			continue
+		}
+		if scope.class != orgRetention || !keyInOrg(key, org) {
+			return false
+		}
+	}
+	return true
 }
 
 // RetryByDigest implements replica.DigestRetryMachine: every control command carries the whole
@@ -248,7 +446,21 @@ func (m *replicatedControl) Applied() uint64 {
 	return value
 }
 func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
-	if c.Entry.Kind != replica.Noop && c.Index <= m.Applied() {
+	// The command is decoded once for the whole of the apply (a patch of a full round is 770 KiB of JSON).
+	var decoded controlCommand
+	haveCommand := false
+	decode := func() (controlCommand, error) {
+		if !haveCommand {
+			cmd, err := decodeControlCommand(c.Entry.Payload)
+			if err != nil {
+				return controlCommand{}, err
+			}
+			decoded, haveCommand = cmd, true
+		}
+		return decoded, nil
+	}
+	applied := m.Applied()
+	if c.Entry.Kind != replica.Noop && c.Index <= applied {
 		rejected := false
 		if err := m.store.db.View(func(tx *bolt.Tx) error {
 			rejected = tx.Bucket([]byte("replica_control")).Get([]byte("rejected:"+c.Entry.ID.String())) != nil
@@ -257,7 +469,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			return err
 		}
 		if !rejected {
-			cmd, err := decodeControlCommand(c.Entry.Payload)
+			cmd, err := decode()
 			if err != nil {
 				return model.Fail(model.Corrupt)
 			}
@@ -274,8 +486,8 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 		}
 	}
-	if c.Index > m.Applied() && c.Entry.Kind != replica.Noop {
-		cmd, err := decodeControlCommand(c.Entry.Payload)
+	if c.Index > applied && c.Entry.Kind != replica.Noop {
+		cmd, err := decode()
 		if err != nil {
 			return model.Fail(model.Corrupt)
 		}
@@ -293,7 +505,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 		}
 	}
-	rejected := false
+	rejected, activated := false, false
 	err := m.store.db.Update(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_control"))
 		physical := readWatermark(meta.Get([]byte("physical")))
@@ -305,15 +517,35 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			return model.Fail(model.Corrupt)
 		}
 		b := tx.Bucket([]byte("control"))
-		rawState := b.Get([]byte("state"))
-		// The state is decoded only when a command cannot be applied to its bytes (stateRoot, patchRaw):
-		// a patch, an audit delta, a stale rejection and a no-op leave every member they do not name as
-		// it is, and decoding and encoding tens of megabytes for them is what a voter paid per command.
-		root := scanStateRoot(rawState)
+		layout := ledgerLayout(b)
+		// The bytes of the state the command is applied to are read only when the command cannot be applied
+		// without them. A file of layout 2 keeps the revision outside its blob (state_layout.go), so a
+		// command that only steps the revision (an admission round, a stale rejection, a no-op) never reads
+		// the blob and never writes it; the state is decoded only when a command cannot be applied to its
+		// bytes (stateRoot, patchRaw): a patch, an audit delta, a stale rejection and a no-op leave every
+		// member they do not name as it is, and decoding and encoding tens of megabytes for them is what a
+		// voter paid per command.
+		var rawState []byte
+		var root stateRoot
+		haveRaw := false
+		raw := func() error {
+			if haveRaw {
+				return nil
+			}
+			r, err := stateRaw(b)
+			if err != nil {
+				return err
+			}
+			rawState, root, haveRaw = r, scanStateRoot(r), true
+			return nil
+		}
 		var current State
 		loaded := false
 		load := func() error {
 			if !loaded {
+				if err := raw(); err != nil {
+					return err
+				}
 				if json.Unmarshal(rawState, &current) != nil {
 					return model.Fail(model.Corrupt)
 				}
@@ -321,20 +553,37 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 			return nil
 		}
-		installation0, revision0 := root.installation, root.revision
-		if !root.ok {
-			if err := load(); err != nil {
+		var installation0 model.ID
+		var revision0 model.Revision
+		if layout {
+			var err error
+			if installation0, revision0, err = stateHead(b); err != nil {
 				return err
 			}
-			installation0, revision0 = current.Installation, current.Revision
+		} else {
+			if err := raw(); err != nil {
+				return err
+			}
+			installation0, revision0 = root.installation, root.revision
+			if !root.ok {
+				if err := load(); err != nil {
+					return err
+				}
+				installation0, revision0 = current.Installation, current.Revision
+			}
 		}
 		revisionAfter := revision0
 		owe := false
+		var ledgerOps []patchOp
+		var replaceLedger *ledgerMembers
+		stepOnly := false
+		fast, setClock := false, false // layout 2: the command only steps the revision (and maybe its clock)
+		var stepClock []byte
 		if c.Entry.Kind != replica.Noop {
 			if c.Entry.Kind != replica.Control {
 				return model.Fail(model.Corrupt)
 			}
-			cmd, derr := decodeControlCommand(c.Entry.Payload)
+			cmd, derr := decode()
 			if derr != nil {
 				return model.Fail(model.Corrupt)
 			}
@@ -367,7 +616,9 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if err := meta.Put(staleAppliedKey, watermarkBytes(c.Index)); err != nil {
 					return err
 				}
-				if out, _, ok := patchRaw(rawState, root, []patchOp{revisionOp(revisionAfter)}); ok {
+				if layout {
+					fast = true
+				} else if out, _, ok := patchRaw(rawState, root, []patchOp{revisionOp(revisionAfter)}); ok {
 					next = out
 				} else {
 					if err := load(); err != nil {
@@ -378,6 +629,9 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			} else if cmd.delta != nil {
 				owe = erasureCount(cmd.delta.Audits) > 0
 				revisionAfter = cmd.delta.Expected + 1
+				if err := raw(); err != nil {
+					return err
+				}
 				settled = root.settled
 				if out, ok := deltaRaw(rawState, root, *cmd.delta); ok {
 					next = out
@@ -392,33 +646,45 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if p.Base != "" {
 					// A voter that holds other bytes than the proposer read has to be resynchronised (a
 					// snapshot install), not given a patch that only names what it changes.
-					base, ok := "", false
-					if root.ok {
-						base, ok = patchBaseRoot(rawState, root)
-					} else {
-						var err error
-						base, err = patchBase(rawState)
-						ok = err == nil
+					ok, e := baseMatches(tx, p.Base)
+					if e != nil {
+						return e
 					}
-					if !ok || base != p.Base {
+					if !ok {
 						return model.Fail(model.Corrupt)
 					}
 				}
-				if out, eff, ok := patchRaw(rawState, root, p.Ops); ok && eff.revisionSet && eff.revision == p.Expected+1 {
-					next = out
-					owe = eff.erasures > 0
-					settled = eff.settled
-					revisionAfter = eff.revision
+				blobOps := p.Ops
+				if layout {
+					blobOps, ledgerOps = splitLedgerOps(p.Ops)
+				}
+				stepOnly = onlyStepOps(blobOps)
+				if layout && stepOnly {
+					var e error
+					if revisionAfter, stepClock, setClock, e = stepOfOps(blobOps, p.Expected); e != nil {
+						return e
+					}
+					fast = true
 				} else {
-					if err := load(); err != nil {
+					if err := raw(); err != nil {
 						return err
 					}
-					patched, perr := patchedState(rawState, &current, p)
-					if perr != nil {
-						return perr
+					if out, eff, ok := patchRaw(rawState, root, blobOps); ok && eff.revisionSet && eff.revision == p.Expected+1 {
+						next = out
+						owe = eff.erasures > 0
+						settled = eff.settled
+						revisionAfter = eff.revision
+					} else {
+						if err := load(); err != nil {
+							return err
+						}
+						patched, perr := patchedState(rawState, &current, blobOps, p.Expected, p.Base == "")
+						if perr != nil {
+							return perr
+						}
+						owe = erasureCount(patched.Audits) > erasureCount(current.Audits)
+						current = patched
 					}
-					owe = erasureCount(patched.Audits) > erasureCount(current.Audits)
-					current = patched
 				}
 			} else {
 				// An erasing audit this commit adds means it frees the pages that held what was
@@ -428,9 +694,15 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				}
 				owe = erasureCount(cmd.replacement.State.Audits) > erasureCount(current.Audits)
 				current = cmd.replacement.State
+				if layout {
+					// The replacement carries the whole state: the ledger members go to the ledger, the blob
+					// holds the rest.
+					held := detachLedger(&current).normalized()
+					replaceLedger = &held
+				}
 			}
-			spliced := next != nil
-			if !spliced {
+			spliced := next != nil || fast
+			if !spliced && !fast {
 				// The decoded path: current is the state this command leaves.
 				revisionAfter = current.Revision
 				settled = current.Settlement != nil
@@ -443,8 +715,45 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			if !rejected && settled {
 				m.store.settledSeen.Store(true)
 			}
-			if e := putState(b, next); e != nil {
-				return e
+			var werr error
+			switch {
+			case fast:
+				// Only the revision and the clock moved: the blob, and what a reader of the state without
+				// the ledger decoded before it, are as they were.
+				werr = putStep(b, revisionAfter, stepClock, setClock)
+			case stepOnly:
+				// The same for a file that keeps them in the blob (coreState).
+				werr = putStateKeep(b, next)
+			default:
+				werr = putState(b, next)
+			}
+			if werr != nil {
+				return werr
+			}
+			if layout && (replaceLedger != nil || len(ledgerOps) != 0) {
+				l, e := openLedger(tx)
+				if e != nil {
+					return e
+				}
+				if replaceLedger != nil {
+					e = l.replace(*replaceLedger)
+				} else {
+					e = l.applyLedgerOps(ledgerOps)
+				}
+				if e != nil {
+					return e
+				}
+				if !rejected && l.hasWindows() {
+					m.store.settledSeen.Store(true)
+				}
+			}
+			// The command that contracts the installation (born so, or the operator's step) is the one that
+			// takes the books out of the blob, on every voter at the same command.
+			if !layout && !rejected && commandNamesContraction(&cmd) {
+				if e := migrateLedger(tx); e != nil {
+					return e
+				}
+				activated = true
 			}
 			if spliced {
 				m.store.rawApplies.Add(1)
@@ -470,6 +779,9 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 	if err != nil {
 		return err
 	}
+	if activated {
+		m.store.layoutLedger.Store(true)
+	}
 	if rejected {
 		return replica.ErrConflict
 	}
@@ -493,13 +805,16 @@ func (m *replicatedControl) Snapshot() ([]byte, error) {
 	s := m.store
 	s.keyMu.Lock()
 	defer s.keyMu.Unlock()
-	out := controlSnapshot{Keys: map[string][]byte{}, Metadata: map[string][]byte{}}
+	keys := map[string][]byte{}
+	metadata := map[string][]byte{}
+	var state []byte
 	if err := s.db.View(func(tx *bolt.Tx) error {
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &out.State) != nil {
-			return model.Fail(model.Corrupt)
+		var err error
+		if state, err = snapshotState(tx); err != nil {
+			return err
 		}
 		if b := tx.Bucket([]byte("replica_control")); b != nil {
-			return b.ForEach(func(k, v []byte) error { out.Metadata[string(k)] = bytes.Clone(v); return nil })
+			return b.ForEach(func(k, v []byte) error { metadata[string(k)] = bytes.Clone(v); return nil })
 		}
 		return nil
 	}); err != nil {
@@ -516,10 +831,27 @@ func (m *replicatedControl) Snapshot() ([]byte, error) {
 			if e != nil {
 				return nil, e
 			}
-			out.Keys[name] = raw
+			keys[name] = raw
 		}
 	}
-	return json.Marshal(out)
+	// The bytes of json.Marshal(controlSnapshot{State, Keys, Metadata}), with the state as snapshotState
+	// wrote it (it is not decoded to be encoded again).
+	keysRaw, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	metadataRaw, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(state)+len(keysRaw)+len(metadataRaw)+64)
+	out = append(out, `{"state":`...)
+	out = append(out, state...)
+	out = append(out, `,"keys":`...)
+	out = append(out, keysRaw...)
+	out = append(out, `,"metadata":`...)
+	out = append(out, metadataRaw...)
+	return append(out, '}'), nil
 }
 
 // Restore is the snapshot install of the replication layer: it replaces this node's control
@@ -540,6 +872,11 @@ func (m *replicatedControl) Restore(raw []byte, physical uint64) error {
 // and carries the settled marker key from the start (the group's later install of that same
 // state is exempt in oweInstalledScrub, which is what keeps the file unmarked once it opens).
 func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error {
+	if isCompactControl(raw) {
+		// Restore is asked to install only a state the machine is behind; a compact state is a name for
+		// control.db itself, so a machine behind it has lost the state the name stands for.
+		return compactStateRefusal("is behind")
+	}
 	var snapshot controlSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil || snapshot.State.Installation == (model.ID{}) {
 		return model.Fail(model.Corrupt)
@@ -549,9 +886,11 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 	if err != nil {
 		return err
 	}
+	whole := snapshot.State // the logical state, the ledger members still in it
 	if err = s.db.Update(func(tx *bolt.Tx) error {
 		if owe {
-			if err := oweInstalledScrub(tx.Bucket([]byte("control")), snapshot.State); err != nil {
+			// The installed state is compared with the file's own logical state, ledger included.
+			if err := oweInstalledScrub(tx, whole); err != nil {
 				return err
 			}
 		}
@@ -559,11 +898,7 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 		if err != nil {
 			return err
 		}
-		state, err := json.Marshal(snapshot.State)
-		if err != nil {
-			return err
-		}
-		if err = putState(tx.Bucket([]byte("control")), state); err != nil {
+		if err = putLogicalState(tx, whole); err != nil {
 			return err
 		}
 		for name, value := range snapshot.Metadata {
@@ -579,11 +914,17 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 		// The keys were installed for this state: an install that did not happen leaves none of them.
 		return withCleanup(err, s.undoKeys(keys))
 	}
+	s.noteLayout()
 	return nil
 }
 
 // ReconcileAdmissions uses the one installed owner's durable outcome proof and
 // does not require a live source credential. It never refunds a reserved charge.
+//
+// The batches that can be missing a finalize are those whose reservation is still open (admission_open.go): an
+// owner that answers for the reservations it is asked about (AdmissionOutcomesFor) is asked about those, so
+// a pass costs what is open, a few hundred at any moment, and not what was ever admitted. An owner that
+// answers only with every outcome it holds (AdmissionOutcomes) is read as before.
 func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 	s.registryMu.RLock()
 	owner := s.ownerProof
@@ -591,26 +932,27 @@ func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 	if owner == nil {
 		return model.Fail(model.Unavailable)
 	}
-	type outcomes interface {
-		AdmissionOutcomes(context.Context) ([]model.FinalizeAdmission, error)
-	}
-	installed, ok := owner.(outcomes)
-	if !ok {
-		return model.Fail(model.Unavailable)
-	}
-	proofs, err := installed.AdmissionOutcomes(ctx)
+	proofs, err := s.ownerOutcomes(ctx, owner)
 	if err != nil {
 		return err
+	}
+	if len(proofs) == 0 {
+		return nil
 	}
 	// One linearizable read decides which outcomes still need a commit: a reservation control
 	// holds that has no cursor yet. An outcome whose reservation control no longer holds is fine
 	// only when its cursor lies in a settled window (settle.go): its charge is folded already.
 	var pending []model.FinalizeAdmission
-	if err = s.View(ctx, func(st State) error {
+	if err = s.viewBooks(ctx, func(books admissionBooks) error {
 		for _, proof := range proofs {
-			old, ok := st.Reservations[proof.ReservationID.String()]
+			old, ok, err := books.reservation(proof.ReservationID.String())
+			if err != nil {
+				return err
+			}
 			if !ok {
-				if _, settled := st.Settlement.Window(proof.Cursor); settled {
+				if _, settled, err := windowOf(books, proof.Cursor); err != nil {
+					return err
+				} else if settled {
 					continue
 				}
 				return model.Fail(model.Corrupt)
@@ -630,27 +972,50 @@ func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	for _, proof := range pending {
-		if err = owner.VerifyFinalization(ctx, proof); err != nil {
-			return err
+	// The outcomes are committed reconcilePerCommand at a time: a restart after an overload finds a
+	// batch of thousands of appended batches whose finalize never reached control, and one command
+	// each is a restart that does not fit its startup budget.
+	for len(pending) > 0 {
+		chunk := pending[:min(len(pending), reconcilePerCommand)]
+		pending = pending[len(chunk):]
+		for _, proof := range chunk {
+			if err = owner.VerifyFinalization(ctx, proof); err != nil {
+				return err
+			}
 		}
-		if err = s.updateAs(ctx, writerReconcileAdmissions, func(st *State) error {
-			old, ok := st.Reservations[proof.ReservationID.String()]
-			if !ok || old.State == "cancelled" {
-				return model.Fail(model.Corrupt)
+		if err = s.admissionUpdate(ctx, writerReconcileAdmissions, func(_ *State, books admissionBooks) error {
+			for _, proof := range chunk {
+				if err := reconcileStep(books, proof); err != nil {
+					return err
+				}
 			}
-			if old.Cursor != nil && *old.Cursor != proof.Cursor {
-				return model.Fail(model.Conflict)
-			}
-			old.State = "consumed"
-			cursor := proof.Cursor
-			old.Cursor = &cursor
-			st.Reservations[old.ID.String()] = old
 			return nil
 		}); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// reconcilePerCommand is how many owner outcomes one reconciliation command marks consumed.
+const reconcilePerCommand = 256
+
+// reconcileStep marks the reservation of one durable outcome consumed at the outcome's cursor.
+func reconcileStep(books admissionBooks, proof model.FinalizeAdmission) error {
+	old, ok, err := books.reservation(proof.ReservationID.String())
+	if err != nil {
+		return err
+	}
+	if !ok || old.State == "cancelled" {
+		return model.Fail(model.Corrupt)
+	}
+	if old.Cursor != nil && *old.Cursor != proof.Cursor {
+		return model.Fail(model.Conflict)
+	}
+	old.State = "consumed"
+	cursor := proof.Cursor
+	old.Cursor = &cursor
+	books.putReservation(old)
 	return nil
 }
 
@@ -675,7 +1040,7 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		var actual model.ID
 		e = s.db.View(func(tx *bolt.Tx) error {
 			var st State
-			if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
+			if readState(tx.Bucket([]byte("control")), &st) != nil {
 				return model.Fail(model.Corrupt)
 			}
 			actual = st.Installation
@@ -689,11 +1054,12 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	db, err := bolt.Open(path, 0600, durablefs.BoltOptions())
 	if err != nil {
 		return nil, err
 	}
 	s := &Store{db: &trackedDB{DB: db}, dir: dir}
+	registerTracked(s.db)
 	if err = durablefs.SyncFileAndDir(path); err != nil {
 		db.Close()
 		return nil, err
@@ -703,11 +1069,7 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		if e != nil {
 			return e
 		}
-		state, e := json.Marshal(seed.State)
-		if e != nil {
-			return e
-		}
-		if e = putState(b, state); e != nil {
+		if e = putLogicalState(tx, seed.State); e != nil {
 			return e
 		}
 		return writeLocalScrub(b, localScrub{})
@@ -768,16 +1130,14 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 		}
 		installation, expected, revision = cmd.replacement.State.Installation, cmd.replacement.Expected, cmd.replacement.State.Revision
 	}
-	return m.store.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
-		root := scanStateRoot(raw)
-		installation0, revision0 := root.installation, root.revision
-		if !root.ok {
-			var current State
-			if json.Unmarshal(raw, &current) != nil {
-				return model.Fail(model.Corrupt)
-			}
-			installation0, revision0 = current.Installation, current.Revision
+	ledgerCommand := cmd.patch != nil && ledgerOnlyPatch(cmd.patch)
+	if now := time.Now(); ledgerCommand && m.store.admissionYielding(now) {
+		return model.Fail(model.Stale) // held for a writer that lost (admission_yield.go): the proposer tries again
+	}
+	err = m.store.db.View(func(tx *bolt.Tx) error {
+		installation0, revision0, err := stateHead(tx.Bucket([]byte("control")))
+		if err != nil {
+			return err
 		}
 		if installation != installation0 || expected != revision0 || command.ApplicationIndex != uint64(revision) {
 			return model.Fail(model.Stale)
@@ -788,20 +1148,20 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 			if cmd.patch.Base == "" {
 				return model.Fail(model.Invalid)
 			}
-			base, ok := "", false
-			if root.ok {
-				base, ok = patchBaseRoot(raw, root)
-			} else {
-				var err error
-				base, err = patchBase(raw)
-				ok = err == nil
+			ok, err := baseMatches(tx, cmd.patch.Base)
+			if err != nil {
+				return err
 			}
-			if !ok || base != cmd.patch.Base {
+			if !ok {
 				return model.Fail(model.Stale)
 			}
 		}
 		return nil
 	})
+	if !ledgerCommand && isStale(err) {
+		m.store.noteWriterLost(time.Now())
+	}
+	return err
 }
 func (s *Store) replicaKeyFiles() (map[string][]byte, error) {
 	s.keyMu.Lock()
@@ -988,7 +1348,7 @@ func (s *Store) InitializeBearerHashKey(ctx context.Context, sealed string, vers
 	return s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("control"))
 		var st State
-		if bucket == nil || json.Unmarshal(bucket.Get([]byte("state")), &st) != nil {
+		if readState(bucket, &st) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		changed, err := initialize(&st)
@@ -1050,7 +1410,7 @@ func (s *Store) initializeConsensusNamespace(directory string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("control"))
 		var state State
-		if bucket == nil || json.Unmarshal(bucket.Get([]byte("state")), &state) != nil {
+		if readState(bucket, &state) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		marker := bucket.Get([]byte("replica_format"))
@@ -1096,8 +1456,8 @@ func (s *Store) initializeConsensusNamespace(directory string) error {
 func (m *replicatedControl) verifyCurrentState(expected State) error {
 	return m.store.db.View(func(tx *bolt.Tx) error {
 		var current State
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
-			return model.Fail(model.Corrupt)
+		if err := loadLogical(tx, &current); err != nil {
+			return err
 		}
 		if current.Installation != expected.Installation || current.Revision < expected.Revision {
 			return model.Fail(model.Corrupt)
@@ -1105,6 +1465,9 @@ func (m *replicatedControl) verifyCurrentState(expected State) error {
 		if current.Revision != expected.Revision {
 			return nil
 		}
+		// The ledger does not tell an empty map from an absent one: both states are compared in its form.
+		normalizeLedger(&expected)
+		normalizeLedger(&current)
 		left, err := model.CanonicalJSON(current)
 		if err != nil {
 			return err
@@ -1123,6 +1486,9 @@ func (m *replicatedControl) verifyCurrentState(expected State) error {
 // refused only when it is for another installation. A machine at the snapshot's revision must
 // hold exactly that state, and one ahead of it holds whatever came after.
 func (m *replicatedControl) VerifySnapshot(raw []byte) error {
+	if isCompactControl(raw) {
+		return m.verifyCompact(raw)
+	}
 	var snapshot controlSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil {
 		return model.Fail(model.Corrupt)
@@ -1133,7 +1499,7 @@ func (m *replicatedControl) VerifySnapshot(raw []byte) error {
 	behind := false
 	if err := m.store.db.View(func(tx *bolt.Tx) error {
 		var current State
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
+		if readState(tx.Bucket([]byte("control")), &current) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		behind = current.Installation == snapshot.State.Installation && current.Revision < snapshot.State.Revision
@@ -1189,20 +1555,18 @@ func replicaSource(st State, org, project, source model.ID, epoch model.Uint64, 
 	return nil
 }
 func (s *Store) ValidateReplicatedBatch(ctx context.Context, b model.NormalizedBatch) error {
-	return s.View(ctx, func(st State) error {
+	return s.ViewAdmission(ctx, func(st State, rows auth.AdmissionReader) error {
 		if err := replicaSource(st, b.Org, b.Project, b.Source, b.PolicyEpoch, b.PolicyRevision, true); err != nil {
 			return err
 		}
-		r, ok := st.Reservations[b.Reservation.ID.String()]
+		r, ok, err := rows.Reservation(b.Reservation.ID.String())
+		if err != nil {
+			return err
+		}
 		if !ok || r.State != "reserved" || r.Hash != b.Hash || r.Batch != b.ID || r.Org != b.Org || r.Project != b.Project || r.Source != b.Source || r.Producer != b.Producer || r.Slot != b.RouteSlot {
 			return model.Fail(model.Forbidden)
 		}
-		a, err := model.CanonicalJSON(r)
-		if err != nil {
-			return model.Fail(model.Corrupt)
-		}
-		supplied, err := model.CanonicalJSON(b.Reservation)
-		if err != nil || !bytes.Equal(a, supplied) {
+		if !auth.SameReservation(r, b.Reservation) {
 			return model.Fail(model.Forbidden)
 		}
 		src := st.Sources[b.Source.String()]
@@ -1258,8 +1622,11 @@ func (s *Store) ValidateReplicatedFence(ctx context.Context, f model.SourceFence
 	})
 }
 func (s *Store) ValidateReplicatedCancellation(ctx context.Context, c model.CancelReservation) error {
-	return s.View(ctx, func(st State) error {
-		r, ok := st.Reservations[c.ReservationID.String()]
+	return s.viewBooks(ctx, func(books admissionBooks) error {
+		r, ok, err := books.reservation(c.ReservationID.String())
+		if err != nil {
+			return err
+		}
 		if !ok || r.Hash != c.Hash || r.State != "reserved" {
 			return model.Fail(model.Conflict)
 		}

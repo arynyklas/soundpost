@@ -36,7 +36,7 @@ type RestoreView struct {
 // never restored or has nothing left), so it can be shown to every signed-in account.
 func (s *Service) RestorePending(ctx context.Context) (int, error) {
 	pending := 0
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		raw, ok := st.OIDC[restoreStashKey]
 		if !ok {
 			return nil
@@ -62,7 +62,7 @@ func (s *Service) RestoreItems(ctx context.Context, c Credential) (RestoreView, 
 		return RestoreView{}, err
 	}
 	view := RestoreView{Items: []RestoreItem{}}
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, c); err != nil {
 			return err
 		}

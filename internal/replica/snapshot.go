@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -260,6 +261,19 @@ func (s Snapshot) envelopeBytes() ([]byte, error) {
 func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, error) {
 	g.cutMu.Lock()
 	defer g.cutMu.Unlock()
+	snapshot, err := g.cut(ctx, at)
+	if errors.Is(err, errRetryPartsLost) { // the selected snapshot no longer holds the retry parts the cut meant to take from it: write the table whole
+		snapshot, err = g.cut(ctx, at)
+	}
+	return snapshot, err
+}
+
+// errRetryPartsLost is cut's report that it failed only because a retry part it meant to reuse was gone; the group
+// has forgotten its parts, so the same cut, repeated, writes the whole table.
+var errRetryPartsLost = errors.New("replica retry parts lost")
+
+// cut is CreateSnapshot with cutMu held.
+func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 	if at.Group != g.group {
 		return Snapshot{}, ErrInvalid
 	}
@@ -273,6 +287,7 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 	if err := g.trip("snapshot_cut"); err != nil {
 		return Snapshot{}, err
 	}
+	lockBegan := time.Now()
 	g.mu.Lock()
 	if g.failed || g.closed || g.applied == 0 {
 		g.mu.Unlock()
@@ -317,14 +332,23 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 	}
 	defer func() { release() }()
 	envelope := snapshotEnvelope{Application: g.application, State: state, Members: cloneMembers(g.members), Retiring: append([]Member(nil), g.retiring...)}
-	for _, c := range g.completed {
-		envelope.Completed = append(envelope.Completed, c)
+	var plan *retryPlan
+	if g.compactRetry(state) {
+		plan = g.planRetryLocked()
+		envelope.Completed, envelope.RetryFrom = plan.plain, plan.from
+	} else {
+		for _, c := range g.completed {
+			envelope.Completed = append(envelope.Completed, c)
+		}
+		envelope.markRetry()
+		sort.Slice(envelope.Completed, func(i, j int) bool { return envelope.Completed[i].Index < envelope.Completed[j].Index })
 	}
-	envelope.markRetry()
-	sort.Slice(envelope.Completed, func(i, j int) bool { return envelope.Completed[i].Index < envelope.Completed[j].Index })
+	completed := len(g.completed)
 	conf := g.conf
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
 	g.mu.Unlock()
+	sinceMax(&g.phases.cutLockNS, &g.phases.cutLockMax, lockBegan)
+	envelopeBegan := time.Now()
 	if ledger.Version != 1 || ledger.Group != g.group || ledger.Entries == nil {
 		return Snapshot{}, ErrNoLedger
 	}
@@ -334,6 +358,18 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 			return Snapshot{}, ErrNoLedger
 		}
 		previous = e.Index
+	}
+	var retrySources []bundleSource
+	var retryParts []retryPart
+	if plan != nil {
+		var written uint64
+		if retrySources, retryParts, written, err = plan.encode(); err != nil {
+			return Snapshot{}, err
+		}
+		g.phases.cutRetryBytes.Store(written)
+		if len(retryParts) > 0 {
+			envelope.Retry, envelope.RetryParts = retryDigestTag, partNames(retryParts)
+		}
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil {
@@ -347,9 +383,13 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 	if err != nil {
 		return Snapshot{}, err
 	}
+	since(&g.phases.cutEnvelopeNS, envelopeBegan)
+	g.phases.cutEnvelopeBytes.Store(uint64(len(raw)))
+	g.phases.cutCompleted.Store(uint64(completed))
 	// The in-memory Raft snapshot is what a lagging follower receives and what the
 	// journal rewrite is anchored on; it is made before the directory is
 	// published so truncation can never outrun a verified directory.
+	lock2Began := time.Now()
 	g.mu.Lock()
 	if g.failed || g.closed {
 		g.mu.Unlock()
@@ -362,7 +402,9 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 		}
 	}
 	g.mu.Unlock()
+	sinceMax(&g.phases.cutLock2NS, &g.phases.cutLock2Max, lock2Began)
 	sources := []bundleSource{{name: fileEnvelope, data: raw}, {name: fileLedger, data: ledgerRaw}, {name: fileConf, data: confRaw}}
+	sources = append(sources, retrySources...)
 	for _, f := range pinned {
 		if !safeFileName.MatchString(f.Name) {
 			return Snapshot{}, ErrInvalid
@@ -371,7 +413,23 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].name < sources[j].name })
 	manifest := SnapshotManifest{Version: snapshotFormat, Group: g.group, Index: index, Term: term, Cursor: cursor, Generation: ledger.Generation}
-	return g.snaps.create(ctx, manifest, ledgerRaw, sources)
+	storeBegan := time.Now()
+	snapshot, err := g.snaps.create(ctx, manifest, ledgerRaw, sources)
+	since(&g.phases.cutStoreNS, storeBegan)
+	if plan != nil {
+		g.mu.Lock()
+		switch {
+		case errors.Is(err, ErrReuseLost) && len(plan.keep) > 0:
+			g.resetRetryPartsLocked()
+			err = errRetryPartsLost
+		case err == nil && g.retryEpoch == plan.epoch && g.snaps.wroteLast():
+			g.retryParts = retryParts
+		case err == nil:
+			g.resetRetryPartsLocked() // the selected snapshot was already this cut and is not what was planned
+		}
+		g.mu.Unlock()
+	}
+	return snapshot, err
 }
 
 func (g *Group) trip(at string) error {

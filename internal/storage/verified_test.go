@@ -65,21 +65,22 @@ func editIndex(t *testing.T, dir string, receipt model.Receipt) {
 	defer db.Close()
 	hit := 0
 	if err = db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("scan_time"))
-		var keys [][]byte
-		_ = b.ForEach(func(k, v []byte) error {
-			if len(k) >= 26 && binary.BigEndian.Uint64(k[len(k)-10:len(k)-2]) == uint64(receipt.Cursor.Index) && bytes.Equal(k[len(k)-26:len(k)-10], receipt.Cursor.Group[:]) {
-				keys = append(keys, bytes.Clone(k))
+		for _, b := range logicalBuckets(tx, "scan_time") {
+			var keys [][]byte
+			_ = b.ForEach(func(k, v []byte) error {
+				if len(k) >= 26 && binary.BigEndian.Uint64(k[len(k)-10:len(k)-2]) == uint64(receipt.Cursor.Index) && bytes.Equal(k[len(k)-26:len(k)-10], receipt.Cursor.Group[:]) {
+					keys = append(keys, bytes.Clone(k))
+				}
+				return nil
+			})
+			for _, k := range keys {
+				v := bytes.Clone(b.Get(k))
+				v[len(v)-1] ^= 0xff
+				if err := b.Put(k, v); err != nil {
+					return err
+				}
+				hit++
 			}
-			return nil
-		})
-		for _, k := range keys {
-			v := bytes.Clone(b.Get(k))
-			v[len(v)-1] ^= 0xff
-			if err := b.Put(k, v); err != nil {
-				return err
-			}
-			hit++
 		}
 		return nil
 	}); err != nil {
@@ -137,6 +138,16 @@ func isCorruptFault(err error) bool {
 	return errors.As(err, &fault) && fault.Code == model.Corrupt
 }
 
+// closeEngineWithoutAdvance closes the engine as a close does whose advance of the verified point did not finish (budget 0), or a crash:
+// the commands applied since the last verification are the tail the next start verifies. A graceful close advances the point itself
+// (verifyAtClose), so a test about the tail cannot use closeEngine.
+func (x *eraseEnv) closeEngineWithoutAdvance() {
+	oldBudget := closeVerifyBudget
+	closeVerifyBudget = 0
+	defer func() { closeVerifyBudget = oldBudget }()
+	x.closeEngine()
+}
+
 // A valid record turns the next start into a tail-only verification: nothing is hashed, only the
 // commands above the verified point are looked up.
 func TestVerifiedRecordBoundsRestart(t *testing.T) {
@@ -153,7 +164,7 @@ func TestVerifiedRecordBoundsRestart(t *testing.T) {
 		t.Fatalf("first reopen after a flush was a full verification: %+v", v)
 	}
 	x.appendN(2, 200)
-	x.closeEngine()
+	x.closeEngineWithoutAdvance()
 	if _, err := x.open(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +309,7 @@ func editDB(t *testing.T, dir string, edit func(tx *bolt.Tx) error) {
 }
 
 // entriesOf lists the scan_time keys written by the command of receipt.
-func entriesOf(b *bolt.Bucket, receipt model.Receipt) [][]byte {
+func entriesOf(b logicalBucket, receipt model.Receipt) [][]byte {
 	var keys [][]byte
 	_ = b.ForEach(func(k, v []byte) error {
 		if len(k) >= 26 && binary.BigEndian.Uint64(k[len(k)-10:len(k)-2]) == uint64(receipt.Cursor.Index) && bytes.Equal(k[len(k)-26:len(k)-10], receipt.Cursor.Group[:]) {
@@ -319,23 +330,40 @@ func TestCorruptionInUnverifiedTailNeverReady(t *testing.T) {
 		{"index entry CRC", func(t *testing.T, x *eraseEnv, tail model.Receipt) { editIndex(t, x.dir, tail) }},
 		{"index entry missing", func(t *testing.T, x *eraseEnv, tail model.Receipt) {
 			editDB(t, x.dir, func(tx *bolt.Tx) error {
-				b := tx.Bucket([]byte("scan_time"))
-				keys := entriesOf(b, tail)
-				if len(keys) == 0 {
-					t.Fatal("no entry")
+				for _, b := range logicalBuckets(tx, "scan_time") {
+					if keys := entriesOf(b, tail); len(keys) > 0 {
+						return b.Delete(keys[0])
+					}
 				}
-				return b.Delete(keys[0])
+				t.Fatal("no entry")
+				return nil
 			})
 		}},
 		{"hot page bytes", func(t *testing.T, x *eraseEnv, tail model.Receipt) {
 			editDB(t, x.dir, func(tx *bolt.Tx) error {
-				commits := tx.Bucket([]byte("scan_commits"))
 				var ids []committedPage
-				if err := json.Unmarshal(commits.Get(commitKey(tail.Cursor)), &ids); err != nil || len(ids) == 0 {
+				if err := json.Unmarshal(logicalGet(tx, "scan_commits", commitKey(tail.Cursor)), &ids); err != nil || len(ids) == 0 {
 					t.Fatalf("commit entry: %v", err)
 				}
-				pages := tx.Bucket([]byte("scan_pages"))
-				ref, err := parsePageRef(pages.Get(ids[0].ID[:]))
+				ref, err := parsePageRef(logicalGet(tx, "scan_pages", ids[0].ID[:]))
+				if err == nil && len(ref.Hot) == 0 && isPayloadRef(ref.Log) { // the hot page is a record of the payload log: damage its bytes there
+					seq, off, n, _, _ := parsePayloadRef(ref.Log)
+					f, ferr := os.OpenFile(filepath.Join(x.dir, payloadDirName, payloadFileName(seq)), os.O_RDWR, 0)
+					if ferr != nil {
+						t.Fatal(ferr)
+					}
+					defer f.Close()
+					at := off + payloadHeaderLen + int64(n/2)
+					var b [1]byte
+					if _, ferr = f.ReadAt(b[:], at); ferr != nil {
+						t.Fatal(ferr)
+					}
+					b[0] ^= 0xff
+					if _, ferr = f.WriteAt(b[:], at); ferr != nil {
+						t.Fatal(ferr)
+					}
+					return nil
+				}
 				if err != nil || len(ref.Hot) == 0 {
 					t.Fatalf("page is not hot: %v", err)
 				}
@@ -345,7 +373,7 @@ func TestCorruptionInUnverifiedTailNeverReady(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				return pages.Put(ids[0].ID[:], raw)
+				return bucketHolding(tx, "scan_pages", ids[0].ID[:]).Put(ids[0].ID[:], raw)
 			})
 		}},
 		{"command missing", func(t *testing.T, x *eraseEnv, tail model.Receipt) {
@@ -373,7 +401,7 @@ func TestCorruptionInUnverifiedTailNeverReady(t *testing.T) {
 				t.Fatal(err)
 			}
 			tail := x.appendN(1, 300)
-			x.closeEngine()
+			x.closeEngineWithoutAdvance() // what a crash leaves; a graceful close would verify (and so cover) the tail
 			c.damage(t, x, tail[0])
 			e, err := Open(x.dir, x.a)
 			if err == nil {

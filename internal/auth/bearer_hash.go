@@ -98,7 +98,7 @@ func initializeBearerHashKey(store ControlStore) ([32]byte, error) {
 	var key [32]byte
 	var sealed string
 	ctx := context.Background()
-	if err := store.View(ctx, func(st model.ControlState) error {
+	if err := store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := checkSchema(st); err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func initializeBearerHashKey(store ControlStore) ([32]byte, error) {
 		}
 		// Re-read the committed root: concurrent constructors must use the first
 		// installed authority, never assume their prepared candidate won.
-		if err := store.View(ctx, func(st model.ControlState) error {
+		if err := store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 			if st.BearerHashKey == "" || st.BearerHashKeyVersion != 1 {
 				return model.Fail(model.Corrupt)
 			}

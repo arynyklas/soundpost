@@ -161,7 +161,6 @@ func openControl(dir string, options *replicationOptions) (*control.Store, error
 	return control.Open(dir)
 }
 func (a *App) enableReplication(dir string, options *replicationOptions, budget time.Duration) (err error) {
-	ctx := context.Background()
 	// A node whose journal is behind what it acknowledged fails closed while it starts (a peer's heartbeat
 	// commits beyond its journal); the startup step that notices it next only sees unavailable or stale.
 	// Report the cause, so the operator gets reason=journal_behind_acknowledged.
@@ -170,8 +169,10 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 			err = a.replication.domain.Cause(err)
 		}
 	}()
-	var installation model.ID
-	if err := a.Control.View(ctx, func(st model.ControlState) error { installation = st.Installation; return nil }); err != nil {
+	// The installation names the control group; it is read from the file, not from a state assembled
+	// with the ledger (a restart of a node with a large admission ledger must not read it to learn a name).
+	installation, err := a.Control.Installation()
+	if err != nil {
 		return err
 	}
 	cfg := replica.Config{ID: 1, Group: installation, Directory: filepath.Join(dir, "raft", "control"), TickInterval: 100 * time.Millisecond, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}}
@@ -215,13 +216,20 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	// The audit delta command of control (control.Store.AppendAudit) is proposed once every member
 	// declared protocol 4; the gate reads false until storage's replication is up and everyone did.
 	a.Control.SetAuditDeltaGate(a.Storage.ControlAuditDeltaReady)
-	// A control command is proposed as a state patch (control.Store.SetStatePatchGate), so that no
-	// command grows with the control state, once every member declared protocol 5. The patch flows
-	// on the control group, so the gate reads that group's own committed configuration (a
-	// membership change that reached it but not slot 0 must not open the gate for its new member).
+	// A control command is proposed as a state patch, so that no command grows with the control state,
+	// once every member declared protocol 5 (SetLegacyStatePatchGate), while the admission ledger holds no
+	// record, and in every case once every member declared protocol 6, the ledger layout
+	// (SetStatePatchGate): a patch of the ledger layout names a digest that the previous release (5)
+	// does not compute. The patch flows on the control group, so the gates read that group's own
+	// committed configuration (a membership change that reached it but not slot 0 must not open a gate
+	// for its new member).
 	a.Control.SetStatePatchGate(func() bool {
 		group := a.Control.ReplicaGroup()
-		return group != nil && a.Storage.ControlStatePatchReady(group.Status().Members.Nodes)
+		return group != nil && a.Storage.ControlStatePatchReady(group.CommittedMembers().Nodes)
+	})
+	a.Control.SetLegacyStatePatchGate(func() bool {
+		group := a.Control.ReplicaGroup()
+		return group != nil && a.Storage.ControlLegacyStatePatchReady(group.CommittedMembers().Nodes)
 	})
 	// D70: `soundpost upgrade contract-indexes` is refused unless the RUNNING binary of every member
 	// of the control group answers the live layout question over the mesh. A stored declaration

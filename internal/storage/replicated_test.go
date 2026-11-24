@@ -5,6 +5,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -41,6 +42,18 @@ func activateTestControl(t *testing.T, authority *control.Store) error {
 	t.Cleanup(func() { group.Close(); transport.Close() })
 	return nil
 }
+
+// testPayloadLayout runs every engine of the suite on the payload layout (SOUNDPOST_TEST_PAYLOAD=1, D89). A test about how a file
+// moves between layouts calls withoutPayloadToggle: it builds the layouts itself.
+var testPayloadLayout = os.Getenv("SOUNDPOST_TEST_PAYLOAD") != ""
+
+func withoutPayloadToggle(t *testing.T) {
+	t.Helper()
+	old, oldEnabled := testPayloadLayout, payloadLayoutEnabled
+	testPayloadLayout, payloadLayoutEnabled = false, false // the background merger adopts the payload layout of a contracted installation by itself
+	t.Cleanup(func() { testPayloadLayout, payloadLayoutEnabled = old, oldEnabled })
+}
+
 func openTestEngine(t *testing.T, dir string, validator Revalidator, authority *control.Store) (*Engine, error) {
 	t.Helper()
 	if err := activateTestControl(t, authority); err != nil {
@@ -49,6 +62,15 @@ func openTestEngine(t *testing.T, dir string, validator Revalidator, authority *
 	engine, err := Open(dir, validator)
 	if err != nil {
 		return nil, err
+	}
+	if testPayloadLayout { // the whole suite on the payload layout (D89): every stored value is a reference
+		if err = engine.adoptRunsLayout(); err == nil {
+			err = engine.adoptPayloadLayout()
+		}
+		if err != nil {
+			engine.Close()
+			return nil, err
+		}
 	}
 	transport := replica.NewLoopback()
 	groups, err := engine.EnableReplication(replica.Config{ID: 1, Directory: filepath.Join(dir, "raft"), Transport: transport, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}}, nil, authority)
@@ -100,11 +122,10 @@ func TestReadYourReceiptUsesReplicatedOriginalApply(t *testing.T) {
 		t.Fatal("original receipt changed")
 	}
 	if err = engine.db.View(func(tx *bolt.Tx) error {
-		if tx.Bucket([]byte("batches")).Get(batchKey(batch.Org, batch.Project, batch.Source, batch.Producer, batch.RouteSlot, batch.ID)) == nil {
+		if logicalGet(tx, "batches", batchKey(batch.Org, batch.Project, batch.Source, batch.Producer, batch.RouteSlot, batch.ID)) == nil {
 			t.Fatal("ACK without actual typed data")
 		}
-		meta := tx.Bucket([]byte("replica_data"))
-		if getUint(meta, metaKey(batch.RouteSlot, "physical")) < uint64(original.Cursor.Index) || getUint(meta, metaKey(batch.RouteSlot, "application")) != uint64(original.Cursor.Index) {
+		if getCounter(tx, batch.RouteSlot, "physical") < uint64(original.Cursor.Index) || getCounter(tx, batch.RouteSlot, "application") != uint64(original.Cursor.Index) {
 			t.Fatal("dual watermarks not installed with apply")
 		}
 		return nil

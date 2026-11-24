@@ -131,6 +131,8 @@ func (e *Engine) admitJournal(org, project model.ID, records []model.Record, siz
 	return nil
 }
 
+var errorKindJSON = []byte(`"` + model.ErrorKind + `"`)
+
 // ExpiringEntry is one error occurrence of the journal whose receipt deadline is
 // at or before a horizon: where it sits in its data group (the origin cursor of
 // its batch), its receipt deadline and its signal time.
@@ -143,32 +145,9 @@ type ExpiringEntry struct {
 
 // ExpiringErrorEvidence lists, without erasing or changing anything, the error
 // occurrences whose receipt deadline is at or before horizon, in no particular
-// order (one entry per record). It reads the same retained commands the expiry
-// pass reads and asks no guard: the caller decides what is unprocessed.
+// order (one entry per record). It reads the retained commands the expiry pass
+// reads and asks no guard: the caller decides what is unprocessed. A command
+// is read once, however many plans are made (expiry_scan.go).
 func (e *Engine) ExpiringErrorEvidence(ctx context.Context, horizon model.UnixNano) ([]ExpiringEntry, error) {
-	var out []ExpiringEntry
-	sel := eraseSelector{
-		record: func(_, _ model.ID, r model.Record, receipt model.Receipt) (bool, model.UnixNano) {
-			if r.Kind != model.ErrorKind {
-				return false, 0
-			}
-			for _, d := range receipt.SignalDeadlines {
-				if d.Kind == r.Kind && d.RetainUntil != 0 && d.RetainUntil <= horizon {
-					return true, d.RetainUntil
-				}
-			}
-			return false, 0
-		},
-		blob: func(model.BlobManifest) (bool, model.UnixNano) { return false, 0 },
-	}
-	guard := func(_ context.Context, c EraseCandidate) (bool, error) {
-		if c.Record != nil {
-			out = append(out, ExpiringEntry{Org: c.Org, Project: c.Project, Cursor: c.Cursor, Deadline: c.Deadline, At: model.SignalTime(*c.Record)})
-		}
-		return false, nil
-	}
-	if _, _, _, err := e.eraseCandidates(ctx, sel, guard); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return e.expiry.entries(ctx, e, horizon)
 }

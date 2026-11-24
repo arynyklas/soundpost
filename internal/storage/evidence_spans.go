@@ -102,37 +102,82 @@ func quotaEvidenceWindowed(slots []replica.Snapshot, cut ControlCut, fromCommand
 			}
 			key := model.SettledKey(group, w.N)
 			sw, isSettled := settled.Lookup(key)
+			partial := isSettled && !sw.Complete()
 			var detail bool
-			if isSettled {
+			var sc windowSidecar
+			haveSidecar := false
+			sidecar := func() (windowSidecar, error) {
+				if !haveSidecar {
+					var err error
+					if sc, err = readSidecar(s, w); err != nil {
+						return sc, err
+					}
+					haveSidecar = true
+				}
+				return sc, nil
+			}
+			var parts []WindowPartEvidence
+			switch {
+			case isSettled && !partial:
 				if sw.Span != uint64(states[i].Span) || sw.Charge != w.Charge || sw.Count != w.Batches {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
 				seen[key] = true
 				detail = w.Redacted != 0
-			} else {
+			case partial:
+				// Some parts of the window are settled: the data's own parts, derived from the sidecar, must be
+				// the ones control settled, and the rows control still holds must be the data's other parts.
+				if sw.Span != uint64(states[i].Span) {
+					return QuotaEvidence{}, model.Fail(model.Corrupt)
+				}
+				seen[key] = true
+				c, err := sidecar()
+				if err != nil {
+					return QuotaEvidence{}, err
+				}
+				parts = partEvidence(windowParts(c.Consumed, w.First, sw.Part))
+				for _, p := range sw.Parts {
+					if dp, ok := findPartEvidence(parts, p.J); !ok || dp.Batches != p.Count || dp.Charge != p.Charge {
+						return QuotaEvidence{}, model.Fail(model.Corrupt)
+					}
+				}
+				detail = w.Redacted != 0 || !partsMatchRows(parts, sw, view[winKey{group, w.N}], w.First, sw.Part)
+			default:
 				detail = w.Redacted != 0 || chargeDigest(view[winKey{group, w.N}]) != w.Charge
 			}
-			out.Windows = append(out.Windows, WindowEvidence{Group: group, N: w.N, First: w.First, Count: w.Count, Span: uint64(states[i].Span), Batches: w.Batches, Redacted: w.Redacted, Charge: w.Charge, Identity: w.Identity, Detail: detail})
-			needSidecar := detail || w.Cancels != 0 || isSettled && sums != nil
+			we := WindowEvidence{Group: group, N: w.N, First: w.First, Count: w.Count, Span: uint64(states[i].Span), Batches: w.Batches, Redacted: w.Redacted, Charge: w.Charge, Identity: w.Identity, Detail: detail}
+			if partial {
+				we.Part, we.Parts = sw.Part, parts
+			}
+			out.Windows = append(out.Windows, we)
+			needSidecar := detail || w.Cancels != 0 || partial || isSettled && sums != nil
 			if !needSidecar {
 				continue
 			}
-			sc, err := readSidecar(s, w)
+			c, err := sidecar()
 			if err != nil {
 				return QuotaEvidence{}, err
 			}
 			if detail || isSettled && sums != nil {
-				if chargeDigest(sc.Consumed) != w.Charge {
+				if chargeDigest(c.Consumed) != w.Charge {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
 			}
 			if isSettled && sums != nil {
-				addCharges(sums, sc.Consumed)
+				if partial {
+					for _, ev := range c.Consumed {
+						if _, done := sw.Settled(model.PartOf(uint64(ev.Cursor.Index), sw.Span, sw.Part)); done {
+							addCharges(sums, []ReservationEvidence{ev})
+						}
+					}
+				} else {
+					addCharges(sums, c.Consumed)
+				}
 			}
 			if detail {
-				out.Consumed = append(out.Consumed, sc.Consumed...)
+				out.Consumed = append(out.Consumed, c.Consumed...)
 			}
-			out.Cancelled = append(out.Cancelled, sc.Cancelled...)
+			out.Cancelled = append(out.Cancelled, c.Cancelled...)
 		}
 	}
 	if settled != nil {
@@ -226,8 +271,23 @@ func (q QuotaEvidence) resolve(cut ControlCut) ([]ReservationEvidence, error) {
 	if cut.Settlement != nil {
 		for key, sw := range cut.Settlement.Windows {
 			w, ok := wins[winKey{sw.Group, sw.N}]
-			if !ok || key != model.SettledKey(sw.Group, sw.N) || sw.Span != w.Span || sw.Charge != w.Charge || sw.Count != w.Batches {
+			if !ok || key != model.SettledKey(sw.Group, sw.N) || sw.Span != w.Span {
 				return nil, model.Fail(model.Corrupt)
+			}
+			if sw.Complete() {
+				if sw.Charge != w.Charge || sw.Count != w.Batches {
+					return nil, model.Fail(model.Corrupt)
+				}
+				continue
+			}
+			// Settled in parts: the evidence states the window's parts, and each one control settled is one of them.
+			if w.Part != sw.Part {
+				return nil, model.Fail(model.Corrupt)
+			}
+			for _, p := range sw.Parts {
+				if dp, ok := findPartEvidence(w.Parts, p.J); !ok || dp.Batches != p.Count || dp.Charge != p.Charge {
+					return nil, model.Fail(model.Corrupt)
+				}
 			}
 		}
 	}
@@ -240,15 +300,72 @@ func (q QuotaEvidence) resolve(cut ControlCut) ([]ReservationEvidence, error) {
 			}
 			continue
 		}
-		if _, settled := cut.Settlement.Lookup(model.SettledKey(k.group, k.n)); settled {
+		sw, settled := cut.Settlement.Lookup(model.SettledKey(k.group, k.n))
+		if settled && sw.Complete() {
 			continue
 		}
-		if chargeDigest(view[k]) != w.Charge {
+		if settled {
+			// The rows the cut holds for a window settled in parts are the consumed reservations of the
+			// parts that are not settled, part by part.
+			if !partsMatchRows(w.Parts, sw, view[k], w.First, w.Part) {
+				return nil, model.Fail(model.Corrupt)
+			}
+		} else if chargeDigest(view[k]) != w.Charge {
 			return nil, model.Fail(model.Corrupt)
 		}
 		out = append(out, view[k]...)
 	}
 	return out, nil
+}
+
+// partEvidence is the evidence form of a window's parts.
+func partEvidence(parts []windowPart) []WindowPartEvidence {
+	out := make([]WindowPartEvidence, len(parts))
+	for i, p := range parts {
+		out[i] = WindowPartEvidence{J: p.J, Batches: p.Batches, Charge: p.Charge}
+	}
+	return out
+}
+
+func findPartEvidence(parts []WindowPartEvidence, j uint32) (WindowPartEvidence, bool) {
+	for _, p := range parts {
+		if p.J == j {
+			return p, true
+		}
+	}
+	return WindowPartEvidence{}, false
+}
+
+// partsMatchRows reports whether the rows control holds for a window that it settled in parts are exactly
+// the consumed reservations of the parts it did not settle, part by part: none for a settled part, and for
+// every other part the rows its digest states. The window starts at first and is cut into parts of part
+// commands.
+func partsMatchRows(parts []WindowPartEvidence, sw model.SettledWindow, rows []ReservationEvidence, first, part uint64) bool {
+	if part == 0 {
+		return false
+	}
+	byPart := map[uint32][]ReservationEvidence{}
+	for _, r := range rows {
+		if uint64(r.Cursor.Index) < first {
+			return false
+		}
+		j := uint32((uint64(r.Cursor.Index) - first) / part)
+		byPart[j] = append(byPart[j], r)
+	}
+	for _, p := range parts {
+		held := byPart[p.J]
+		delete(byPart, p.J)
+		if _, done := sw.Settled(p.J); done {
+			if len(held) != 0 {
+				return false
+			}
+			continue
+		}
+		if uint64(len(held)) != p.Batches || chargeDigest(held) != p.Charge {
+			return false
+		}
+	}
+	return len(byPart) == 0
 }
 
 // ConsumedEvidence is every consumed reservation the bundle's evidence proves, in the form
@@ -368,19 +485,37 @@ func BatchReservations(snapshot replica.Snapshot, only func(n uint64) bool) (map
 }
 
 // settledMatchesEvidence reports whether a version 1 evidence (every consumed reservation listed)
-// holds exactly the reservations control settled: per settled window the digest and the count, and
-// over all of them the folded charge.
+// holds exactly the reservations control settled: per settled window the digest and the count (per
+// settled part for a window settled in parts), and over all of them the folded charge.
 func settledMatchesEvidence(s *model.Settlement, evidence []ReservationEvidence) bool {
+	type partKey struct {
+		window string
+		j      uint32
+	}
 	byWindow := map[string][]ReservationEvidence{}
+	byPart := map[partKey][]ReservationEvidence{}
 	var all []ReservationEvidence
 	for _, c := range evidence {
-		if w, ok := s.Window(c.Cursor); ok {
+		if w, ok := s.Window(c.Cursor); ok && w.Covers(c.Cursor.Index) {
 			key := model.SettledKey(w.Group, w.N)
 			byWindow[key] = append(byWindow[key], c)
+			if !w.Complete() {
+				pk := partKey{key, model.PartOf(uint64(c.Cursor.Index), w.Span, w.Part)}
+				byPart[pk] = append(byPart[pk], c)
+			}
 			all = append(all, c)
 		}
 	}
 	for key, w := range s.Windows {
+		if !w.Complete() {
+			for _, p := range w.Parts {
+				list := byPart[partKey{key, p.J}]
+				if uint64(len(list)) != p.Count || chargeDigest(list) != p.Charge {
+					return false
+				}
+			}
+			continue
+		}
 		list := byWindow[key]
 		if uint64(len(list)) != w.Count || chargeDigest(list) != w.Charge {
 			return false

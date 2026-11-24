@@ -97,6 +97,11 @@ func patchBase(raw []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return hashMembers(members), nil
+}
+
+// hashMembers is patchBase of the members of an encoding.
+func hashMembers(members map[string]json.RawMessage) string {
 	names := make([]string, 0, len(members))
 	for name := range members {
 		names = append(names, name)
@@ -109,7 +114,7 @@ func patchBase(raw []byte) (string, error) {
 		h.Write(members[name])
 		h.Write([]byte{0})
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // validBase is whether s is a digest patchBase writes, or empty (a rewritten patch).
@@ -138,10 +143,14 @@ func recursesInto(path []string) bool {
 	return path[0] == "Orgs" && len(path) < maxPatchOpPath
 }
 
-// validPatchPath is the rule recursesInto draws, as a check of a decoded path.
+// validPatchPath is the rule recursesInto draws, as a check of a decoded path. The members of the
+// admission ledger (ledger.go) are addressed by their own shapes, which validLedgerOp judges with the op.
 func validPatchPath(path []string) bool {
 	if len(path) == 0 || path[0] == "" {
 		return false
+	}
+	if ledgerRoot(path[0]) {
+		return true
 	}
 	if path[0] == "Orgs" {
 		return len(path) <= maxPatchOpPath
@@ -527,7 +536,7 @@ func validatePatch(p statePatch) error {
 		return model.Fail(model.Invalid)
 	}
 	for _, op := range p.Ops {
-		if !validPatchPath(op.Path) {
+		if !validPatchPath(op.Path) || ledgerRoot(op.Path[0]) && !validLedgerOp(op) && !wholeMemberOp(op) {
 			return model.Fail(model.Invalid)
 		}
 		switch op.Op {
@@ -556,20 +565,23 @@ func validatePatch(p statePatch) error {
 }
 
 // patchCommand is the payload of a state patch for a transition from oldRaw (the encoding of the
-// committed state the proposer read) to next.
+// committed state the proposer read) to next. It names the digest of the blob alone, which is the
+// digest of the state while the ledger is empty.
 func patchCommand(oldRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
-	return patchCommandRaw(oldRaw, nil, expected, next, keys)
-}
-
-// patchCommandRaw is patchCommand for a proposer that already holds the encoding of next (newRaw; nil
-// encodes it here). The verification of a per-organization commit (settleOrgAuthority) is such a
-// proposer: it has to encode the state to judge the commit, and the patch is diffed from the very
-// same bytes.
-func patchCommandRaw(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
 	base, err := patchBase(oldRaw)
 	if err != nil {
 		return nil, err
 	}
+	return patchCommandRaw(oldRaw, nil, expected, next, keys, base, nil)
+}
+
+// patchCommandRaw is patchCommand for a proposer that already holds the encoding of next (newRaw; nil
+// encodes it here), names base as the digest of the state it read and adds ledgerOps (the ops that
+// address the admission ledger, which next does not hold). The verification of a per-organization
+// commit (settleOrgAuthority) is such a proposer: it has to encode the state to judge the commit, and
+// the patch is diffed from the very same bytes.
+func patchCommandRaw(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte, base string, ledgerOps []patchOp) ([]byte, error) {
+	var err error
 	if newRaw == nil {
 		if newRaw, err = json.Marshal(next); err != nil {
 			return nil, model.Fail(model.Invalid)
@@ -579,6 +591,7 @@ func patchCommandRaw(oldRaw, newRaw []byte, expected model.Revision, next *State
 	if err != nil {
 		return nil, err
 	}
+	ops = append(ops, ledgerOps...)
 	payload, err := json.Marshal(statePatchCommand{StatePatch: statePatch{Installation: next.Installation, Expected: expected, Base: base, Keys: keys, Ops: ops}})
 	if err != nil {
 		return nil, model.Fail(model.Invalid)
@@ -586,22 +599,17 @@ func patchCommandRaw(oldRaw, newRaw []byte, expected model.Revision, next *State
 	return payload, nil
 }
 
-// patchedState is the State that applying p to the state encoded in raw leaves, checked: decoded
-// strictly, of the same installation, at the revision the patch steps to.
-func patchedState(raw []byte, current *State, p statePatch) (State, error) {
-	if p.Base != "" {
-		// A voter that holds other bytes than the proposer read has to be resynchronised (a
-		// snapshot install), not given a patch that only names what it changes.
-		if base, err := patchBase(raw); err != nil || base != p.Base {
-			return State{}, model.Fail(model.Corrupt)
-		}
-	}
-	patched, err := applyPatchRaw(raw, p.Ops, p.Base == "")
+// patchedState is the State that applying ops (the ones that address the blob) to the state encoded in
+// raw leaves, checked: decoded strictly, of the same installation, at the revision the patch steps to.
+// The base the patch names was checked by the caller. lenient is for a patch without a base (see
+// patchNode.apply).
+func patchedState(raw []byte, current *State, ops []patchOp, expected model.Revision, lenient bool) (State, error) {
+	patched, err := applyPatchRaw(raw, ops, lenient)
 	if err != nil {
 		return State{}, err
 	}
 	var next State
-	if model.StrictJSON(patched, &next) != nil || next.Installation != current.Installation || next.Revision != p.Expected+1 {
+	if model.StrictJSON(patched, &next) != nil || next.Installation != current.Installation || next.Revision != expected+1 {
 		return State{}, model.Fail(model.Corrupt)
 	}
 	return next, nil
@@ -643,12 +651,31 @@ func (s *Store) StatePatch() bool {
 	return gate != nil && (*gate)()
 }
 
+// SetLegacyStatePatchGate installs the function that says whether every member of the replica group
+// declared the first protocol of the state patch (storage.Engine.ControlLegacyStatePatchReady): the
+// previous release is one of them. Such a group proposes a patch only while the admission ledger holds
+// no record, where the digest it names is the one every release computes; with books in the ledger a
+// command is a whole-state replacement until every member declared the protocol of the ledger layout
+// (SetStatePatchGate). Passing nil removes the gate.
+func (s *Store) SetLegacyStatePatchGate(ready func() bool) {
+	if ready == nil {
+		s.legacyStatePatchGate.Store(nil)
+		return
+	}
+	s.legacyStatePatchGate.Store(&ready)
+}
+
+func (s *Store) legacyStatePatch() bool {
+	gate := s.legacyStatePatchGate.Load()
+	return gate != nil && (*gate)()
+}
+
 // controlPayload is the payload of the command that takes the committed state encoded in oldRaw
 // (read only when the patch is on, otherwise nil) to next; newRaw is the encoding of next when the
 // caller already made one (settleOrgAuthority), nil otherwise. A command that does not fit the
 // replica's entry limit is refused here with what the replica answers for it (invalid), before
 // anything is proposed.
-func (s *Store) controlPayload(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
+func (s *Store) controlPayload(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte, base string, ledgerOps []patchOp) ([]byte, error) {
 	if oldRaw == nil {
 		payload, err := json.Marshal(controlReplacement{Expected: expected, State: *next, Keys: keys})
 		if err != nil {
@@ -656,7 +683,7 @@ func (s *Store) controlPayload(oldRaw, newRaw []byte, expected model.Revision, n
 		}
 		return payload, nil
 	}
-	payload, err := patchCommandRaw(oldRaw, newRaw, expected, next, keys)
+	payload, err := patchCommandRaw(oldRaw, newRaw, expected, next, keys, base, ledgerOps)
 	if err != nil {
 		return nil, err
 	}
@@ -670,8 +697,8 @@ func (s *Store) controlPayload(oldRaw, newRaw []byte, expected model.Revision, n
 // revision it holds what the patch wrote.
 func (m *replicatedControl) verifyCurrentPatch(p statePatch) error {
 	return m.store.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
-		installation, revision, err := revisionOf(raw)
+		ctrl := tx.Bucket([]byte("control"))
+		installation, revision, err := stateHead(ctrl)
 		if err != nil {
 			return err
 		}
@@ -681,6 +708,27 @@ func (m *replicatedControl) verifyCurrentPatch(p statePatch) error {
 		if revision != p.Expected+1 {
 			return nil
 		}
-		return verifyPatchRaw(raw, p.Ops)
+		layout := ledgerLayout(ctrl)
+		blobOps, ledgerOps := p.Ops, []patchOp(nil)
+		if layout {
+			blobOps, ledgerOps = splitLedgerOps(p.Ops)
+		}
+		if len(ledgerOps) != 0 {
+			l, err := openLedger(tx)
+			if err != nil {
+				return err
+			}
+			if err = l.verifyLedgerOps(ledgerOps); err != nil {
+				return err
+			}
+		}
+		if layout && onlyStepOps(blobOps) {
+			return verifyStepOps(ctrl, blobOps)
+		}
+		raw, err := stateRaw(ctrl)
+		if err != nil {
+			return err
+		}
+		return verifyPatchRaw(raw, blobOps)
 	})
 }

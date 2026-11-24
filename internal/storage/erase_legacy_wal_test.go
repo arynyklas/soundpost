@@ -64,7 +64,7 @@ func (x *eraseEnv) closedLegacyImage(hit erased) (slot uint16, index uint64) {
 	slot, index = hit.batch.RouteSlot, uint64(hit.receipt.Cursor.Index)
 	var applied walEntry
 	if err := x.e.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("replica_commands")).Get(commandKey(slot, index))
+		raw := commandAt(tx.Bucket([]byte("replica_commands")), commandKey(slot, index))
 		if raw == nil {
 			return model.Fail(model.Corrupt)
 		}
@@ -83,6 +83,7 @@ func (x *eraseEnv) closedLegacyImage(hit erased) (slot uint16, index uint64) {
 		x.t.Fatal(err)
 	}
 	err = predecessor.Update(func(tx *bolt.Tx) error {
+		dropRunsLayout(x.t, tx)
 		for _, name := range []string{"replica_data", "replica_commands", "scan_pages", "scan_time", "scan_postings", "scan_commits", "scan_integrity"} {
 			if err := tx.DeleteBucket([]byte(name)); err != nil {
 				return err
@@ -211,6 +212,52 @@ func TestLegacyWALIsNamedAsAResidualStoreUntilItIsRewritten(t *testing.T) {
 	}
 	if hits := x.treeHits(eraseCanary); inHits(hits, walName(slot)) {
 		t.Fatalf("the legacy WAL still holds the canary: %v", hits)
+	}
+}
+
+// The stored redacted command is the authority the legacy WAL and the replication layer are reconciled against, and it is found by its
+// JSON prefix in the row (redactedCommands). The migration to the payload layout moves every value of payloadMinBytes or more into the
+// log; a redacted command moved there is a reference, no reconciliation finds it, and the receipt measured the legacy WAL clean while
+// it still held the erased bytes (the full storage suite, a run slower than the merger's first tick). A redacted command stays in its row.
+func TestRedactedCommandStaysInItsRowWhenTheInlineHistoryMovesToTheLog(t *testing.T) {
+	withoutPayloadToggle(t)
+	holdBackgroundVerification(t)
+	x := newCheckpointEnv(t)
+	ctx := context.Background()
+	hit := x.appendMixed(eraseCanary, bothDeadlines)
+	slot, _ := x.legacyImage(hit)
+	pred := x.rangePredicate(0, 10, model.Metric)
+	barrierAll(t, x.e, pred)
+	fired := false
+	x.e.setFault(func(at string) error {
+		if at == HookLegacyWALBegin && !fired {
+			fired = true
+			return errors.New("interrupted at " + at)
+		}
+		return nil
+	})
+	if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err == nil || !fired {
+		t.Fatalf("the erasure pass was not interrupted before the legacy WAL was rewritten: %v", err)
+	}
+	x.e.setFault(nil)
+	x.adoptPayload()
+	for range 8 { // the merger's passes: every inline source moves, whatever it is
+		if _, err := x.e.migrateInlinePayload(nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	redacted, err := x.e.redactedCommands(slot)
+	if err != nil || len(redacted) == 0 {
+		t.Fatalf("the redacted command is not found after the history moved to the log: %d (%v)", len(redacted), err)
+	}
+	if got := x.e.ResidualStores(); !contains(got, ResidualLegacyWAL) {
+		t.Fatalf("a legacy WAL holding erased bytes is not named as a residual store after the migration: %v", got)
+	}
+	if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil {
+		t.Fatalf("the next pass: %v", err)
+	}
+	if hits := x.treeHits(eraseCanary); inHits(hits, walName(slot)) {
+		t.Fatalf("the legacy WAL still holds the canary after the next pass: %v", hits)
 	}
 }
 

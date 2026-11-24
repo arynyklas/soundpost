@@ -83,6 +83,7 @@ type Book string
 
 const (
 	BookIssues         Book = "IssueBooks"
+	BookGroupingIssues Book = "GroupingIssues"
 	BookJobs           Book = "JobBooks"
 	BookConditions     Book = "ConditionBooks"
 	BookIncidents      Book = "IncidentBooks"
@@ -114,9 +115,26 @@ type ServerTokenInfo struct {
 // ReadOnlyOf reads st through the read-only interface, without copying it. It is for code that
 // holds a state it may mutate (a transaction in progress) and calls a function written against
 // ReadOnlyControl: the function sees the state as it is when it asks.
-func ReadOnlyOf(st *ControlState) ReadOnlyControl { return readOnlyControl{st} }
+func ReadOnlyOf(st *ControlState) ReadOnlyControl { return readOnlyControl{st: st} }
 
-type readOnlyControl struct{ st *ControlState }
+// BookSource reads the records of the books a decoded state does not hold: the job and issue books of a
+// control store that keeps them as records of their own. Its answers are the state's own, for the
+// revision the state is of.
+type BookSource interface {
+	BookKeys(book Book, prefix string) []string
+	BookRecord(book Book, key string) ([]byte, bool)
+}
+
+// ReadOnlyOfWith is ReadOnlyOf for a state whose job and issue books (BookJobs, BookIssues) are read from
+// src instead of the state's own members.
+func ReadOnlyOfWith(st *ControlState, src BookSource) ReadOnlyControl {
+	return readOnlyControl{st: st, src: src}
+}
+
+type readOnlyControl struct {
+	st  *ControlState
+	src BookSource
+}
 
 func (r readOnlyControl) Installation() ID {
 	return r.st.Installation
@@ -284,6 +302,9 @@ func (r readOnlyControl) bookOf(book Book) map[string]json.RawMessage {
 }
 
 func (r readOnlyControl) BookKeys(book Book, prefix string) []string {
+	if r.src != nil && (book == BookIssues || book == BookJobs || book == BookGroupingIssues || book == BookJobPositions) {
+		return r.src.BookKeys(book, prefix)
+	}
 	var out []string
 	for key := range r.bookOf(book) {
 		if strings.HasPrefix(key, prefix) {
@@ -294,6 +315,9 @@ func (r readOnlyControl) BookKeys(book Book, prefix string) []string {
 }
 
 func (r readOnlyControl) BookRecord(book Book, key string) ([]byte, bool) {
+	if r.src != nil && (book == BookIssues || book == BookJobs || book == BookGroupingIssues || book == BookJobPositions) {
+		return r.src.BookRecord(book, key)
+	}
 	raw, ok := r.bookOf(book)[key]
 	if !ok {
 		return nil, false
@@ -303,6 +327,21 @@ func (r readOnlyControl) BookRecord(book Book, key string) ([]byte, bool) {
 
 func (r readOnlyControl) ProjectIssues(org, project ID) []GroupingIssueEntry {
 	var out []GroupingIssueEntry
+	if r.src != nil {
+		// The grouping issues are records of the control store; a project's are those under its key prefix.
+		for _, key := range r.src.BookKeys(BookGroupingIssues, org.String()+":"+project.String()+":") {
+			raw, ok := r.src.BookRecord(BookGroupingIssues, key)
+			if !ok {
+				continue
+			}
+			var gi GroupingIssue
+			if json.Unmarshal(raw, &gi) != nil || gi.Org != org || gi.Project != project {
+				continue
+			}
+			out = append(out, GroupingIssueEntry{Key: key, Issue: gi})
+		}
+		return out
+	}
 	for key, gi := range r.st.GroupingIssues {
 		if gi.Org == org && gi.Project == project {
 			out = append(out, GroupingIssueEntry{Key: key, Issue: gi.clone()})

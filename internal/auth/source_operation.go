@@ -12,7 +12,7 @@ func (s *Service) SourceFenceFor(ctx context.Context, c Credential, source model
 		return model.SourceFence{}, model.Fail(model.NotFound)
 	}
 	var out model.SourceFence
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, c); err != nil {
 			return err
 		}

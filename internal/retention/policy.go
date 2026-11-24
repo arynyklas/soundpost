@@ -89,9 +89,14 @@ func evidenceKind(k model.Kind) bool {
 // AdmissionResolver resolves the retention admission stamps into receipt deadlines (design section
 // 12): the defaults layered with the audited organization and project versions in force at the
 // instant of admission, read from the control state. It implements policy.RetentionResolver.
+//
+// It runs once for every ingest request, so it reads the state without the admission ledger
+// (control.Store.ViewCore): the retention versions are not in the ledger, and decoding every
+// reservation and quota record admitted so far for each request made the cost of a request grow with
+// the history (81 % of the CPU of a live server at 2,000 records/s was this decode).
 type AdmissionResolver struct {
 	control interface {
-		View(context.Context, func(control.State) error) error
+		ViewCore(context.Context, func(control.State) error) error
 	}
 }
 
@@ -103,10 +108,11 @@ func NewAdmissionResolver(c *control.Store) (*AdmissionResolver, error) {
 	return &AdmissionResolver{control: c}, nil
 }
 
-// ResolveRetention implements policy.RetentionResolver.
+// ResolveRetention implements policy.RetentionResolver. Resolve only reads the state it is given, which
+// is shared with every concurrent core reader.
 func (r *AdmissionResolver) ResolveRetention(ctx context.Context, org, project model.ID, at model.UnixNano) (policy.Retention, error) {
 	var out policy.Retention
-	err := r.control.View(ctx, func(st control.State) error {
+	err := r.control.ViewCore(ctx, func(st control.State) error {
 		p := Resolve(st, org, &project, at)
 		out = policy.Retention{Days: p.Days, RawDays: p.RawDays}
 		return nil

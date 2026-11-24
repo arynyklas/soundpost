@@ -89,8 +89,8 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 		c.Close()
 		return nil, e
 	}
-	var initialized bool
-	if e = c.View(context.Background(), func(st model.ControlState) error { initialized = st.DataInitialized; return nil }); e != nil {
+	initialized, e := c.DataInitialized()
+	if e != nil {
 		c.Close()
 		return nil, e
 	}
@@ -101,7 +101,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 			return nil, model.Fail(model.Corrupt)
 		}
 	}
-	engine, e := storage.Open(filepath.Join(dir, "data"), a)
+	engine, e := storage.OpenReplicated(filepath.Join(dir, "data"), a)
 	if e != nil {
 		c.Close()
 		return nil, e

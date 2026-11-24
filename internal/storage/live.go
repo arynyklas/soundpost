@@ -10,6 +10,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -47,6 +48,26 @@ type changeIterator struct {
 	// and moved is closed and replaced each time settled grows (and when the iterator closes), under e.mu.
 	queued, settled uint64
 	moved           chan struct{}
+	// replay is the window an overrun dropped, read back from durable storage when the subscription asked for
+	// catch-up (SubscribeRequest.CatchUp); pendingReplay says the pending event came from it and not from the queue;
+	// handed is how many routes of the pending event the consumer was handed.
+	replay        *replayWindow
+	pendingReplay bool
+	handed        int
+	// handedRows are the rows of the pending event the consumer was handed (catch-up subscriptions only): the
+	// identity that survives a rewrite of the commit record, which a route offset does not.
+	handedRows map[model.ID]struct{}
+}
+
+// replayWindow is what an overrun dropped: the commits after next (the last one handled, per group) up to through.
+// resume names the one event the consumer had been handed part of, to be read again without the rows it was handed.
+type replayWindow struct {
+	next, through []model.Cursor
+	resume        *replayResume
+}
+type replayResume struct {
+	cursor model.Cursor
+	handed map[model.ID]struct{}
 }
 
 func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeRequest) (ChangeIterator, error) {
@@ -146,11 +167,11 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 		event.Org = entry.Batch.Org
 		event.Project = entry.Batch.Project
 		err := e.db.View(func(tx *bolt.Tx) error {
-			bucket := tx.Bucket([]byte("scan_commits"))
-			if bucket == nil {
-				return model.Fail(model.Corrupt)
+			raw, err := tableGet(tx, tblCommits, commitKey(cursor))
+			if err != nil {
+				return err
 			}
-			return json.Unmarshal(bucket.Get(commitKey(cursor)), &event.Pages)
+			return json.Unmarshal(raw, &event.Pages)
 		})
 		if err != nil {
 			e.failLocked()
@@ -189,26 +210,184 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 					break drain
 				}
 			}
-			if it.pending != nil {
+			if it.pending != nil && !it.pendingReplay {
 				dropped++
 			}
 			it.settledLocked(dropped)
-			it.pending = nil
-			it.offset = 0
 			it.epoch++
-			// An untaken gap already owes the consumer everything after its After
-			// (a stale Subscribe cursor sits behind delivered), so the replacement
-			// must not start later; same rule as Subscribe's advanced branch.
-			after := it.delivered
-			if it.gap != nil {
-				after = it.gap.After
+			if it.req.CatchUp {
+				it.startReplayLocked()
+			} else {
+				it.pending = nil
+				it.offset = 0
+				// An untaken gap already owes the consumer everything after its After
+				// (a stale Subscribe cursor sits behind delivered), so the replacement
+				// must not start later; same rule as Subscribe's advanced branch.
+				after := it.delivered
+				if it.gap != nil {
+					after = it.gap.After
+				}
+				it.gap = &ChangeGap{After: append([]model.Cursor(nil), after...), Through: append([]model.Cursor(nil), it.marks...), Reason: "slow_consumer"}
 			}
-			it.gap = &ChangeGap{After: append([]model.Cursor(nil), after...), Through: append([]model.Cursor(nil), it.marks...), Reason: "slow_consumer"}
 			// Wake a blocked receiver without polling or replaying a discarded epoch.
 			it.events <- committedEvent{Epoch: it.epoch}
 			it.queued++
 		}
 	}
+}
+
+// DefaultCatchUpLag is the lag bound of a catch-up subscription that does not name one: commits per group.
+const DefaultCatchUpLag = 4096
+
+// replayScanBatch is how many commits one replay step examines under e.mu before it gives the lock up. A
+// variable only so a test can shrink it.
+var replayScanBatch = 256
+
+// startReplayLocked answers an overrun for a subscription that asked for catch-up: everything the queue held
+// is discarded and the window is read back from the commit records instead. An untaken gap (a window the
+// consumer is already told to recover) is not read twice: the replay starts after it. The part of the window
+// beyond the lag bound is announced as a gap instead of being read (limitLagLocked). The event the consumer
+// was handed part of is read again, minus the rows it was handed (identified by row ID: a position in the
+// commit record would shift when an erasure rewrites it).
+func (it *changeIterator) startReplayLocked() {
+	if it.replay == nil {
+		base := it.delivered
+		if it.gap != nil {
+			base = it.gap.Through
+		}
+		it.replay = &replayWindow{next: append([]model.Cursor(nil), base...)}
+		it.queued++ // the whole window is one unit of work for WaitCaughtUp, settled when it has been handed over
+	}
+	it.limitLagLocked()
+	if p := it.pending; p != nil && it.handed < len(p.Pages) && (it.gap == nil || p.Cursor.Index > cursorIndexOf(it.gap.Through, p.Cursor.Group)) {
+		it.replay.resume = &replayResume{cursor: p.Cursor, handed: it.handedRows}
+		for i := range it.replay.next {
+			if it.replay.next[i].Group == p.Cursor.Group && it.replay.next[i].Index >= p.Cursor.Index {
+				it.replay.next[i].Index = p.Cursor.Index - 1
+			}
+		}
+	}
+	it.pending, it.offset, it.handed, it.pendingReplay, it.handedRows = nil, 0, 0, false, nil
+	it.replay.through = append(it.replay.through[:0], it.marks...)
+}
+
+// limitLagLocked enforces the lag bound (D99) on a window that is about to be read: a group whose window is
+// longer than the bound has its oldest commits announced as an exact slow_consumer gap, ending at the commit
+// before the newest CatchUpLag, and the replay of that group starts after it. The gap extends one the
+// consumer has not taken yet (its After is kept, its Through moves up).
+func (it *changeIterator) limitLagLocked() {
+	bound := it.req.CatchUpLag
+	if bound == 0 {
+		bound = DefaultCatchUpLag
+	}
+	r := it.replay
+	for _, m := range it.marks {
+		for i := range r.next {
+			next := r.next[i]
+			if next.Group != m.Group || m.Index <= next.Index || uint64(m.Index-next.Index) <= bound {
+				continue
+			}
+			cut := model.Cursor{Group: m.Group, Index: m.Index - model.Uint64(bound)}
+			gap := &ChangeGap{After: append([]model.Cursor(nil), it.delivered...), Through: append([]model.Cursor(nil), it.delivered...), Reason: "slow_consumer"}
+			if it.gap != nil {
+				gap = &ChangeGap{After: it.gap.After, Through: append([]model.Cursor(nil), it.gap.Through...), Reason: it.gap.Reason}
+			}
+			advanceWatermark(gap.Through, cut)
+			it.gap = gap
+			r.next[i] = cut
+			if r.resume != nil && r.resume.cursor.Group == cut.Group && r.resume.cursor.Index <= cut.Index {
+				r.resume = nil
+			}
+		}
+	}
+}
+func cursorIndexOf(cursors []model.Cursor, group model.ID) model.Uint64 {
+	for _, c := range cursors {
+		if c.Group == group {
+			return c.Index
+		}
+	}
+	return 0
+}
+
+// rowHanded reports whether the consumer was already handed this row of the pending event.
+func (it *changeIterator) rowHanded(id model.ID) bool {
+	_, ok := it.handedRows[id]
+	return ok
+}
+
+// routeGoneLocked reports whether the commit record no longer names the page: an erasure removed it.
+func (e *Engine) routeGoneLocked(cursor model.Cursor, page model.ID) (bool, error) {
+	var pages []committedPage
+	err := e.db.View(func(tx *bolt.Tx) error {
+		raw, err := tableGet(tx, tblCommits, commitKey(cursor))
+		if err != nil || raw == nil {
+			return err
+		}
+		return json.Unmarshal(raw, &pages)
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, p := range pages {
+		if p.ID == page {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+const (
+	replayDone = iota
+	replayHit
+	replayYield
+)
+
+// replayNextLocked is the next commit of the replay window this scope can be handed, read from the commit
+// records, with the rows of it that were handed already (nil unless it is the commit a second overrun
+// interrupted). It examines at most replayScanBatch commits: status is replayHit for a commit, replayYield
+// when the budget ran out first (the caller releases e.mu and asks again) and replayDone once the window is
+// exhausted.
+func (it *changeIterator) replayNextLocked() (ev committedEvent, handed map[model.ID]struct{}, status int, err error) {
+	e, r := it.e, it.replay
+	scanned := 0
+	for i := range r.next {
+		through := cursorIndexOf(r.through, r.next[i].Group)
+		for r.next[i].Index < through {
+			if scanned == replayScanBatch {
+				return committedEvent{}, nil, replayYield, nil
+			}
+			scanned++
+			r.next[i].Index++
+			cursor := r.next[i]
+			var pages []committedPage
+			err = e.db.View(func(tx *bolt.Tx) error {
+				raw, err := tableGet(tx, tblCommits, commitKey(cursor))
+				if err != nil || raw == nil {
+					return err
+				}
+				return json.Unmarshal(raw, &pages)
+			})
+			if err != nil {
+				return committedEvent{}, nil, replayDone, err
+			}
+			if len(pages) == 0 {
+				continue
+			}
+			ref, err := e.loadRefLocked(pages[0].ID)
+			if err != nil {
+				return committedEvent{}, nil, replayDone, err
+			}
+			if ref.Org != it.scope.OrgID() || !it.scope.AllowsProject(ref.Project) {
+				continue
+			}
+			if r.resume != nil && r.resume.cursor == cursor {
+				handed = r.resume.handed
+			}
+			return committedEvent{Org: ref.Org, Project: ref.Project, Cursor: cursor, Pages: pages, Epoch: it.epoch}, handed, replayHit, nil
+		}
+	}
+	return committedEvent{}, nil, replayDone, nil
 }
 func commitKey(c model.Cursor) []byte {
 	return []byte(c.Group.String() + ":" + strconv.FormatUint(uint64(c.Index), 10))
@@ -267,6 +446,27 @@ func (it *changeIterator) Watermarks() []model.Cursor {
 		return nil
 	}
 	return append([]model.Cursor(nil), it.marks...)
+}
+
+// Lag is how many commits the consumer is behind (D99): those queued for it plus those left in the replay
+// window, counted per group over every commit of the group (a commit this scope cannot see counts too, so it
+// is an upper bound), and zero for a consumer that holds nothing. The queue part may include one wake-up
+// marker.
+func (it *changeIterator) Lag() uint64 {
+	it.e.mu.Lock()
+	defer it.e.mu.Unlock()
+	if it.closed {
+		return 0
+	}
+	lag := uint64(len(it.events))
+	if r := it.replay; r != nil {
+		for _, next := range r.next {
+			if through := cursorIndexOf(r.through, next.Group); through > next.Index {
+				lag += uint64(through - next.Index)
+			}
+		}
+	}
+	return lag
 }
 
 // settledLocked records that n committed events queued for this iterator are done: handed to the
@@ -372,6 +572,12 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			}
 			ref, err := e.loadRefLocked(route.ID)
 			if err != nil {
+				// A page that an erasure removed after this commit was read is no longer named by the
+				// commit record (the erasure rewrites both in one transaction): it is withheld, not corrupt.
+				if gone, gerr := e.routeGoneLocked(pending.Cursor, route.ID); gerr == nil && gone {
+					e.mu.Unlock()
+					continue
+				}
 				it.terminal = err
 				it.closeLocked()
 				e.mu.Unlock()
@@ -399,7 +605,7 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			}
 			var selected Page
 			for i := range p.IDs {
-				if !coveredRow(delPreds, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) {
+				if !coveredRow(delPreds, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) && !it.rowHanded(p.IDs[i]) {
 					appendPageRow(&selected, p, i)
 				}
 			}
@@ -429,7 +635,7 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			if deletionsChanged(delPreds, latest) {
 				selected = Page{}
 				for i := range p.IDs {
-					if !coveredRow(latest, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) {
+					if !coveredRow(latest, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) && !it.rowHanded(p.IDs[i]) {
 						appendPageRow(&selected, p, i)
 					}
 				}
@@ -445,15 +651,53 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			if it.offset == len(pending.Pages) {
 				advanceWatermark(it.delivered, cursor)
 			}
+			if it.req.CatchUp {
+				if it.handedRows == nil {
+					it.handedRows = make(map[model.ID]struct{}, len(selected.IDs))
+				}
+				for _, id := range selected.IDs {
+					it.handedRows[id] = struct{}{}
+				}
+			}
+			it.handed = it.offset
 			e.mu.Unlock()
 			return ChangePage{Page: selected, Cursors: []model.Cursor{cursor}}, nil
 		}
 		if it.pending != nil {
 			advanceWatermark(it.delivered, it.pending.Cursor)
+			if !it.pendingReplay {
+				it.settledLocked(1)
+			}
+		}
+		it.pending, it.offset, it.handed, it.pendingReplay, it.handedRows = nil, 0, 0, false, nil
+		if it.replay != nil {
+			ev, handed, status, err := it.replayNextLocked()
+			if err != nil {
+				it.terminal = err
+				it.closeLocked()
+				e.mu.Unlock()
+				return ChangePage{}, err
+			}
+			switch status {
+			case replayHit:
+				it.pending, it.offset, it.handed, it.pendingReplay, it.handedRows = &ev, 0, 0, true, handed
+				it.replay.resume = nil
+				e.mu.Unlock()
+				continue
+			case replayYield:
+				// The scan of commits this scope cannot see is bounded: give e.mu to the appends and
+				// acknowledgements that wait for it, then carry on from where the scan stopped.
+				hook := e.replayYield
+				e.mu.Unlock()
+				if hook != nil {
+					hook()
+				}
+				runtime.Gosched()
+				continue
+			}
+			it.replay = nil
 			it.settledLocked(1)
 		}
-		it.pending = nil
-		it.offset = 0
 		events := it.events
 		e.mu.Unlock()
 		fence := time.NewTimer(liveFenceEvery)
@@ -482,7 +726,7 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				return ChangePage{}, err
 			}
 			if !it.closed && event.Epoch == it.epoch {
-				it.pending = &event
+				it.pending, it.offset, it.handed, it.pendingReplay, it.handedRows = &event, 0, 0, false, nil
 			} else {
 				it.settledLocked(1)
 			}

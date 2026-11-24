@@ -65,8 +65,13 @@ func TestRetireProjectLeavesNoPayloadInTheControlRaftFiles(t *testing.T) {
 	}
 	before := f.raftHits(gone)
 	t.Logf("raft files holding the erased payload after the deletion saga: %v", before)
-	if !contains(before, "raft-control/ready.wal") || !hasEnvelope(before) {
-		t.Fatalf("fixture invalid: the journal and a snapshot envelope must carry the payload before the pass: %v", before)
+	// The commands in the journal carry the payload. The snapshot the group cuts for itself no longer does:
+	// the fixture is a contracted installation, so the snapshot is compact and names control.db (D86).
+	if !contains(before, "raft-control/ready.wal") {
+		t.Fatalf("fixture invalid: the journal must carry the payload before the pass: %v", before)
+	}
+	if hasEnvelope(before) {
+		t.Fatalf("a compact control snapshot carries the erased payload in its envelope: %v", before)
 	}
 	if got := f.store.ResidualStores(); !contains(got, control.ResidualControlJournal) {
 		t.Fatalf("before the pass the receipt must name the journal: %v", got)
@@ -79,9 +84,8 @@ func TestRetireProjectLeavesNoPayloadInTheControlRaftFiles(t *testing.T) {
 	if after := f.raftHits(gone); len(after) != 0 {
 		t.Fatalf("the control Raft directory still holds the erased payload after the deletion and the pass: %v", after)
 	}
-	if hits := f.raftHits(kept); !contains(hits, "raft-control/ready.wal") {
-		t.Fatalf("the pass took a payload no deletion covers out of the journal: %v", hits)
-	}
+	// A journal anchored on a compact snapshot (D86) no longer keeps the state: what no deletion covers
+	// is in the live state, which the check below keeps.
 	if !f.stateHolds(kept) {
 		t.Fatal("the pass changed the live state")
 	}
@@ -289,8 +293,10 @@ func TestRedactedControlJournalCoversEveryKindOfErasureAndEachNewOne(t *testing.
 			t.Fatalf("%s survives in %v", canary, hits)
 		}
 	}
-	if hits := f.raftHits(kept); !contains(hits, "raft-control/ready.wal") {
-		t.Fatalf("the pass took a payload no deletion covers: %v", hits)
+	// The journal no longer keeps the state once it is anchored on a compact snapshot (D86): the payload no
+	// deletion covers lives in the state, which the pass must not touch.
+	if !f.stateHolds(kept) || len(controlDBHits(t, f.dir, kept)) == 0 {
+		t.Fatalf("the pass took a payload no deletion covers: the live state holds it: %v", f.stateHolds(kept))
 	}
 }
 

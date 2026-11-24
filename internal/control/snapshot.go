@@ -21,7 +21,7 @@ import (
 func (m *replicatedControl) DeletionLedger() (replica.Ledger, error) {
 	var st State
 	if err := m.store.db.View(func(tx *bolt.Tx) error {
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
+		if readState(tx.Bucket([]byte("control")), &st) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		return nil

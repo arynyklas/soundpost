@@ -125,8 +125,11 @@ type LiveEvent struct {
 	Cursors    []model.Cursor `json:"cursors,omitempty"`
 	Gap        *LiveGapInfo   `json:"gap,omitempty"`
 	Watermarks []model.Cursor `json:"watermarks,omitempty"`
-	Reason     string         `json:"reason,omitempty"`
-	Failure    *Failure       `json:"failure,omitempty"`
+	// Lag is, on open and heartbeat events, how many committed-feed commits the stream still has to absorb
+	// (D99; an upper bound: commits this stream cannot see count). Absent when the stream is caught up.
+	Lag     model.Uint64 `json:"lag,omitempty"`
+	Reason  string       `json:"reason,omitempty"`
+	Failure *Failure     `json:"failure,omitempty"`
 }
 
 // Terminal reports whether no event can follow this one on its attachment.
@@ -155,6 +158,9 @@ type LiveLimits struct {
 
 	MaxStreams, MaxStreamsPerOrg, MaxStreamsPerPrincipal int
 	MaxTickets, MaxTicketsPerPrincipal                   int
+	// CatchUpLag bounds how many commits per replica group the stream's feed subscription may fall behind
+	// before the skipped part is announced as a gap (D99); 0 is the storage default.
+	CatchUpLag uint64
 }
 
 // DefaultLiveLimits follow the approved design: 60 second replay and ticket

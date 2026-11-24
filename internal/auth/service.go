@@ -44,7 +44,50 @@ func (s *Service) viewShared(ctx context.Context, fn func(model.ReadOnlyControl)
 	if v, ok := s.store.(SharedViewer); ok && v.SharesViewOf(s.store) {
 		return v.ViewShared(ctx, fn)
 	}
-	return s.store.View(ctx, func(st model.ControlState) error { return fn(model.ReadOnlyOf(&st)) })
+	return s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error { return fn(model.ReadOnlyOf(&st)) })
+}
+
+// AdmissionReader reads the reservation rows of the revision a CoreViewer gave the state of.
+type AdmissionReader interface {
+	Reservation(id string) (model.AdmissionReservation, bool, error)
+}
+
+// CoreViewer is optionally implemented by a ControlStore that keeps the admission books (Reservations,
+// AdmissionKeys, Quotas, Settlement) apart from the rest of the control state (control.Store). The
+// state its views give has those members empty and is shared between readers, who must not change
+// it; AdmissionReader reads one reservation of the same revision. The per-batch reads of the intake
+// path (source authentication, the reservation check of an append) use it, so that what a batch
+// costs does not depend on how many were admitted before it. SharesViewOf has the same meaning as for
+// SharedViewer.
+type CoreViewer interface {
+	ViewCore(context.Context, func(model.ControlState) error) error
+	ViewAdmission(context.Context, func(model.ControlState, AdmissionReader) error) error
+	SharesViewOf(ControlStore) bool
+}
+
+// viewCore reads the control state without the admission books, read only: shared when the store can
+// and is not a wrapper of one, otherwise the whole state (View).
+func (s *Service) viewCore(ctx context.Context, fn func(model.ControlState) error) error {
+	if v, ok := s.store.(CoreViewer); ok && v.SharesViewOf(s.store) {
+		return v.ViewCore(ctx, fn)
+	}
+	return s.store.View(ctx, fn)
+}
+
+// viewAdmission is viewCore that also gives the reader the reservation rows.
+func (s *Service) viewAdmission(ctx context.Context, fn func(model.ControlState, AdmissionReader) error) error {
+	if v, ok := s.store.(CoreViewer); ok && v.SharesViewOf(s.store) {
+		return v.ViewAdmission(ctx, fn)
+	}
+	return s.store.View(ctx, func(st model.ControlState) error { return fn(st, stateReader{st}) })
+}
+
+// stateReader is AdmissionReader over a whole state.
+type stateReader struct{ st model.ControlState }
+
+func (r stateReader) Reservation(id string) (model.AdmissionReservation, bool, error) {
+	v, ok := r.st.Reservations[id]
+	return v, ok, nil
 }
 
 type AuthDependencies struct {
@@ -138,7 +181,7 @@ func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Sessio
 	// refuses before any password work: a linearizable read of the token comes first and the
 	// 64 MiB KDF runs only for the holder of a valid one. The transition below checks again,
 	// because the state may change between the read and the write.
-	if e := s.store.View(ctx, func(st model.ControlState) error { return bootstrapTokenRefusal(st, token) }); e != nil {
+	if e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error { return bootstrapTokenRefusal(st, token) }); e != nil {
 		return Session{}, e
 	}
 	h, e := hashPassword(p)
@@ -289,7 +332,7 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 		var key string
 		var seen model.ControlUser
 		known := false
-		if err := s.store.View(wait, func(st model.ControlState) error {
+		if err := s.store.View(model.WithoutBooks(wait), func(st model.ControlState) error {
 			for k, u := range st.Users {
 				if u.Email == email && !u.Disabled {
 					key, seen, known = k, u, true
@@ -349,7 +392,7 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {
 	var out Credential
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if tokenRecord, ok := st.ServerTokens[s.serverTokenDigest(token)]; ok {
 			user, exists := st.Users[tokenRecord.Principal.String()]
 			if !exists || user.Disabled || tokenRecord.Revoked || tokenRecord.Expires <= s.now().Unix() {
@@ -370,7 +413,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Credential, e
 }
 func (s *Service) Session(ctx context.Context, token string) (Session, error) {
 	var out Session
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		v, ok := st.Sessions[hashToken(token)]
 		if !ok || v.Expires <= s.now().Unix() || st.Users[v.User.String()].ID == (model.ID{}) || st.Users[v.User.String()].Disabled {
 			return model.Fail(model.Unauthenticated)
@@ -399,7 +442,7 @@ func (s *Service) Reauthenticate(ctx context.Context, token, p, code string) (Se
 		return Session{}, e
 	}
 	var email string
-	e = s.store.View(ctx, func(st model.ControlState) error { email = st.Users[c.user.String()].Email; return nil })
+	e = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error { email = st.Users[c.user.String()].Email; return nil })
 	if e != nil {
 		return Session{}, e
 	}

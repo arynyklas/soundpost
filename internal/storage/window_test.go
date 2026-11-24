@@ -453,13 +453,13 @@ func TestCompactSnapshotInstallsFromItsDirectory(t *testing.T) {
 		var a, b []byte
 		w.e.mu.Lock()
 		_ = w.e.db.View(func(tx *bolt.Tx) error {
-			a = bytes.Clone(tx.Bucket([]byte("replica_commands")).Get(commandKey(w.slot, index)))
+			a = bytes.Clone(commandAt(tx.Bucket([]byte("replica_commands")), commandKey(w.slot, index)))
 			return nil
 		})
 		w.e.mu.Unlock()
 		restored.mu.Lock()
 		_ = restored.db.View(func(tx *bolt.Tx) error {
-			b = bytes.Clone(tx.Bucket([]byte("replica_commands")).Get(commandKey(w.slot, index)))
+			b = bytes.Clone(commandAt(tx.Bucket([]byte("replica_commands")), commandKey(w.slot, index)))
 			return nil
 		})
 		restored.mu.Unlock()
@@ -528,7 +528,7 @@ func TestFullPassCatchesAStaleWindowRecord(t *testing.T) {
 	err := w.e.db.Update(func(tx *bolt.Tx) error {
 		commands := tx.Bucket([]byte("replica_commands"))
 		key := commandKey(w.slot, 2)
-		return commands.Put(key, append(bytes.Clone(commands.Get(key)), ' ')) // still valid JSON, no longer the bytes the record hashed
+		return commands.Put(key, append(bytes.Clone(commandAt(commands, key)), ' ')) // still valid JSON, no longer the bytes the record hashed
 	})
 	w.e.mu.Unlock()
 	if err != nil {

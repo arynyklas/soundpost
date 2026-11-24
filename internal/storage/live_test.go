@@ -66,6 +66,112 @@ func TestCommittedSubscriptionGapAndRevocation(t *testing.T) {
 	}
 }
 
+// D97: a subscription that asks for catch-up and is overrun by a burst faster than its queue is handed every
+// committed row exactly once, in commit order, with no gap, a second burst that lands while the first one is
+// still being caught up included, and the commit that follows the bursts arrives too.
+func TestOverrunIsCaughtUpFromDurableStorageAndTheTailArrives(t *testing.T) {
+	store, a, c, d := fixture(t)
+	_, b := normalized(t, store, a, c, d)
+	read := scanScope(t, store, a, d)
+	e, err := openTestEngine(t, t.TempDir(), a, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	env := liveEnv{store: store, a: a, c: c, d: d, e: e}
+	it, err := e.Subscribe(context.Background(), read, SubscribeRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, CatchUp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+	var want []model.ID
+	burst := func(n int) {
+		for range n {
+			id, _ := env.appendRow(t, b.Records[0], len(want)+1)
+			want = append(want, id)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	var got []model.ID
+	next := func() {
+		t.Helper()
+		change, err := it.Next(ctx)
+		if err != nil {
+			t.Fatalf("after %d of %d rows: %v", len(got), len(want), err)
+		}
+		if change.Gap != nil {
+			t.Fatalf("a gap was announced after %d of %d rows: %+v", len(got), len(want), change.Gap)
+		}
+		got = append(got, change.Page.IDs...)
+	}
+	burst(liveCapacity*3 + 5)
+	for range 10 {
+		next()
+	}
+	burst(liveCapacity*3 + 5) // lands while the first window is still being read back
+	burst(1)                  // the tail
+	for len(got) < len(want) {
+		next()
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows handed over differ from rows committed (%d vs %d)", len(got), len(want))
+	}
+}
+
+// A second overrun that lands while a replayed commit is being certified for the consumer (it has not been
+// handed over yet) must read that commit again, not skip it.
+func TestOverrunDuringTheCertificationOfAReplayedCommitLosesNothing(t *testing.T) {
+	store, a, c, d := fixture(t)
+	_, b := normalized(t, store, a, c, d)
+	read := scanScope(t, store, a, d)
+	e, err := openTestEngine(t, t.TempDir(), a, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	env := liveEnv{store: store, a: a, c: c, d: d, e: e}
+	it, err := e.Subscribe(context.Background(), read, SubscribeRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, CatchUp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+	var want []model.ID
+	burst := func(n int) {
+		for range n {
+			id, _ := env.appendRow(t, b.Records[0], len(want)+1)
+			want = append(want, id)
+		}
+	}
+	burst(liveCapacity * 2)
+	armed := true
+	e.duringReleaseFence = func() {
+		if armed {
+			armed = false
+			burst(liveCapacity * 2)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	var got []model.ID
+	for len(got) < len(want) {
+		change, err := it.Next(ctx)
+		if err != nil {
+			t.Fatalf("after %d of %d rows: %v", len(got), len(want), err)
+		}
+		if change.Gap != nil {
+			t.Fatalf("a gap was announced after %d of %d rows: %+v", len(got), len(want), change.Gap)
+		}
+		got = append(got, change.Page.IDs...)
+	}
+	if armed {
+		t.Fatal("the second burst never landed during a certification")
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows handed over differ from rows committed (%d vs %d)", len(got), len(want))
+	}
+}
+
 // liveEnv bundles the real actual-Raft engine and the real authority used by
 // the revoke/resume tests below.
 type liveEnv struct {

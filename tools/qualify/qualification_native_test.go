@@ -42,10 +42,13 @@ type timeoutError struct{}
 
 func (*timeoutError) Error() string { return "deadline exceeded" }
 
-// CPU hotplug is no longer a gap nobody tried: it has a harness (native_hotplug.go). What stays true is that a row is
-// never exercised without the real thing. (a) A genuine runner that lacks the opt-in or root reports not_exercised with
-// the reason and starts nothing; (b) a WSL2 host, another kernel series or another architecture never exercises the row,
-// opt-in or not; (c) a hotplug that did not occur is never a pass; and no capability is left in nativeGaps.
+// CPU hotplug is no longer a gap nobody tried: it has a harness (native_hotplug.go), and container modes have theirs (native_container.go,
+// 07.06#12; D79 for which of its scenarios a kernel must show). The container_modes half of what the old loop over both gaps held is
+// TestContainerModesPrerequisitesAreNotExercisedWithTheExactReason (another architecture, another kernel series, WSL2: not exercised and
+// never extrapolated) and TestContainerGapRemovedFromNativeGaps, both in native_container_test.go. What stays true is that a row is never
+// exercised without the real thing. (a) A genuine runner that lacks the opt-in or root reports not_exercised with the reason and starts
+// nothing; (b) a WSL2 host, another kernel series or another architecture never exercises the row, opt-in or not; (c) a hotplug that did
+// not occur is never a pass; and no capability is left in nativeGaps.
 func TestQualificationNativeGapsAreNeverExercised(t *testing.T) {
 	spec := func(arch, capability string) RowSpec {
 		return RowSpec{ID: "g", Subject: &Subject{Family: "linux-kernel", Version: "6.6", OS: "linux", Arch: arch}, Params: map[string]string{"capability": capability}}

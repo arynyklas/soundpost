@@ -114,7 +114,14 @@ func (c *processCluster) terminate(id uint64) error {
 	if cmd == nil {
 		return errors.New("member not running")
 	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := cmd.Process.Signal(syscall.SIGTERM); errors.Is(err, os.ErrProcessDone) {
+		// The member already stopped by itself (a previous release refusing a data directory the
+		// candidate moved to a layout it does not read exits at startup): nothing to stop.
+		c.mu.Lock()
+		delete(c.cmds, id)
+		c.mu.Unlock()
+		return nil
+	} else if err != nil {
 		return err
 	}
 	select {

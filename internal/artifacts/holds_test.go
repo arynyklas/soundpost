@@ -174,6 +174,43 @@ func TestLifecycleIssueHoldRetainsTheMapUntilTheIssueStopsBeingOpen(t *testing.T
 	}
 }
 
+// A hold for an issue the book already knows to be resolved or ignored only records its maps (the
+// producer holds before it applies the occurrences, and a regression applies them to a resolved
+// issue before it reopens it): nothing retains the map past the upload's own deadline until the
+// issue is open again, and then SettleIssues takes the recorded hold.
+func TestLifecycleHoldOfAnIssueThatIsNotOpenOnlyRecordsItsMaps(t *testing.T) {
+	for _, workflow := range []string{"resolved", "ignored"} {
+		t.Run(workflow, func(t *testing.T) {
+			f := newLifeFx(t, 1<<20)
+			ctx := context.Background()
+			sys := f.system(t, auth.IssuesWrite)
+			a := f.put(t, "recorded", false)
+			issue := model.NewID()
+			f.setIssue(t, issue, workflow)
+			until := f.hours(48)
+
+			res, err := f.life.HoldIssues(ctx, sys, []artifacts.IssueHold{hold(issue, until, a.ID)})
+			if err != nil || res.Held != 0 || res.Skipped != 0 {
+				t.Fatalf("hold of a %s issue: %+v %v", workflow, res, err)
+			}
+			if got := f.effective(t, a); got != a.Manifest.RetainUntil {
+				t.Fatalf("the map of a %s issue is retained until %d, want the upload's own %d", workflow, got, a.Manifest.RetainUntil)
+			}
+			if h := f.holderOf(t, issue); h == nil || h.Held || h.Until != until || len(h.Roots) != 1 {
+				t.Fatalf("the recorded holder of a %s issue: %+v", workflow, h)
+			}
+
+			f.setIssue(t, issue, "open")
+			if res, err = f.life.SettleIssues(ctx, sys); err != nil || res.Held != 1 || res.Released != 0 {
+				t.Fatalf("settle after reopen: %+v %v", res, err)
+			}
+			if got := f.effective(t, a); got != until {
+				t.Fatalf("a reopened issue holds the map until %d, want %d", got, until)
+			}
+		})
+	}
+}
+
 // Another holder keeps the map when one issue lets go; an issue the book does not know keeps
 // its holds until their deadline; a holder past its deadline is forgotten.
 func TestLifecycleSettleKeepsOtherHoldersAndUnknownIssuesAndForgetsLapsedOnes(t *testing.T) {

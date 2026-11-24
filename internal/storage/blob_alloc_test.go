@@ -12,6 +12,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // writeBlobAllocBound is the cumulative-allocation ceiling of one replicated WriteBlob, as a
@@ -24,6 +25,13 @@ const writeBlobAllocBound = 42
 // Linux (lane 1 wave 9): 26.4x with the envelope against 32.9x for the JSON form in the same run;
 // 33x leaves 25% headroom over the envelope figure.
 const writeBlobEnvelopeAllocBound = 33
+
+// noCutCadence is a cut cadence no write of these tests reaches. The default cadence of the data groups is
+// staggered per slot (slotStagger: slot 0 cuts at half the 16 MiB bound), so a blob of 8 MiB can make the group
+// of its slot cut a snapshot while the write is measured, and the cut's allocation (the window files it stages)
+// lands in or out of the measurement with the scheduler: 33x to 45x for the same write. What is measured here
+// is the allocation of WriteBlob.
+var noCutCadence = replica.Cadence{Commands: 1 << 30, Bytes: 1 << 40}
 
 // blobFixtureSized is blobFixture with an input of size bytes.
 func blobFixtureSized(t *testing.T, size int) (*control.Store, *auth.Service, auth.Scope, model.BlobManifest, []byte) {
@@ -69,7 +77,7 @@ func blobFixtureSized(t *testing.T, size int) (*control.Store, *auth.Service, au
 func TestWriteBlobCumulativeAllocationIsBounded(t *testing.T) {
 	const size = 8 << 20
 	c, a, scope, m, raw := blobFixtureSized(t, size)
-	e := openDeleteEngine(t, t.TempDir(), a, c)
+	e := openDeleteEngineCadence(t, t.TempDir(), a, c, noCutCadence)
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -92,7 +100,7 @@ func TestWriteBlobCumulativeAllocationIsBounded(t *testing.T) {
 func TestWriteBlobCumulativeAllocationWithEnvelope(t *testing.T) {
 	const size = 8 << 20
 	c, a, scope, m, raw := blobFixtureSized(t, size)
-	e := openDeleteEngine(t, t.TempDir(), a, c)
+	e := openDeleteEngineCadence(t, t.TempDir(), a, c, noCutCadence)
 	e.EnableFragmentEnvelope(true)
 	runtime.GC()
 	var before, after runtime.MemStats

@@ -36,35 +36,75 @@ type Engine struct {
 	// and by Open before the engine is shared. A reader holds either lock, or runs only after
 	// EnableReplication returned (the replica groups; InstallReplicationIdentity refuses once repl
 	// is set), or is the background verification, which copies identity under mu (VerifyFull).
-	mu           sync.Mutex
-	proposalMu   sync.Mutex
-	repl         *replicatedEngine
-	db           *trackedDB
-	dir          string
-	identity     model.ID
-	incarnation  string // hex; the random id of this disk's data directory (ensureIncarnation); read through disk()
-	incMu        sync.RWMutex
-	self         atomic.Pointer[selfRef] // this voter's own member, recorded by EnableReplication
-	files        [64]*os.File
-	indexes      [64]uint64
-	validator    Revalidator
-	faultHook    atomic.Pointer[func(string) error]
-	injected     atomic.Pointer[func(string) error]
-	failed       bool
-	closed       bool
-	catalog      manifestState
-	scans        map[*rowIterator]struct{}
-	subscribers  map[*changeIterator]struct{}
-	storageStats StorageStats
-	snap         snapshotState
-	pressure     pressureState
-	journal      journalHolds // held lifecycle evidence journals (journal_hold.go)
-	tomb         tombstoneState
-	scrub        scrubConfig
-	redact       redactState
-	erasure      erasureState
-	ver          verifyState // bounded startup verification (D15)
-	closing      atomic.Bool // set when Close starts: long publications stop at their next check
+	mu engineMu
+	// proposalMu is held exclusively by every proposer that needs the engine free of other
+	// proposals (fences, barriers, snapshots, blob and erase commands) and shared by Append,
+	// which orders itself per slot (slotMu): appends of different slots overlap their round trips
+	// and fsyncs, appends of one slot take their application indexes one at a time.
+	proposalMu sync.RWMutex
+	slotMu     [64]sync.Mutex
+	repl       *replicatedEngine
+	db         *trackedDB
+	dir        string
+	// cutMu is held shared by a snapshot cut deriving the windows of its slot without mu (windowTableForCut,
+	// DeletionLedger, PinFiles) and exclusively by erasure, the writer that rewrites stored commands. Lock order:
+	// cutMu, then mu (the cut takes mu only for a moment, to read the slot's index and the engine's flags).
+	cutMu sync.RWMutex
+	// cutEpoch is bumped, with cutMu held exclusively, before stored commands are rewritten; windows are the derivations of the open
+	// window of each slot (windowCache), valid while the epoch they were built under is the current one.
+	cutEpoch atomic.Uint64
+	windows  [64]windowCache
+	// expiry is the error evidence the journal-expiry plan found in the stored commands, kept so that the next plan reads only the
+	// commands appended since (expiry_scan.go); valid while cutEpoch is the one it was built under.
+	expiry expiryScan
+	// runsLayout is whether the query indexes of the open file are in the runs layout (index_acc.go). A
+	// file starts in the single-bucket layout the previous release reads and moves to the runs layout
+	// when the installation is contracted (adoptRunsLayout): from then on no previous release is a
+	// member. layoutAuthority is where the engine asks.
+	runsLayout atomic.Bool
+	// payload is the owned payload log (paylog.go), opened with the engine; payloadOn is whether the file has adopted the layout that
+	// writes payload references (scanIndexPayload): from then on no previous release can open it.
+	payload   *payloadLog
+	payloadOn atomic.Bool
+	// payloadSweptFrom, payloadDebt, payloadDirty: the sweep of records no reference names (payload_sweep.go). payloadSweptFrom is
+	// the position in the log up to which every record is known to be named or dead and zeroed (the mark of the file at open, then
+	// the end of the last sweep); payloadDebt is whether the log holds a span past it that a crashed process may have left unnamed
+	// records in; payloadDirty is whether this process itself left an append whose commit failed.
+	payloadSweepMu   sync.Mutex
+	payloadSweptFrom payloadPos
+	payloadDebt      atomic.Bool
+	payloadDirty     atomic.Bool
+	payloadSweepSeen bool     // loadPayloadSwept ran: payloadDebt is known
+	externalized     sync.Map // final run buckets whose blocks are all in the log (payload_blocks.go), by bucket name
+	layoutAuthority  atomic.Pointer[ReplicatedAuthority]
+	settle           settleState  // what the settlement pass remembers between passes (settle.go)
+	contractedSeen   atomic.Bool  // the installation was seen contracted (protocolToDeclare)
+	contractedAsked  atomic.Int64 // when it was last asked, unix nanoseconds
+	indexMerger      indexMerger
+	identity         model.ID
+	incarnation      string // hex; the random id of this disk's data directory (ensureIncarnation); read through disk()
+	incMu            sync.RWMutex
+	self             atomic.Pointer[selfRef] // this voter's own member, recorded by EnableReplication
+	files            [64]*os.File
+	indexes          [64]uint64
+	validator        Revalidator
+	faultHook        atomic.Pointer[func(string) error]
+	injected         atomic.Pointer[func(string) error]
+	failed           bool
+	closed           bool
+	catalog          manifestState
+	scans            map[*rowIterator]struct{}
+	subscribers      map[*changeIterator]struct{}
+	storageStats     StorageStats
+	snap             snapshotState
+	pressure         pressureState
+	journal          journalHolds // held lifecycle evidence journals (journal_hold.go)
+	tomb             tombstoneState
+	scrub            scrubConfig
+	redact           redactState
+	erasure          erasureState
+	ver              verifyState // bounded startup verification (D15)
+	closing          atomic.Bool // set when Close starts: long publications stop at their next check
 	// fragmentEnvelope selects the binary wire form for artifact fragment proposals
 	// (envelope.go); envelopesProposed counts the proposals that used it.
 	fragmentEnvelope  atomic.Bool
@@ -72,6 +112,12 @@ type Engine struct {
 	// afterSubscribeFence is a test seam: called by Subscribe between its read fence and its registration
 	// (nothing is held), so a test can commit exactly there. Nil in production.
 	afterSubscribeFence func()
+	// duringReleaseFence is a test seam: called while a live subscription's release fence runs (e.mu is not
+	// held), so a test can commit exactly while a page is being certified. Nil in production.
+	duringReleaseFence func()
+	// replayYield is a test seam: called each time a replay's scan of irrelevant commits gives up e.mu (it is
+	// not held while the hook runs), so a test can see the scan is bounded. Nil in production.
+	replayYield func()
 }
 type walEntry struct {
 	Type       string                      `json:"type"`
@@ -117,7 +163,27 @@ type redaction struct {
 	Operations []model.ID `json:"operations,omitempty"` // tombstones/expiry that caused the erasure
 }
 
-func Open(dir string, v Revalidator) (*Engine, error) {
+// openApplyDB opens apply.db with durablefs.BoltOptions (no freelist in the commits, the array freelist, mapped ahead of its growth). A
+// file that carries no freelist (a crash left it so) is opened by a pass over the nodes of its live tree (bolt: PreLoadFreelist), a page
+// fault after the other: 14 s for the 107,000 nodes of the file the single-host gate leaves, on a cold disk. The warm-up reads those pages
+// 64 at a time first (durablefs.WarmBoltTree), so that bolt's pass finds them in the cache. The crash-restart tests open a file with
+// exactly these.
+func openApplyDB(path string) (*bolt.DB, error) {
+	durablefs.WarmBoltTree(path)
+	return bolt.Open(path, 0600, durablefs.BoltOptions())
+}
+
+// Open opens the engine at dir. The background verification (verified.go) starts a full pass at once.
+func Open(dir string, v Revalidator) (*Engine, error) { return open(dir, v, false) }
+
+// OpenReplicated is Open for a node that enables replication next (EnableReplication): the first full pass of the background
+// verification waits until the start is complete and then verifyStartDelay more, instead of reading the whole node (every index entry,
+// every record of the payload log) while the start replays the journals from the same cold disk: at the single-host gate that pass was
+// 10 of the 39 CPU seconds of the first 13 seconds of a cold start and read as much as the start did itself (L2w20Admission30). A
+// start still verifies what the verified record does not vouch for before readiness; only the background re-check is later.
+func OpenReplicated(dir string, v Revalidator) (*Engine, error) { return open(dir, v, true) }
+
+func open(dir string, v Revalidator, deferFirstPass bool) (*Engine, error) {
 	if v == nil {
 		return nil, model.Fail(model.Invalid)
 	}
@@ -144,11 +210,25 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		}
 		preparedIdentity = model.NewID()
 	}
-	db, e := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	// The freelist is NOT persisted by the commits (D91): a commit that persists it writes every free and pending page id of the file
+	// (8 bytes each) next to its own dirty pages, and the file of the single-host gate is mostly free pages (166,000 of 206,000 pages
+	// at 100 commits a second: a 1.3 MB overflow node per commit, 64 % of everything the server wrote, L2w20Admission26). A graceful
+	// close writes it once (syncFreelist); a start after a crash rebuilds it from the live tree (bolt: PreLoadFreelist), which is a
+	// pass over the pages the tree holds, not over the file (the file keeps its blocks as overflow nodes, index_blocks.go).
+	// The file is mapped ahead of its growth (durablefs.BoltInitialMmapSize): a commit that grows it past the mapping waits for every
+	// read transaction, and every new reader waits for that commit.
+	db, e := openApplyDB(path)
 	if e != nil {
 		return nil, e
 	}
 	out := &Engine{db: &trackedDB{DB: db}, dir: dir, validator: v}
+	pl, e := openPayloadLog(filepath.Join(dir, payloadDirName))
+	if e != nil {
+		db.Close()
+		return nil, e
+	}
+	out.payload = pl
+	payloadLogs.Store(db, pl)
 	if e = durablefs.SyncFileAndDir(path); e != nil {
 		db.Close()
 		return nil, e
@@ -186,6 +266,9 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		e = out.ensureIncarnation()
 	}
 	if e == nil {
+		e = out.loadPayloadSwept()
+	}
+	if e == nil {
 		out.loadVerifiedRecord()
 		e = out.validateReplicaNamespaces()
 	}
@@ -203,7 +286,11 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		return nil, e
 	}
 	out.commitVerifiedStart()
+	if deferFirstPass {
+		out.ver.first = make(chan struct{})
+	}
 	out.startBackgroundVerify()
+	out.startIndexMerger()
 	return out, nil
 }
 
@@ -223,8 +310,23 @@ func (e *Engine) lockWithin(d time.Duration) bool {
 	}
 	return true
 }
+
+// lockCtx takes e.mu, giving up when ctx ends.
+func (e *Engine) lockCtx(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	for !e.mu.TryLock() {
+		if ctx.Err() != nil {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return true
+}
 func (e *Engine) Close() error {
 	e.closing.Store(true)
+	e.stopIndexMerger()
 	e.stopBackgroundVerify()
 	e.erasure.cancelLoop()
 	if e.repl != nil {
@@ -233,6 +335,7 @@ func (e *Engine) Close() error {
 		}
 	}
 	e.erasure.waitLoop()
+	e.verifyAtClose()
 	if !e.lockWithin(closeDeadline) {
 		return model.Fail(model.Timeout)
 	}
@@ -248,6 +351,18 @@ func (e *Engine) Close() error {
 			if x := f.Close(); err == nil {
 				err = x
 			}
+		}
+	}
+	payloadLogs.Delete(e.db.DB)
+	e.markPayloadClean()
+	if !e.failed {
+		if x := e.db.syncFreelist(); err == nil {
+			err = x
+		}
+	}
+	if e.payload != nil {
+		if x := e.payload.close(); err == nil {
+			err = x
 		}
 	}
 	if x := e.db.Close(); err == nil {
@@ -295,14 +410,21 @@ func batchKey(org, project, source, producer model.ID, slot uint16, batch model.
 }
 func slotKey(slot uint16) []byte { var b [2]byte; binary.BigEndian.PutUint16(b[:], slot); return b[:] }
 func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
-	e.proposalMu.Lock()
-	defer e.proposalMu.Unlock()
+	if b.RouteSlot >= 64 {
+		return model.Receipt{}, model.Fail(model.Invalid)
+	}
+	e.proposalMu.RLock()
+	defer e.proposalMu.RUnlock()
 	if err := e.replicaBeforeWrite(ctx, b.RouteSlot); err != nil {
 		return model.Receipt{}, err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed || e.failed {
+	// e.mu is held only to read the engine's state, never across a control read, an fsync or the
+	// replication round trip. Every check that asks the control group runs before the slot lock, so
+	// the appends of one slot overlap those waits with the round trip of the one in front of them;
+	// the slot lock orders only what must be ordered (the receipt and ordering checks that the
+	// previous append of the slot can change, the application index, the proposal itself), and the
+	// applier, which takes e.mu, never queues behind a request that waits for the control group.
+	if e.unusable() {
 		return model.Receipt{}, model.Fail(model.Unavailable)
 	}
 	if err := ctx.Err(); err != nil {
@@ -320,23 +442,7 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 	if err := scope.RevalidateSource(ctx, b.Project, b.Source, true); err != nil {
 		return model.Receipt{}, err
 	}
-	key := batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)
-	var old model.Receipt
-	found := false
-	err := e.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket([]byte("receipts")).Get(key)
-		if raw == nil {
-			return nil
-		}
-		found = true
-		if json.Unmarshal(raw, &old) != nil {
-			return model.Fail(model.Corrupt)
-		}
-		if old.Hash != b.Hash {
-			return model.Fail(model.Conflict)
-		}
-		return nil
-	})
+	old, found, err := e.storedReceipt(b)
 	if err != nil {
 		return model.Receipt{}, err
 	}
@@ -362,18 +468,32 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 	if err = scope.ValidateReservation(ctx, b); err != nil {
 		return model.Receipt{}, err
 	}
-	if err = e.db.View(func(tx *bolt.Tx) error {
-		if tx.Bucket([]byte("cancelled")).Get([]byte(b.Reservation.ID.String())) != nil {
-			return model.Fail(model.Conflict)
-		}
-		return validateOrdered(tx, b)
-	}); err != nil {
+	if err = e.orderedAdmits(b); err != nil {
 		return model.Receipt{}, err
 	}
 	if err = e.writeDeletions(ctx, b); err != nil {
 		return model.Receipt{}, err
 	}
+	e.slotMu[b.RouteSlot].Lock()
+	defer e.slotMu[b.RouteSlot].Unlock()
+	// The append in front of this one in the slot may have stored this very batch (a retry that
+	// raced it) or moved the series the ordering rules look at: ask again, now that nothing can
+	// change either until this append has proposed.
+	if old, found, err = e.storedReceipt(b); err != nil {
+		return model.Receipt{}, err
+	} else if found {
+		return old, nil
+	}
+	if err = e.orderedAdmits(b); err != nil {
+		return model.Receipt{}, err
+	}
+	e.mu.Lock()
+	if e.closed || e.failed {
+		e.mu.Unlock()
+		return model.Receipt{}, model.Fail(model.Unavailable)
+	}
 	index := e.indexes[b.RouteSlot] + 1
+	e.mu.Unlock()
 	r := model.Receipt{Version: 1, BatchID: b.ID, Hash: b.Hash, Cursor: model.Cursor{Group: e.group(b.RouteSlot), Index: model.Uint64(index)}, SignalDeadlines: append([]model.SignalDeadline(nil), b.Deadlines...), DedupUntil: b.AdmissionAt + model.UnixNano(7*24*time.Hour)}
 	if len(r.SignalDeadlines) == 0 {
 		return model.Receipt{}, model.Fail(model.Invalid)
@@ -385,10 +505,57 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		}
 	}
 	entry := walEntry{Type: "batch", Batch: &b, Receipt: &r}
-	if err = e.commit(b.RouteSlot, index, entry); err != nil {
+	group, command, err := e.slotCommand(b.RouteSlot, index, entry)
+	if err != nil {
+		return model.Receipt{}, err
+	}
+	if err = proposeSlotCommand(group, command); err != nil {
 		return model.Receipt{}, err
 	}
 	return r, nil
+}
+
+// unusable reports a closed or failed engine.
+func (e *Engine) unusable() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.closed || e.failed
+}
+
+// storedReceipt is the receipt a batch already has: found with the original receipt, or a
+// conflict when the batch ID is held with another hash.
+func (e *Engine) storedReceipt(b model.NormalizedBatch) (model.Receipt, bool, error) {
+	key := batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)
+	var old model.Receipt
+	found := false
+	err := e.db.View(func(tx *bolt.Tx) error {
+		raw, err := tableGet(tx, tblReceipts, key)
+		if err != nil {
+			return err
+		}
+		if raw == nil {
+			return nil
+		}
+		found = true
+		if json.Unmarshal(raw, &old) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		if old.Hash != b.Hash {
+			return model.Fail(model.Conflict)
+		}
+		return nil
+	})
+	return old, found, err
+}
+
+// orderedAdmits is the cancellation and ordering check of a batch against what the store holds.
+func (e *Engine) orderedAdmits(b model.NormalizedBatch) error {
+	return e.db.View(func(tx *bolt.Tx) error {
+		if tx.Bucket([]byte("cancelled")).Get([]byte(b.Reservation.ID.String())) != nil {
+			return model.Fail(model.Conflict)
+		}
+		return validateOrdered(tx, b)
+	})
 }
 
 // commit is deliberately the sole durable ordered-apply path. There is no

@@ -104,7 +104,7 @@ func (s *Service) ContractIndexes(ctx context.Context, c Credential, r ContractI
 	}
 	var pending []string
 	var revision model.Revision
-	if e := s.store.View(ctx, func(st model.ControlState) error {
+	if e := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := authorize(st); err != nil {
 			return err
 		}

@@ -73,13 +73,19 @@ func validateFence(tx *bolt.Tx, b model.NormalizedBatch) error {
 	return nil
 }
 func validateOrdered(tx *bolt.Tx, b model.NormalizedBatch) error {
+	return validateOrderedWith(tx, b, nil)
+}
+
+// validateOrderedWith is validateOrdered with the canonical samples of the batch taken from prep when the
+// caller derived them already.
+func validateOrderedWith(tx *bolt.Tx, b model.NormalizedBatch, prep *batchPrep) error {
 	if e := validateFence(tx, b); e != nil {
 		return e
 	}
 	if e := validateTombstoneBatch(tx, b); e != nil {
 		return e
 	}
-	if e := validateMetrics(tx, b); e != nil {
+	if e := validateMetricsWith(tx, b, prep); e != nil {
 		return e
 	}
 	return validateJobs(tx, b)

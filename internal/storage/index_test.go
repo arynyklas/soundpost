@@ -39,8 +39,8 @@ func TestTypedIndexChecksumIsNotEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = e.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("scan_time"))
-		key, value := bucket.Cursor().First()
+		bucket, key := firstLogical(tx, "scan_time")
+		value := bucket.Get(key)
 		copyValue := append([]byte(nil), value...)
 		copyValue[0] ^= 1
 		return bucket.Put(key, copyValue)

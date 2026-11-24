@@ -160,3 +160,7 @@ func (s *Store) MembersIncompatible(ctx context.Context, members []replica.Membe
 func (m *replicatedControl) guardSnapshot(ctx context.Context, to replica.Member) error {
 	return m.store.CheckMemberLayout(ctx, to)
 }
+
+// IndexesContracted is indexesContracted for the storage engine, which keeps its own query-index layout
+// in step with the installation's (storage.adoptRunsLayout): true once any organization is contracted.
+func (s *Store) IndexesContracted(ctx context.Context) (bool, error) { return s.indexesContracted(ctx) }

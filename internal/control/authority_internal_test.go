@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,IssueHold,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
@@ -173,6 +173,10 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		// Reference / Unreference ledger bookkeeping (10.29): see writerArtifactLedger; the GC
 		// fence and the retire transition keep bumping.
 		"UpdateArtifactReferences": "writerArtifactLedger",
+		// The holds of the issue producer (artifacts HoldIssues / SettleIssues): the same ledger
+		// bookkeeping, decided by the workflow of an issue, so with the grouping issues in the
+		// state (writerIssueHold).
+		"UpdateIssueHolds": "writerIssueHold",
 		// The control log expiry (retention.go): expired audit rows and applied-command rows only
 		// (writerExpireControlLog says why that cannot change authority).
 		"ExpireControlLog": "writerExpireControlLog",
@@ -244,7 +248,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 					}
 				case "updateOrgRetention", "updateOperation":
 					record("orgRetention")
-				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked":
+				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked", "admissionUpdate":
 					if id, ok := call.Args[1].(*ast.Ident); ok {
 						record(id.Name)
 					} else {
@@ -265,6 +269,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 	}
 	// updateAs forwards to update(ctx, !keep, ...): the one dispatcher.
 	delete(got, "updateAs")
+	delete(got, "admissionUpdate") // the admission dispatcher: the ledger commit it makes never touches AuthorityRevision, and the whole-state commit it falls back to is updateAs(w)
 	delete(got, "updateAsGuarded") // the guarded dispatcher: forwards to update/replicatedUpdate
 	delete(got, "updateAsGuardedChecked")
 	delete(want, "updateAs")

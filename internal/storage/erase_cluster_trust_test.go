@@ -211,7 +211,7 @@ func cutSlot(t *testing.T, e *Engine, slot uint16) slotCut {
 	}
 	var phys uint64
 	if err := e.db.View(func(tx *bolt.Tx) error {
-		phys = getUint(tx.Bucket([]byte("replica_data")), metaKey(slot, "physical"))
+		phys = getCounter(tx, slot, "physical")
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -253,16 +253,11 @@ func installSlotCuts(t *testing.T, e *Engine, cuts []slotCut) {
 	t.Helper()
 	if err := e.db.Update(func(tx *bolt.Tx) error {
 		for _, n := range []string{"batches", "receipts", "consumed", "metrics", "jobs", "scan_pages", "scan_time", "scan_postings", "scan_commits", "scan_integrity", "tombstones", "cancelled", "fences"} {
-			b := tx.Bucket([]byte(n))
-			if b == nil {
+			if tx.Bucket([]byte(n)) == nil {
 				continue
 			}
-			var keys [][]byte
-			_ = b.ForEach(func(k, _ []byte) error { keys = append(keys, bytes.Clone(k)); return nil })
-			for _, k := range keys {
-				if err := b.Delete(k); err != nil {
-					return err
-				}
+			if err := emptyLogical(tx, n); err != nil {
+				return err
 			}
 		}
 		if integ := tx.Bucket([]byte("scan_integrity")); integ != nil {

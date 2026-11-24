@@ -186,6 +186,7 @@ func (s *SnapshotStore) VerifyCut() (Snapshot, error) {
 		}
 		h := sha256.New()
 		_, err = io.Copy(h, in)
+		durablefs.DropCachedPages(in) // written once, read again only by a restore, a transfer or the next cut: not for the page cache of a node that takes 2,000 records a second
 		in.Close()
 		if err != nil || model.Hash(h.Sum(nil)) != f.SHA256 {
 			return Snapshot{}, ErrCorrupt
@@ -250,6 +251,7 @@ func checkTree(dir string, m SnapshotManifest, deep bool) error {
 			}
 			h := sha256.New()
 			_, err = io.Copy(h, in)
+			durablefs.DropCachedPages(in)
 			in.Close()
 			if err != nil || model.Hash(h.Sum(nil)) != f.SHA256 {
 				return ErrCorrupt
@@ -324,6 +326,17 @@ func checkContent(dir string, m SnapshotManifest, envelopeToo bool) error {
 	var envelope snapshotEnvelope
 	if json.Unmarshal(raw, &envelope) != nil || envelope.Application != uint64(m.Cursor.Index) || ValidateMembers(envelope.Members) != nil {
 		return ErrCorrupt
+	}
+	if len(envelope.RetryParts) > 0 {
+		have := map[string]bool{}
+		for _, f := range m.Files {
+			have[f.Name] = true
+		}
+		for _, name := range envelope.RetryParts {
+			if !have[filePrefix+name] {
+				return ErrCorrupt
+			}
+		}
 	}
 	return nil
 }

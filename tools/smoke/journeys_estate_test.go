@@ -20,6 +20,11 @@ import (
 // applications (Python API and jobs, Bun gateway, the Vite web build), PostgreSQL and the dependency are all services of the
 // file; per-source credentials are provisioned at run time by a service that waits for the node and writes them to a volume only the
 // applications mount, never into the file; every image is content-pinned or is the id of an image built from this tree.
+// This replaces TestReferenceComposeStartsOnlyBackingServices, which pinned the service set to {postgres, dependency} and the docs to
+// "backing services only": D78 read 07.04#12 that way (the node and the applications as host processes of the smoke), the release
+// implements the criterion's literal wording instead (verify9-c: D78's reading is "NOT_SUPPORTED"; verify10-e: whole-estate compose
+// "SUPPORTED"), so the same two pins now hold for the whole set (the service set below, "whole reference estate" in the docs) and the
+// old wording must not come back (TestReferenceComposeDocumentsTheWholeEstate).
 // The structure is checked on the parsed file, not on its text.
 type composeFile struct {
 	Services map[string]struct {

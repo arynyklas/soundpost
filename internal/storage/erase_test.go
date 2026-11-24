@@ -98,8 +98,16 @@ type erased struct {
 // slot the (fixed-label) log routes to.
 func (x *eraseEnv) appendMixed(canary string, deadlines []model.SignalDeadline) erased {
 	x.t.Helper()
-	producer := model.NewID()
-	keepL := x.log()
+	producer, secret, keepM, keepL := x.mixedRecords(canary)
+	b, r, scope := x.appendRecords(producer, deadlines, secret, keepM, keepL)
+	return erased{batch: b, receipt: r, scope: scope, secret: secret, keepM: keepM, keepL: keepL}
+}
+
+// mixedRecords is the records of appendMixed: a canary metric (t=5), a kept metric (t=50) and a kept log line.
+func (x *eraseEnv) mixedRecords(canary string) (producer model.ID, secret, keepM, keepL model.Record) {
+	x.t.Helper()
+	producer = model.NewID()
+	keepL = x.log()
 	want, err := model.OwnerSlot(x.d.Org, x.d.Project, x.d.Source, producer, keepL)
 	if err != nil {
 		x.t.Fatal(err)
@@ -116,11 +124,21 @@ func (x *eraseEnv) appendMixed(canary string, deadlines []model.SignalDeadline) 
 	}
 	// A distinct kept series per batch: an equal (series, time) in a second batch is a duplicate
 	// the engine deliberately does not store.
-	secret, keepM := find("secret"+canary, 5), find("kept"+model.NewID().String()[:12], 50)
-	b, r, scope := x.appendRecords(producer, deadlines, secret, keepM, keepL)
-	return erased{batch: b, receipt: r, scope: scope, secret: secret, keepM: keepM, keepL: keepL}
+	secret, keepM = find("secret"+canary, 5), find("kept"+model.NewID().String()[:12], 50)
+	return producer, secret, keepM, keepL
 }
 func (x *eraseEnv) appendRecords(producer model.ID, deadlines []model.SignalDeadline, recs ...model.Record) (model.NormalizedBatch, model.Receipt, auth.Scope) {
+	x.t.Helper()
+	n, scope := x.admit(producer, deadlines, recs...)
+	r, err := x.e.Append(context.Background(), scope, n)
+	if err != nil {
+		x.t.Fatal("append: ", err)
+	}
+	return n, r, scope
+}
+
+// admit normalizes the records into a batch and reserves its admission, without appending it.
+func (x *eraseEnv) admit(producer model.ID, deadlines []model.SignalDeadline, recs ...model.Record) (model.NormalizedBatch, auth.Scope) {
 	x.t.Helper()
 	ctx := context.Background()
 	src, err := x.a.SourceAuthority(ctx, x.cred, true)
@@ -152,11 +170,7 @@ func (x *eraseEnv) appendRecords(producer model.ID, deadlines []model.SignalDead
 	if n.Reservation, err = x.store.ReserveAdmission(ctx, scope, n); err != nil {
 		x.t.Fatal("reserve: ", err)
 	}
-	r, err := x.e.Append(ctx, scope, n)
-	if err != nil {
-		x.t.Fatal("append: ", err)
-	}
-	return n, r, scope
+	return n, scope
 }
 
 var bothDeadlines = []model.SignalDeadline{{Kind: model.Metric, RetainUntil: metricDeadline}, {Kind: model.Log, RetainUntil: logDeadline}}
@@ -203,6 +217,15 @@ func containsAny(haystack []byte, forms [][]byte) bool {
 	}
 	return false
 }
+
+// hotPageBytes is the hot page a page row names in the payload log (nil for a page row that holds its bytes or none).
+func hotPageBytes(tx *bolt.Tx, row []byte) []byte {
+	if ref, err := parsePageRef(row); err == nil && isPayloadRef(ref.Log) {
+		return storedTx(tx, ref.Log)
+	}
+	return nil
+}
+
 func rawHits(t *testing.T, e *Engine, canary string) []string {
 	t.Helper()
 	var hits []string
@@ -212,14 +235,29 @@ func rawHits(t *testing.T, e *Engine, canary string) []string {
 		_ = b.ForEach(func(k, v []byte) error {
 			if v == nil {
 				walk(path+"/"+string(k), b.Bucket(k))
-			} else if containsAny(k, forms) || containsAny(v, forms) {
+			} else if containsAny(k, forms) || containsAny(storedValue(b, v), forms) || path == tblPages.bucket && containsAny(hotPageBytes(b.Tx(), v), forms) { // a payload reference stands for its bytes
 				hits = append(hits, path)
 			}
 			return nil
 		})
 	}
 	if err := e.db.View(func(tx *bolt.Tx) error {
-		return tx.ForEach(func(name []byte, b *bolt.Bucket) error { walk(string(name), b); return nil })
+		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			walk(string(name), b)
+			if bytes.HasPrefix(name, []byte(rowsIndex+".r")) {
+				// A block holds a value as a difference to the previous one, so the decoded rows are asked as well,
+				// and a hit in one is a hit in the bucket the row is of (batches, metrics, scan_pages, ...).
+				for _, tbl := range rowTables {
+					_ = tagRunBucket{b, tbl.tag}.ForEach(func(k, v []byte) error {
+						if containsAny(k, forms) || containsAny(storedTx(tx, v), forms) || tbl.tag == tblPages.tag && containsAny(hotPageBytes(tx, v), forms) {
+							hits = append(hits, tbl.bucket)
+						}
+						return nil
+					})
+				}
+			}
+			return nil
+		})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +265,15 @@ func rawHits(t *testing.T, e *Engine, canary string) []string {
 		if err == nil && !d.IsDir() {
 			if raw, rerr := os.ReadFile(p); rerr == nil && containsAny(raw, forms) {
 				hits = append(hits, "segment:"+filepath.Base(p))
+			}
+		}
+		return nil
+	})
+	// The payload log is part of the data directory: erased bytes must not be left in it either.
+	_ = filepath.WalkDir(filepath.Join(e.dir, payloadDirName), func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if raw, rerr := os.ReadFile(p); rerr == nil && containsAny(raw, forms) {
+				hits = append(hits, "payload:"+filepath.Base(p))
 			}
 		}
 		return nil
@@ -251,7 +298,7 @@ func (x *eraseEnv) command(b model.NormalizedBatch, r model.Receipt) []byte {
 	x.t.Helper()
 	var raw []byte
 	_ = x.e.db.View(func(tx *bolt.Tx) error {
-		raw = bytes.Clone(tx.Bucket([]byte("replica_commands")).Get(commandKey(b.RouteSlot, uint64(r.Cursor.Index))))
+		raw = bytes.Clone(commandAt(tx.Bucket([]byte("replica_commands")), commandKey(b.RouteSlot, uint64(r.Cursor.Index))))
 		return nil
 	})
 	if raw == nil {
@@ -444,12 +491,11 @@ func dumpBuckets(t *testing.T, e *Engine, names ...string) map[string]map[string
 	out := map[string]map[string]string{}
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		for _, n := range names {
-			b := tx.Bucket([]byte(n))
-			if b == nil {
+			if tx.Bucket([]byte(n)) == nil {
 				t.Fatalf("bucket %s", n)
 			}
 			m := map[string]string{}
-			_ = b.ForEach(func(k, v []byte) error { m[string(k)] = string(v); return nil })
+			_ = forEachLogical(tx, n, func(k, v []byte) error { m[string(k)] = string(v); return nil })
 			out[n] = m
 		}
 		return nil
@@ -465,6 +511,9 @@ var derivedBuckets = []string{"batches", "receipts", "consumed", "metrics", "job
 // redaction must rebuild exactly the state the erasing node holds.
 func TestDeleteRedactedHistoryReplaysToIdenticalState(t *testing.T) {
 	x := newEraseEnv(t)
+	// The merger adopts the payload layout and moves the hot pages of scan_pages to the log about a second after the open (slower under
+	// the race detector); the two dumps below must be of one layout, so the layout does not move while the test compares them.
+	x.e.stopIndexMerger()
 	hit := x.appendMixed(eraseCanary, bothDeadlines)
 	x.appendMixed(otherCanary, bothDeadlines)
 	if _, err := x.e.EraseDeleted(context.Background(), []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}, nil); err != nil {
@@ -499,19 +548,14 @@ func TestDeleteRedactedHistoryReplaysToIdenticalState(t *testing.T) {
 	// Wipe every derived row and the applied cursors, as an empty replica has.
 	if err := x.e.db.Update(func(tx *bolt.Tx) error {
 		for i := range replays {
-			replays[i].physical = getUint(tx.Bucket([]byte("replica_data")), metaKey(replays[i].m.slot, "physical"))
+			replays[i].physical = getCounter(tx, replays[i].m.slot, "physical")
 			if err := tx.Bucket([]byte("cursors")).Delete(slotKey(replays[i].m.slot)); err != nil {
 				return err
 			}
 		}
 		for _, n := range derivedBuckets {
-			b := tx.Bucket([]byte(n))
-			var keys [][]byte
-			_ = b.ForEach(func(k, _ []byte) error { keys = append(keys, bytes.Clone(k)); return nil })
-			for _, k := range keys {
-				if err := b.Delete(k); err != nil {
-					return err
-				}
+			if err := emptyLogical(tx, n); err != nil {
+				return err
 			}
 		}
 		for _, n := range []string{"scan_time", "scan_postings"} {
@@ -702,7 +746,7 @@ func TestDeleteErasesArtifactRootAndFragmentCommands(t *testing.T) {
 		_ = e.db.View(func(tx *bolt.Tx) error {
 			return tx.Bucket([]byte("replica_commands")).ForEach(func(_, v []byte) error {
 				var entry walEntry
-				if json.Unmarshal(v, &entry) == nil {
+				if json.Unmarshal(storedValue(tx.Bucket([]byte("replica_commands")), v), &entry) == nil {
 					switch entry.Type {
 					case "artifact_fragment":
 						if entry.Artifact != nil && len(entry.Artifact.Bytes) > 0 {

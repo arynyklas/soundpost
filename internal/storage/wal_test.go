@@ -153,7 +153,7 @@ func TestRetryReturnsOriginalReceiptAcrossRestart(t *testing.T) {
 	}
 	var rows []model.Record
 	err = e.db.View(func(tx *bolt.Tx) error {
-		return json.Unmarshal(tx.Bucket([]byte("batches")).Get(batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)), &rows)
+		return json.Unmarshal(logicalGet(tx, "batches", batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)), &rows)
 	})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("logical rows: %d %v", len(rows), err)

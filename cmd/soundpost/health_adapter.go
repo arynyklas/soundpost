@@ -58,13 +58,11 @@ func (s *appState) Schema(ctx context.Context) (health.Schema, error) {
 	out := health.Schema{Supported: uint32(auth.SchemaMarker)}
 	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
 	defer cancel()
-	err := s.app.Control.View(ctx, func(st model.ControlState) error {
-		out.Observed = uint32(st.BearerHashKeyVersion)
-		if v := st.BearerHashKeyVersion; v >= auth.MinSchemaMarker && v <= auth.SchemaMarker {
-			out.Supported = uint32(v)
-		}
-		return nil
-	})
+	marker, _, err := s.app.Control.ReadinessFacts(ctx)
+	out.Observed = uint32(marker)
+	if marker >= auth.MinSchemaMarker && marker <= auth.SchemaMarker {
+		out.Supported = uint32(marker)
+	}
 	return out, err
 }
 
@@ -99,17 +97,9 @@ func (s *appState) Groups(ctx context.Context) ([]health.Group, error) {
 // PendingPolicyFences counts source revocation/retirement fences that have not finished
 // draining: until they do, an old source policy can still be honoured by some data group.
 func (s *appState) PendingPolicyFences(ctx context.Context) (uint64, error) {
-	var pending uint64
 	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
 	defer cancel()
-	err := s.app.Control.View(ctx, func(st model.ControlState) error {
-		for _, f := range st.SourceFences {
-			if f.Phase == "fencing" {
-				pending++
-			}
-		}
-		return nil
-	})
+	_, pending, err := s.app.Control.ReadinessFacts(ctx)
 	return pending, err
 }
 

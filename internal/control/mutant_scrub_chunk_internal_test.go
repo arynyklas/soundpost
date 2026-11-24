@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -128,6 +129,28 @@ func (f *installFx) mutantFreePages() (free []uint64, high uint64) {
 		f.t.Fatal(err)
 	}
 	return free, high
+}
+
+// crashReopen starts the store on a copy of control.db taken while it runs, the file a kill leaves: it carries no freelist, so the open
+// rebuilds it from the live tree. The store that ran is closed (its file is not the one under test any more).
+func (f *installFx) crashReopen() {
+	f.t.Helper()
+	raw, err := os.ReadFile(f.s.db.Path())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err = f.s.Close(); err != nil {
+		f.t.Fatal(err)
+	}
+	dir := f.t.TempDir()
+	if err = os.WriteFile(filepath.Join(dir, "control.db"), raw, 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+	s, err := Open(dir)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.s, f.dir = s, dir
 }
 
 // mutantPage is page id of a raw copy of the file.
@@ -254,12 +277,12 @@ func TestMutantALocalOnlyScrubNeedsNoConsensus(t *testing.T) {
 	}
 }
 
-// mutantFirstFreePagesFx is a fixture whose pages 2 and 3, the first pages after the meta pages, are
-// free: the erasure's commit has just moved the state out of them. Which state size does that
-// depends on bbolt's allocator, so the fixture searches for it and stops the test, loudly, when none
-// does (it never settles for a layout that cannot tell the mutant from the original). The freelist
-// must not be a two-page run: the scrub's own commit would write it over pages 2 and 3.
-func mutantFirstFreePagesFx(t *testing.T) *installFx {
+// mutantFirstFreePagesFx is a fixture whose two lowest free pages, the first free pages after the meta pages, are known (they are
+// returned): the erasure's commit has just moved the state out of them. Which ids they are depends on bbolt's allocator (the
+// commits do not write the freelist, D91, so on a node started after a kill page 2 and some later page are the lowest), so the
+// fixture searches for a state size with two free pages and stops the test, loudly, when none does (it never settles for a layout that
+// cannot tell the mutant from the original). The freelist must not be a two-page run: the scrub's own commit would write it over them.
+func mutantFirstFreePagesFx(t *testing.T) (*installFx, [2]uint64) {
 	t.Helper()
 	for books := 1; books <= 40; books++ {
 		f := newInstallFxOf(t, books)
@@ -269,6 +292,10 @@ func mutantFirstFreePagesFx(t *testing.T) *installFx {
 		if err := f.s.settleLocalScrub(f.local().generation); err != nil {
 			t.Fatal(err)
 		}
+		// The commits do not write the freelist (D91): the pages the file's first commits left (page 2, the freelist of the empty file,
+		// is in none of the trees) are free only in a node that starts on the file a kill leaves, which rebuilds the freelist from the
+		// live tree (a graceful close would write the freelist over the first free pages).
+		f.crashReopen()
 		free, _ := f.mutantFreePages()
 		freelist := -1
 		if err := f.s.probeDB(func(tx *bolt.Tx, pageSize uint64) error {
@@ -283,12 +310,12 @@ func mutantFirstFreePagesFx(t *testing.T) *installFx {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if slices.Contains(free, 2) && slices.Contains(free, 3) && freelist != 1 && len(owedScrubs(f.state().Audits)) != 0 {
-			return f
+		if len(free) >= 2 && freelist != 1 && len(owedScrubs(f.state().Audits)) != 0 {
+			return f, [2]uint64{free[0], free[1]}
 		}
 	}
-	t.Fatal("fixture invalid: no state size leaves pages 2 and 3 free (bbolt's allocator moved?)")
-	return nil
+	t.Fatal("fixture invalid: no state size leaves two free pages (bbolt's allocator moved?)")
+	return nil, [2]uint64{}
 }
 
 // A scrub zeroes the free pages from page 2 on BEFORE it settles anything: a node whose consensus
@@ -296,14 +323,14 @@ func mutantFirstFreePagesFx(t *testing.T) *installFx {
 // the first two included, and reports the debt as owed. With nothing committed after the chunk but
 // its own freelist, a page-2 or page-3 payload that the scrub skipped is still in the file.
 func TestMutantAScrubThatCannotSettleHasZeroedTheFirstFreePages(t *testing.T) {
-	f := mutantFirstFreePagesFx(t)
+	f, first := mutantFirstFreePagesFx(t)
 	pageSize := f.pageSize()
 	file, err := os.OpenFile(f.s.db.Path(), os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stale := bytes.Repeat([]byte(mutantChunkCanary), int(pageSize)/len(mutantChunkCanary)+1)[:pageSize]
-	for _, id := range []uint64{2, 3} { // erased payload left behind in the free pages the erasure just made
+	for _, id := range first { // erased payload left behind in the free pages the erasure just made
 		if _, err = file.WriteAt(stale, int64(id*pageSize)); err != nil {
 			t.Fatal(err)
 		}
@@ -311,13 +338,15 @@ func TestMutantAScrubThatCannotSettleHasZeroedTheFirstFreePages(t *testing.T) {
 	if err = file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []uint64{2, 3} {
+	for _, id := range first {
 		if !bytes.Contains(mutantPage(f.rawFile(), id, pageSize), []byte(mutantChunkCanary)) {
 			t.Fatalf("fixture invalid: page %d does not hold the planted payload", id)
 		}
 	}
-	if err = f.s.ReplicaGroup().Close(); err != nil {
-		t.Fatal(err)
+	if g := f.s.ReplicaGroup(); g != nil { // a store started on the crash image runs no group: its settle cannot commit either
+		if err = g.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err = f.s.ScrubErased(f.ctx); mutantCode(err) != model.Unavailable {
@@ -325,7 +354,7 @@ func TestMutantAScrubThatCannotSettleHasZeroedTheFirstFreePages(t *testing.T) {
 	}
 
 	raw := f.rawFile()
-	for _, id := range []uint64{2, 3} {
+	for _, id := range first {
 		if bytes.Contains(mutantPage(raw, id, pageSize), []byte(mutantChunkCanary)) {
 			t.Errorf("the scrub left the erased payload in page %d, one of the first free pages of the file", id)
 		}

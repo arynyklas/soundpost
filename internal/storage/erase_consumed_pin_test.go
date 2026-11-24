@@ -23,8 +23,9 @@ func TestEraseKeepsTheConsumedRowOfAnErasedBatch(t *testing.T) {
 		var row model.AdmissionReservation
 		var raw []byte
 		if err := x.e.db.View(func(tx *bolt.Tx) error {
-			raw = append([]byte(nil), tx.Bucket([]byte("consumed")).Get([]byte(hit.batch.Reservation.ID.String()))...)
-			return nil
+			v, err := tableGet(tx, tblConsumed, []byte(hit.batch.Reservation.ID.String()))
+			raw = append([]byte(nil), v...)
+			return err
 		}); err != nil {
 			t.Fatal(err)
 		}

@@ -4,11 +4,13 @@ package storage
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
+	"hash"
 	"hash/crc32"
 )
 
@@ -54,6 +56,8 @@ type pageRef struct {
 	Hash           model.Hash
 	RetainUntil    model.UnixNano
 	Hot            []byte
+	// Log is the payload reference of the hot page when it is stored in the payload log (paylog.go) and not in the row.
+	Log []byte `json:",omitempty"`
 }
 
 func pageRefBytes(p pageRef) ([]byte, error) { return json.Marshal(p) }
@@ -64,26 +68,73 @@ func parsePageRef(b []byte) (pageRef, error) {
 	}
 	return p, nil
 }
-func (e *Engine) indexAppliedRows(tx *bolt.Tx, b model.NormalizedBatch, receipt model.Receipt, rows []model.Record) error {
-	pages, commits := tx.Bucket([]byte("scan_pages")), tx.Bucket([]byte("scan_commits"))
-	if pages == nil || commits == nil || b.PolicyRevision == 0 {
-		return model.Fail(model.Corrupt)
+
+// digestDelta is what a set of index entries adds to the counted multiset root of scan_integrity: the
+// number of entries and the XOR of the SHA-256 of every key and value (indexWriter.put's arithmetic).
+type digestDelta struct {
+	count uint64
+	xor   model.Hash
+}
+
+// builtPage is a scan_pages row of an append: the page ID and its stored reference.
+type builtPage struct {
+	id   model.ID
+	meta []byte
+	ref  pageRef // the reference meta encodes, with the hot page
+}
+
+// builtIndex is everything that indexing the rows of one append writes, derived from the batch, its
+// receipt and its rows alone: the pages (their columns encoded and hashed), the keys of scan_time and
+// scan_postings (a key once even when a record names the same term twice) with the digest each adds, and
+// the commit record. Building it reads no store, so the apply of an append derives it before it takes the
+// write lock of the commit that carries the append (prepareBatch) and holds that lock only for the puts.
+type builtIndex struct {
+	pages        []builtPage
+	timePairs    []indexPair
+	postingPairs []indexPair
+	timeDigest   digestDelta
+	postDigest   digestDelta
+	commits      []byte
+}
+
+// pairSet collects the pairs of one index of an append: a key once, with its digest.
+type pairSet struct {
+	pairs   []indexPair
+	seen    map[string]struct{}
+	digest  digestDelta
+	hasher  hash.Hash
+	scratch model.Hash
+}
+
+func newPairSet() *pairSet {
+	return &pairSet{seen: map[string]struct{}{}, hasher: sha256.New()}
+}
+
+func (s *pairSet) put(key, value []byte) {
+	if _, dup := s.seen[string(key)]; dup {
+		return
 	}
-	index, err := newIndexWriter(tx, "scan_time")
-	if err != nil {
-		return err
+	s.seen[string(key)] = struct{}{}
+	s.digest.count++
+	xorDigest(&s.digest.xor, entryDigest(s.hasher, key, value, &s.scratch))
+	s.pairs = append(s.pairs, indexPair{Key: key, Value: value})
+}
+
+// buildBatchIndex derives the index rows of an append (see builtIndex). It validates the rows exactly as
+// indexing them does.
+func buildBatchIndex(b model.NormalizedBatch, receipt model.Receipt, rows []model.Record) (*builtIndex, error) {
+	if b.PolicyRevision == 0 {
+		return nil, model.Fail(model.Corrupt)
 	}
-	postings, err := newIndexWriter(tx, "scan_postings")
-	if err != nil {
-		return err
-	}
+	built := &builtIndex{}
+	index, postings := newPairSet(), newPairSet()
 	pageIDs := make([]committedPage, 0)
 	for _, r := range rows {
 		if !r.Kind.Valid() || signalCode(r.Kind) == 0 || !validSubject(r.Kind, recordSubject(r)) {
-			return model.Fail(model.Corrupt)
+			return nil, model.Fail(model.Corrupt)
 		}
 		if _, err := r.Payload.Value(r.Kind); err != nil {
-			return model.Fail(model.Corrupt)
+			return nil, model.Fail(model.Corrupt)
 		}
 	}
 	for _, kind := range signalKinds {
@@ -126,27 +177,18 @@ func (e *Engine) indexAppliedRows(tx *bolt.Tx, b model.NormalizedBatch, receipt 
 						binary.BigEndian.PutUint16(tail[8:], uint16(i))
 						key = append(key, tail[:]...)
 						value := append(append([]byte(nil), id[:]...), tail[8:]...)
-						if err = index.put(key, indexValue(key, value)); err != nil {
-							return err
-						}
+						index.put(key, indexValue(key, value))
 						for _, term := range recordTerms(r) {
 							pk := termPrefix(prefix, term)
 							pk = append(pk, key[len(prefix):]...)
-							if err = postings.put(pk, indexValue(pk, value)); err != nil {
-								return err
-							}
+							postings.put(pk, indexValue(pk, value))
 						}
 					}
 					meta, err := pageRefBytes(ref)
 					if err != nil {
 						return err
 					}
-					if pages.Get(id[:]) != nil {
-						return model.Fail(model.Corrupt)
-					}
-					if err = pages.Put(id[:], meta); err != nil {
-						return err
-					}
+					built.pages = append(built.pages, builtPage{id: id, meta: meta, ref: ref})
 					pageIDs = append(pageIDs, committedPage{ID: id, Kind: kind, Subject: subject, Restricted: raw, Source: b.Source})
 					selected = selected[:0]
 					chunk++
@@ -162,15 +204,54 @@ func (e *Engine) indexAppliedRows(tx *bolt.Tx, b model.NormalizedBatch, receipt 
 					}
 					selected = append(selected, r)
 					if len(selected) == pageRows {
-						if err = write(); err != nil {
-							return err
+						if err := write(); err != nil {
+							return nil, err
 						}
 					}
 				}
-				if err = write(); err != nil {
-					return err
+				if err := write(); err != nil {
+					return nil, err
 				}
 			}
+		}
+	}
+	raw, err := json.Marshal(pageIDs)
+	if err != nil {
+		return nil, err
+	}
+	built.commits = raw
+	built.timePairs, built.timeDigest = index.pairs, index.digest
+	built.postingPairs, built.postDigest = postings.pairs, postings.digest
+	return built, nil
+}
+
+// putBuiltIndex writes a built index into tx: the pages, the entries of scan_time and scan_postings (one
+// run of the commit in the runs layout) with scan_integrity kept exact, and the commit record.
+func putBuiltIndex(tx *bolt.Tx, built *builtIndex, cursor model.Cursor) error {
+	rows, err := rowsOf(tx)
+	if err != nil {
+		return err
+	}
+	index, err := newIndexWriter(tx, "scan_time")
+	if err != nil {
+		return err
+	}
+	postings, err := newIndexWriter(tx, "scan_postings")
+	if err != nil {
+		return err
+	}
+	if err = index.putBuilt(built.timePairs, built.timeDigest); err != nil {
+		return err
+	}
+	if err = postings.putBuilt(built.postingPairs, built.postDigest); err != nil {
+		return err
+	}
+	for _, p := range built.pages {
+		if rows.Get(tblPages, p.id[:]) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		if err = rows.Insert(tblPages, p.id[:], p.meta); err != nil {
+			return err
 		}
 	}
 	if err = index.finish(); err != nil {
@@ -179,11 +260,18 @@ func (e *Engine) indexAppliedRows(tx *bolt.Tx, b model.NormalizedBatch, receipt 
 	if err = postings.finish(); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(pageIDs)
+	if rows.acc != nil {
+		return rows.Insert(tblCommits, commitKey(cursor), built.commits)
+	}
+	return rows.Set(tblCommits, commitKey(cursor), built.commits) // the rewrite of a stored batch replaces its commit record
+}
+
+func (e *Engine) indexAppliedRows(tx *bolt.Tx, b model.NormalizedBatch, receipt model.Receipt, rows []model.Record) error {
+	built, err := buildBatchIndex(b, receipt, rows)
 	if err != nil {
 		return err
 	}
-	return commits.Put(commitKey(receipt.Cursor), raw)
+	return putBuiltIndex(tx, built, receipt.Cursor)
 }
 func recordTerms(r model.Record) []string {
 	terms := []string{"id=" + r.ID.String(), "service_id=" + r.Resource.Service.String(), "environment_id=" + r.Resource.Environment.String(), "build_id=" + r.Resource.Build.String()}

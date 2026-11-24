@@ -10,22 +10,34 @@ import (
 	"github.com/arynyklas/soundpost/internal/policy"
 	bolt "go.etcd.io/bbolt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
 )
 
 // applyFileHits counts the canary (every encoding the command history uses) in the raw bytes of
-// apply.db, free pages included. rawHits only sees what a bucket can still reach.
+// apply.db, free pages included, and of the payload log files. rawHits only sees what a bucket can still reach.
 func applyFileHits(t *testing.T, e *Engine, canary string) int {
 	t.Helper()
+	raws := [][]byte{}
 	raw, err := os.ReadFile(e.db.Path())
 	if err != nil {
 		t.Fatal(err)
 	}
+	raws = append(raws, raw)
+	logs, _ := filepath.Glob(filepath.Join(e.dir, payloadDirName, "*.spl"))
+	for _, p := range logs {
+		if raw, err = os.ReadFile(p); err != nil {
+			t.Fatal(err)
+		}
+		raws = append(raws, raw)
+	}
 	n := 0
-	for _, f := range canaryForms(canary) {
-		n += bytes.Count(raw, f)
+	for _, raw := range raws {
+		for _, f := range canaryForms(canary) {
+			n += bytes.Count(raw, f)
+		}
 	}
 	return n
 }

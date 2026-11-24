@@ -11,6 +11,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/storage"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -95,10 +96,12 @@ type WorkerStatus struct {
 	// window or the count bound (control.Store.ExpireControlLog).
 	ExpiredAudits   uint64
 	ExpiredCommands uint64
-	// SettledWindows and SettledReservations count the sealed data windows whose consumed
-	// admission reservations control replaced by a settled digest, and the reservation rows that
-	// dropped (control.SettleAdmissions).
+	// SettledWindows and SettledReservations count the data windows whose consumed admission
+	// reservations control replaced by a settled digest, and the reservation rows that dropped;
+	// SettledParts counts the parts of windows (open, or sealed and not complete yet) settled before that
+	// (control.SettleAdmissions).
 	SettledWindows      uint64
+	SettledParts        uint64
 	SettledReservations uint64
 	// UnfencedBlobs counts expired artifact roots an expiry pass kept because no References
 	// source is bound: without one nothing proves a root is retired, and erasing it would leave
@@ -147,7 +150,10 @@ func (s *Service) UseClock(clock func() time.Time) error {
 	return nil
 }
 
-// Start runs RunOnce every Interval until Close or ctx ends.
+// Start runs RunOnce every Interval until Close or ctx ends, and settles admissions every SettleInterval in
+// between: the passes settle the consumed reservations of the data windows as they fill (control state
+// holds at most what one settle interval admits plus a part per group), and an hourly or a minutely pass
+// would leave it a thousand times that.
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,8 +168,10 @@ func (s *Service) Start(ctx context.Context) error {
 	started := s.timeNow()
 	s.last.snapshot, s.last.expiry = started, started
 	s.cancel, s.done = cancel, make(chan struct{})
-	go func(done chan struct{}) {
-		defer close(done)
+	var loops sync.WaitGroup
+	loops.Add(2)
+	go func() {
+		defer loops.Done()
 		t := time.NewTicker(s.worker.Interval)
 		defer t.Stop()
 		for {
@@ -174,6 +182,23 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-t.C:
 			}
 		}
+	}()
+	go func() {
+		defer loops.Done()
+		t := time.NewTicker(s.worker.SettleInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-run.Done():
+				return
+			case <-t.C:
+				_ = s.settleAdmissions(run)
+			}
+		}
+	}()
+	go func(done chan struct{}) {
+		loops.Wait()
+		close(done)
 	}(s.done)
 	return nil
 }
@@ -203,6 +228,11 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		}
 	}
 	step(s.driveDeletions(ctx))
+	// The consumed admission reservations of the sealed data windows are settled on EVERY pass, not on
+	// the hourly expiry schedule: the rows are the part of the control state that grows with each
+	// admitted batch (~1 KB of rows, snapshot and journal each), so the state holds at most the open
+	// windows of the data groups plus what one pass interval admits.
+	step(s.settleAdmissions(ctx))
 	now := s.timeNow()
 	s.mu.Lock()
 	expiryDue := s.last.expiry.IsZero() || now.Sub(s.last.expiry) >= s.worker.ExpiryInterval
@@ -792,8 +822,6 @@ func wrapDry(g storage.EraseGuard) storage.EraseGuard {
 // expireControlLog drops the control log entries that are past their retention (design section
 // 12: audit 365 days; the applied-command log keeps the D4 retry window), so the control state a
 // long-running installation re-reads and re-proposes on every control transition stays bounded.
-// It then settles the consumed admission reservations of the sealed data windows (settleAdmissions),
-// the third unbounded part of that state.
 func (s *Service) expireControlLog(ctx context.Context, now time.Time) error {
 	rep, err := s.cfg.Control.ExpireControlLog(ctx, control.ControlLogPolicy{Now: now, AuditDays: Defaults().AuditDays})
 	if err != nil {
@@ -803,12 +831,17 @@ func (s *Service) expireControlLog(ctx context.Context, now time.Time) error {
 	s.status.ExpiredAudits += uint64(rep.Audits)
 	s.status.ExpiredCommands += uint64(rep.Commands + rep.Capped)
 	s.mu.Unlock()
-	return s.settleAdmissions(ctx)
+	return nil
 }
 
 // settler is what a data plane offers when it can settle consumed reservations (the storage engine).
 type settler interface {
 	SettleCandidates(ctx context.Context) ([]model.SettleCandidate, error)
+}
+
+// booksSettler is a settler that leaves out what control settled already when it is given control's books.
+type booksSettler interface {
+	SettleCandidatesFor(ctx context.Context, books storage.SettleBooks) ([]model.SettleCandidate, error)
 }
 
 // SettleCandidates forwards to the wrapped data plane when it can list settleable windows (the
@@ -821,16 +854,32 @@ func (p ResidualPlane) SettleCandidates(ctx context.Context) ([]model.SettleCand
 	return nil, nil
 }
 
-// settleAdmissions offers the sealed data windows to control, which replaces the rows of the
-// consumed reservations of each by a settled digest and a folded charge (control.SettleAdmissions):
-// control state stops growing with the number of batches ever admitted. A data plane that cannot
-// list its windows leaves the rows as they are.
+// SettleCandidatesFor forwards like SettleCandidates, with control's books for the plane that takes them.
+func (p ResidualPlane) SettleCandidatesFor(ctx context.Context, books storage.SettleBooks) ([]model.SettleCandidate, error) {
+	if s, ok := p.DataPlane.(booksSettler); ok {
+		return s.SettleCandidatesFor(ctx, books)
+	}
+	return p.SettleCandidates(ctx)
+}
+
+// settleAdmissions offers the data windows, and the complete parts of the open ones, to control, which
+// replaces the rows of the consumed reservations of each by a settled digest and a folded charge
+// (control.SettleAdmissions): control state stops growing with the number of batches ever admitted. A
+// data plane that cannot list its windows leaves the rows as they are. Passes do not overlap.
 func (s *Service) settleAdmissions(ctx context.Context) error {
 	p, ok := s.cfg.Data.(settler)
 	if !ok {
 		return nil
 	}
-	candidates, err := p.SettleCandidates(ctx)
+	s.settleMu.Lock()
+	defer s.settleMu.Unlock()
+	var candidates []model.SettleCandidate
+	var err error
+	if b, ok := s.cfg.Data.(booksSettler); ok {
+		candidates, err = b.SettleCandidatesFor(ctx, s.cfg.Control)
+	} else {
+		candidates, err = p.SettleCandidates(ctx)
+	}
 	if err != nil {
 		return err
 	}
@@ -841,9 +890,10 @@ func (s *Service) settleAdmissions(ctx context.Context) error {
 		}
 		s.mu.Lock()
 		s.status.SettledWindows += uint64(rep.Windows)
+		s.status.SettledParts += uint64(rep.Parts)
 		s.status.SettledReservations += uint64(rep.Reservations)
 		s.mu.Unlock()
-		if rep.Windows == 0 {
+		if rep.Windows == 0 && rep.Parts == 0 {
 			break // nothing left that control can prove equal to its rows
 		}
 	}

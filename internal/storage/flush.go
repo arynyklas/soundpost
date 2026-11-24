@@ -48,7 +48,7 @@ func (e *Engine) Flush(ctx context.Context) error {
 func (e *Engine) pageGroupsLocked(hotOnly bool) (map[string][]pageRef, error) {
 	groups := map[string][]pageRef{}
 	err := e.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("scan_pages")).ForEach(func(_, b []byte) error {
+		return tableForEach(tx, tblPages, func(_, b []byte) error {
 			p, err := parsePageRef(b)
 			if err != nil {
 				return err
@@ -76,11 +76,13 @@ func (e *Engine) pageGroupsLocked(hotOnly bool) (map[string][]pageRef, error) {
 func (e *Engine) loadRefLocked(id model.ID) (pageRef, error) {
 	var ref pageRef
 	err := e.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("scan_pages")).Get(id[:])
+		b, err := tableGet(tx, tblPages, id[:])
+		if err != nil {
+			return err
+		}
 		if b == nil {
 			return model.Fail(model.Corrupt)
 		}
-		var err error
 		ref, err = parsePageRef(b)
 		return err
 	})

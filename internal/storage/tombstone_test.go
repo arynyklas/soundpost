@@ -58,8 +58,15 @@ func (v *fakeView) ActiveDeletions(_ context.Context, org model.ID, _ []model.ID
 
 func enableDeleteSolo(t *testing.T, engine *Engine, raftDirectory string, store *control.Store) (*Engine, error) {
 	t.Helper()
+	return enableDeleteSoloCadence(t, engine, raftDirectory, store, replica.Cadence{})
+}
+
+// enableDeleteSoloCadence is enableDeleteSolo with the cut cadence of the data groups given (a zero cadence is the
+// default one, staggered per slot).
+func enableDeleteSoloCadence(t *testing.T, engine *Engine, raftDirectory string, store *control.Store, cadence replica.Cadence) (*Engine, error) {
+	t.Helper()
 	transport := replica.NewLoopback()
-	groups, err := engine.EnableReplication(replica.Config{ID: 1, Directory: raftDirectory, Transport: transport, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}}, nil, acceptDeleteAuthority{store})
+	groups, err := engine.EnableReplication(replica.Config{ID: 1, Directory: raftDirectory, Transport: transport, Cadence: cadence, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}}, nil, acceptDeleteAuthority{store})
 	if err != nil {
 		engine.Close()
 		transport.Close()
@@ -81,6 +88,12 @@ func enableDeleteSolo(t *testing.T, engine *Engine, raftDirectory string, store 
 
 func openDeleteEngine(t *testing.T, dir string, validator Revalidator, store *control.Store) *Engine {
 	t.Helper()
+	return openDeleteEngineCadence(t, dir, validator, store, replica.Cadence{})
+}
+
+// openDeleteEngineCadence is openDeleteEngine with the cut cadence of the data groups given.
+func openDeleteEngineCadence(t *testing.T, dir string, validator Revalidator, store *control.Store, cadence replica.Cadence) *Engine {
+	t.Helper()
 	if err := activateTestControl(t, store); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +101,7 @@ func openDeleteEngine(t *testing.T, dir string, validator Revalidator, store *co
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err = enableDeleteSolo(t, engine, filepath.Join(dir, "raft"), store)
+	engine, err = enableDeleteSoloCadence(t, engine, filepath.Join(dir, "raft"), store, cadence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +291,7 @@ func TestDeleteRetireProjectRejectsEverythingOfThatProjectOnly(t *testing.T) {
 	// Retirement is atomic per batch: a retired project never gets even one record.
 	engine.mu.Lock()
 	rows := 0
-	_ = engine.db.View(func(tx *bolt.Tx) error { rows = tx.Bucket([]byte("batches")).Stats().KeyN; return nil })
+	_ = engine.db.View(func(tx *bolt.Tx) error { rows = logicalCount(t, tx, "batches"); return nil })
 	engine.mu.Unlock()
 	if rows != 1 {
 		t.Fatalf("%d batches stored, want only the pre-retirement one", rows)
@@ -316,8 +329,7 @@ func TestDeleteApplierRejectsMatchingBatchOrderedAfterBarrier(t *testing.T) {
 		logical := engine.indexes[slot] + 1
 		var physical, term uint64
 		_ = engine.db.View(func(tx *bolt.Tx) error {
-			meta := tx.Bucket([]byte("replica_data"))
-			physical, term = getUint(meta, metaKey(slot, "physical")), getUint(meta, metaKey(slot, "term"))
+			physical, term = getCounter(tx, slot, "physical"), getCounter(tx, slot, "term")
 			return nil
 		})
 		engine.mu.Unlock()
@@ -335,7 +347,7 @@ func TestDeleteApplierRejectsMatchingBatchOrderedAfterBarrier(t *testing.T) {
 	engine.mu.Lock()
 	_ = engine.db.View(func(tx *bolt.Tx) error {
 		key := batchKey(late.Org, late.Project, late.Source, late.Producer, slot, late.ID)
-		if tx.Bucket([]byte("receipts")).Get(key) != nil || tx.Bucket([]byte("batches")).Get(key) != nil {
+		if logicalGet(tx, "receipts", key) != nil || logicalGet(tx, "batches", key) != nil {
 			t.Error("rejected batch left receipt or data")
 		}
 		return nil

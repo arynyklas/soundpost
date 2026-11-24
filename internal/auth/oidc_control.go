@@ -12,7 +12,7 @@ import (
 // The provider ID is public routing metadata, not an authorization grant.
 func (s *Service) ConfiguredOIDC(ctx context.Context, org, provider model.ID) (OIDCConfig, error) {
 	var cfg OIDCConfig
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		o, ok := st.Orgs[org.String()]
 		if !ok {
 			return model.Fail(model.Unauthenticated)
@@ -39,7 +39,7 @@ func (s *Service) ConfiguredOIDC(ctx context.Context, org, provider model.ID) (O
 }
 func (s *Service) OIDCConfigForState(ctx context.Context, state string) (OIDCConfig, error) {
 	var pending oidcState
-	if err := s.store.View(ctx, func(st model.ControlState) error {
+	if err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := json.Unmarshal(st.OIDC[hashToken(state)], &pending); err != nil {
 			return model.Fail(model.Unauthenticated)
 		}

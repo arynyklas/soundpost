@@ -161,6 +161,7 @@ type Config struct {
 // WorkerConfig holds the conservative maintenance defaults.
 type WorkerConfig struct {
 	Interval         time.Duration // pass cadence (default 1 minute)
+	SettleInterval   time.Duration // admission settlement cadence between passes (default 5 seconds)
 	SnapshotInterval time.Duration // CreateSnapshots+CompactJournals cadence (default 1 hour)
 	ExpiryInterval   time.Duration // expiry pass cadence (default 1 hour)
 	PhysicalWithin   time.Duration // deletion physical cleanup target (default 24 hours)
@@ -172,6 +173,9 @@ type WorkerConfig struct {
 func (w WorkerConfig) withDefaults() WorkerConfig {
 	if w.Interval <= 0 {
 		w.Interval = time.Minute
+	}
+	if w.SettleInterval <= 0 {
+		w.SettleInterval = 5 * time.Second
 	}
 	if w.SnapshotInterval <= 0 {
 		w.SnapshotInterval = time.Hour

@@ -46,6 +46,7 @@ func dcReadJournal(path string) (dcJournal, error) {
 	}
 	memory := raft.NewMemoryStorage()
 	frames := 0
+	var pending [][]byte // the part records of a snapshot whose last record has not been read
 	for off := 0; off+16 <= len(raw); {
 		header := raw[off : off+16]
 		if string(header[:4]) != "SPR1" || binary.BigEndian.Uint32(header[12:]) != crc32.Checksum(header[:12], dcWALTable) {
@@ -60,11 +61,33 @@ func dcReadJournal(path string) (dcJournal, error) {
 			break
 		}
 		var record struct {
-			Snapshot []byte   `json:"snapshot"`
-			Entries  [][]byte `json:"entries"`
+			Snapshot      []byte       `json:"snapshot"`
+			Entries       [][]byte     `json:"entries"`
+			SnapshotPart  []byte       `json:"snapshot_part"`
+			SnapshotParts model.Uint64 `json:"snapshot_parts"`
+			Hard          []byte       `json:"hard"`
 		}
 		if json.Unmarshal(body, &record) != nil {
 			return dcJournal{}, errors.New("journal record undecodable")
+		}
+		// A snapshot too large for one record is a run of part records, then the record that carries
+		// snapshot_parts (internal/replica/ready_parts.go). A chain whose last record is missing or
+		// torn is never acknowledged: the read ends before it, like the replica's cut back.
+		switch {
+		case len(record.SnapshotPart) > 0:
+			if record.SnapshotParts != 0 || len(record.Snapshot) > 0 || len(record.Hard) > 0 || len(record.Entries) > 0 {
+				return dcJournal{}, errors.New("journal part record carries more than a part")
+			}
+			pending = append(pending, record.SnapshotPart)
+			off += 16 + length
+			continue
+		case record.SnapshotParts > 0:
+			if len(record.Snapshot) > 0 || uint64(len(pending)) != uint64(record.SnapshotParts) {
+				return dcJournal{}, errors.New("journal snapshot chain has a missing or extra part")
+			}
+			record.Snapshot, pending = bytes.Join(pending, nil), nil
+		case len(pending) > 0:
+			return dcJournal{}, errors.New("journal snapshot chain broken by another record")
 		}
 		if len(record.Snapshot) > 0 {
 			snap := &pb.Snapshot{}

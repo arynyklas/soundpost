@@ -93,12 +93,26 @@ const (
 	// fails to decode the entry and stops applying, so it is proposed only once every member
 	// declared at least this (ControlAuditDeltaReady). Same declaration, same rule as the two above.
 	auditDeltaProtocol uint64 = 4
-	// statePatchProtocol is the declaration of a binary that also decodes and applies the state
-	// patch command of control (control.Store.SetStatePatchGate): a command that carries what a
-	// transition changed instead of the whole next state, so that no command grows with the
-	// control state. A binary that does not know it fails to decode the entry and stops applying,
-	// so it is proposed only once every member declared at least this (ControlStatePatchReady).
-	statePatchProtocol uint64 = 5
+	// legacyStatePatchProtocol is the declaration of a binary that decodes and applies the state patch
+	// command of control (control.Store.SetLegacyStatePatchGate): a command that carries what a
+	// transition changed instead of the whole next state, so that no command grows with the control
+	// state. A binary that does not know it fails to decode the entry and stops applying, so it is
+	// proposed only once every member declared at least this (ControlLegacyStatePatchReady). The
+	// previous release declares this and nothing above it.
+	legacyStatePatchProtocol uint64 = 5
+	// statePatchProtocol is the declaration of a binary that also keeps the admission books and the job and
+	// issue books in the ledger layout of control (internal/control/ledger.go): the digest a patch names
+	// covers the blob and the accumulator of the ledger, and a patch may address the finer records of the
+	// quota books and the settlement and the records of the job and issue books. A binary that declared
+	// only 5 (the previous release) computes another digest over its own bytes and cannot apply such a
+	// patch, and one that declared 6 (the first build of the layout) holds the job and issue books in its
+	// blob, so the ledger commands and the ledger digest are proposed only once every member declared at
+	// least this (ControlStatePatchReady). Until then a group proposes patches only while the ledger is
+	// empty, where the digest is the one every release computes, and a whole-state replacement, which
+	// every release applies, otherwise. A binary that declared 7 holds the grouping issues and the applied-command
+	// log (Commands, CommandOwners) in its blob and has no record tables for them (protocol 8, D85): a patch that
+	// addresses those records is proposed only once every member declared at least 8.
+	statePatchProtocol uint64 = 8
 	// declaredProtocol is the version this binary declares.
 	declaredProtocol = statePatchProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced

@@ -121,7 +121,7 @@ func (s *Store) updateOrgScoped(ctx context.Context, class orgClass, fn func(st 
 	}
 	scope := &orgScope{class: class}
 	ctx = context.WithValue(ctx, orgScopeKey{}, scope)
-	return s.replicatedUpdate(ctx, false, nil, func(st *State) error {
+	return s.replicatedUpdate(ctx, false, nil, scopeBooks|scopeCommands, func(st *State) error {
 		// One run of the transition: a lost proposal runs it again on a fresh read, and nothing a run
 		// decided carries over.
 		scope.org, scope.named = model.ID{}, false

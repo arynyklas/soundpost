@@ -213,7 +213,7 @@ func (l *Lifecycle) HoldIssues(ctx context.Context, scope auth.Scope, holds []Is
 		return HoldResult{}, model.Fail(model.Invalid)
 	}
 	var out HoldResult
-	err := l.run(ctx, scope.OrgID(), false, func(st model.ControlState, now model.UnixNano) (plan, error) {
+	err := l.runIssues(ctx, scope.OrgID(), func(st model.ControlState, now model.UnixNano) (plan, error) {
 		out = HoldResult{}
 		org, project, err := holdScope(scope, st)
 		if err != nil {
@@ -289,7 +289,7 @@ func (l *Lifecycle) HoldIssues(ctx context.Context, scope auth.Scope, holds []Is
 // scope is the runner's system issues.write scope over exactly one project.
 func (l *Lifecycle) SettleIssues(ctx context.Context, scope auth.Scope) (HoldResult, error) {
 	var out HoldResult
-	err := l.run(ctx, scope.OrgID(), false, func(st model.ControlState, now model.UnixNano) (plan, error) {
+	err := l.runIssues(ctx, scope.OrgID(), func(st model.ControlState, now model.UnixNano) (plan, error) {
 		out = HoldResult{}
 		org, project, err := holdScope(scope, st)
 		if err != nil {

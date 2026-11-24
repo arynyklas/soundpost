@@ -214,10 +214,12 @@ func (s *Store) RedactRetainedControlCommands(ctx context.Context) error {
 	if snapshot.Manifest.Index <= res.Floor {
 		return model.Fail(model.Unavailable)
 	}
-	if _, err = g.Snapshots().DropSuperseded(); err != nil {
+	// The journal is compacted onto the cut before the snapshot it supersedes is dropped: until it is, its head is
+	// anchored on that snapshot, whose directory holds the retry parts the head names.
+	if _, err = g.CompactJournal(ctx); err != nil {
 		return replicaFault(err)
 	}
-	if _, err = g.CompactJournal(ctx); err != nil {
+	if _, err = g.Snapshots().DropSuperseded(); err != nil {
 		return replicaFault(err)
 	}
 	residue, err := g.MachineResidue(erasures)

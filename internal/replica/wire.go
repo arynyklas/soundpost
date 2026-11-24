@@ -166,17 +166,19 @@ func (w *CommitSetWatermark) UnmarshalJSON(raw []byte) error {
 }
 func (r *readyRecord) UnmarshalJSON(raw []byte) error {
 	var wire struct {
-		Group    model.ID     `json:"group"`
-		Node     model.Uint64 `json:"node"`
-		Members  Members      `json:"members"`
-		Hard     []byte       `json:"hard,omitempty"`
-		Snapshot []byte       `json:"snapshot,omitempty"`
-		Entries  [][]byte     `json:"entries,omitempty"`
+		Group         model.ID     `json:"group"`
+		Node          model.Uint64 `json:"node"`
+		Members       Members      `json:"members"`
+		Hard          []byte       `json:"hard,omitempty"`
+		Snapshot      []byte       `json:"snapshot,omitempty"`
+		Entries       [][]byte     `json:"entries,omitempty"`
+		SnapshotPart  []byte       `json:"snapshot_part,omitempty"`
+		SnapshotParts model.Uint64 `json:"snapshot_parts,omitempty"`
 	}
 	if model.StrictJSON(raw, &wire) != nil {
 		return ErrInvalid
 	}
-	*r = readyRecord{Group: wire.Group, Node: uint64(wire.Node), Members: wire.Members, Hard: wire.Hard, Snapshot: wire.Snapshot, Entries: wire.Entries}
+	*r = readyRecord{Group: wire.Group, Node: uint64(wire.Node), Members: wire.Members, Hard: wire.Hard, Snapshot: wire.Snapshot, Entries: wire.Entries, SnapshotPart: wire.SnapshotPart, SnapshotParts: uint64(wire.SnapshotParts)}
 	return nil
 }
 func (s *snapshotEnvelope) UnmarshalJSON(raw []byte) error {
@@ -187,11 +189,16 @@ func (s *snapshotEnvelope) UnmarshalJSON(raw []byte) error {
 		Completed   []CommittedEntry `json:"completed"`
 		Members     Members          `json:"members"`
 		Retiring    []Member         `json:"retiring,omitempty"`
+		RetryParts  []string         `json:"retry_parts,omitempty"`
+		RetryFrom   model.Uint64     `json:"retry_from,omitempty"`
 	}
 	if model.StrictJSON(raw, &wire) != nil || wire.Retry != "" && wire.Retry != retryDigestTag {
 		return ErrInvalid // a table format this build does not know is refused, not guessed at
 	}
-	*s = snapshotEnvelope{Retry: wire.Retry, Application: uint64(wire.Application), State: wire.State, Completed: wire.Completed, Members: wire.Members, Retiring: wire.Retiring}
+	*s = snapshotEnvelope{Retry: wire.Retry, Application: uint64(wire.Application), State: wire.State, Completed: wire.Completed, Members: wire.Members, Retiring: wire.Retiring, RetryParts: wire.RetryParts, RetryFrom: uint64(wire.RetryFrom)}
+	if !validRetryParts(*s) {
+		return ErrInvalid
+	}
 	return nil
 }
 

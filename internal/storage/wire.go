@@ -5,6 +5,8 @@ package storage
 import (
 	"encoding/base64"
 	"encoding/json"
+	"sync/atomic"
+
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
@@ -120,9 +122,13 @@ func decodeWAL(raw []byte) (walEntry, error) {
 	return decodeWALJSON(raw)
 }
 
+// walDecodes counts the JSON decodes of a command (decodeWALJSON). Tests only: they bound what a restart decodes.
+var walDecodes atomic.Uint64
+
 // decodeWALJSON is json.Unmarshal(raw, &entry) without the outer pass that only re-validates and
 // copies raw before handing it to UnmarshalJSON, which validates strictly itself.
 func decodeWALJSON(raw []byte) (walEntry, error) {
+	walDecodes.Add(1)
 	var entry walEntry
 	err := entry.UnmarshalJSON(raw)
 	return entry, err

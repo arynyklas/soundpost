@@ -8,8 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,8 +48,53 @@ var verifiedMagic = [8]byte{'S', 'P', 'V', 'R', '0', '0', '0', '1'}
 // verifyInterval is the period of the background full re-verification; D15 requires at least daily.
 var verifyInterval = 24 * time.Hour
 
+// verifyStartDelay is how long after the end of its start (releaseFirstPass) a node opened with OpenReplicated waits before the first
+// full pass: the node serves from a cold page cache then, and the pass reads every record it holds.
+var verifyStartDelay = time.Minute
+
+// verifyStartMax bounds the wait of that first pass for the end of the start: the start budget of the product is 20 s (appcore), so a
+// pass that has not been released after this long is not waiting for a start but for one that never comes (a node opened with
+// OpenReplicated that never enables replication), and begins.
+var verifyStartMax = 5 * time.Minute
+
 // verifyGate, when non-nil, holds every background pass until it is closed. Tests only.
 var verifyGate chan struct{}
+
+// cancelPollEvery is how many units of work (index entries, commands, window records, pages) a read transaction of a verification pass
+// does between two looks at its context. A pass at the size the single-host gate leaves is minutes of units, and Close waited for all
+// of them (67 s and more than 3 minutes right after a start, L2w20Admission30): the wait that is left is one stretch of this many units.
+// A variable of the tests.
+var cancelPollEvery uint32 = 256
+
+// verifyUnitDelay makes every polled unit of a pass take this long. Tests only: a store small enough for a test has no pass that lasts.
+var verifyUnitDelay time.Duration
+
+// cancelPoll is how a long read transaction notices that its pass was cancelled: it counts the units of work it has done (tick) and
+// looks at the context every cancelPollEvery of them. A nil poll never cancels (the start's own validation, the tests).
+type cancelPoll struct {
+	ctx context.Context
+	n   uint32
+}
+
+// tick counts one unit of work and reports model.Cancelled once the context is done, at the next look.
+func (p *cancelPoll) tick() error {
+	if p == nil {
+		return nil
+	}
+	if verifyUnitDelay > 0 {
+		time.Sleep(verifyUnitDelay)
+	}
+	if p.n++; p.n%cancelPollEvery == 0 && p.ctx.Err() != nil {
+		return model.Fail(model.Cancelled)
+	}
+	return nil
+}
+
+// isCancelled reports whether err is the fault of a cancelled pass: that is not damage, and fails nothing.
+func isCancelled(err error) bool {
+	var fault *model.Fault
+	return errors.As(err, &fault) && fault.Code == model.Cancelled
+}
 
 type verifiedGroup struct {
 	Group   model.ID     `json:"group"`
@@ -95,6 +142,17 @@ type verifyState struct {
 	cancel            context.CancelFunc
 	done              chan struct{}
 	kick              chan struct{} // wakes the background loop before its interval ends (kickVerify)
+	// first, when non-nil (OpenReplicated), holds the loop's first full pass until releaseFirstPass closes it; fullPasses counts the
+	// full passes the loop began (a test reads it).
+	first      chan struct{}
+	firstOnce  sync.Once
+	fullPasses atomic.Int64
+	// file serializes the writes and removals of the record file, which fsync (recordVerified): a background pass holds it without e.mu;
+	// the manifest publication and the identity install take it under e.mu, in the order e.mu, file, mu.
+	file sync.Mutex
+	// gen (guarded by mu) counts the changes of what the record is bound to that something other than the pass that read it made:
+	// a publication, an install, a start's commit, a failure.
+	gen uint64
 }
 
 func (r *verifiedRecord) encode() ([]byte, error) {
@@ -127,15 +185,31 @@ func decodeVerifiedRecord(raw []byte) (*verifiedRecord, error) {
 func (e *Engine) verifiedPath() string { return filepath.Join(e.dir, verifiedRecordName) }
 
 func (e *Engine) writeVerifiedRecord(r *verifiedRecord) error {
+	defer noteSpan(&verifyStats.records, &verifyStats.recordNS, &verifyStats.maxRecordNS, time.Now())
+	if err := e.trip("verify_record_write"); err != nil {
+		return err
+	}
 	data, err := r.encode()
 	if err != nil {
 		return err
 	}
+	// The file is written with its own fsync and published by the rename, whose directory fsync also makes the new name durable: a
+	// directory fsync before the rename (for the temporary file's name) is a commit of the journal the record does not need.
 	tmp := e.verifiedPath() + ".tmp"
-	if err = durablefs.Remove(tmp); err != nil {
+	if err = os.Remove(tmp); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err = durablefs.Exclusive(tmp, data); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	if ce := f.Close(); err == nil {
+		err = ce
+	}
+	if err != nil {
 		return err
 	}
 	return durablefs.Rename(tmp, e.verifiedPath())
@@ -248,6 +322,12 @@ func (e *Engine) verifiedFrom(slot uint16, applied uint64) uint64 {
 	return 1
 }
 
+// verifiedThrough says whether the verified record covers every command of slot up to index (a start does not verify them again, D15).
+func (e *Engine) verifiedThrough(slot uint16, index uint64) bool {
+	r := e.verifiedRec()
+	return r != nil && uint64(r.Groups[slot].Applied) >= index
+}
+
 func (e *Engine) recordHasSegment(s SegmentManifest) bool {
 	r := e.verifiedRec()
 	if r == nil {
@@ -295,13 +375,33 @@ func (e *Engine) buildVerifiedRecord(tx *bolt.Tx, identity model.ID, cat manifes
 	return rec, nil
 }
 
+// tailPage is a page above the verified point whose scan_time entries are still to be found: the first and the last key they can have
+// (the namespace of the page and its start and end time) and how many of them the page's reference says there are.
+type tailPage struct {
+	id    model.ID
+	from  []byte
+	upper []byte
+	count uint32
+}
+
+// tailPageBatch is how many pages of the tail are collected before their entries are looked up: the lookups of a batch are made in key
+// order (one block of a run serves all the keys it holds), and a batch is what the memory of a pass holds.
+const tailPageBatch = 1 << 16
+
 // validateIndexTail verifies, bounded by what was written since the record, the scan-index side
 // of every command above each group's verified index: the commit entry, its pages and the
-// scan_time entries of every page.
-func (e *Engine) validateIndexTail(tx *bolt.Tx) error {
-	commits, pages, times := tx.Bucket([]byte("scan_commits")), tx.Bucket([]byte("scan_pages")), tx.Bucket([]byte("scan_time"))
-	if commits == nil || pages == nil || times == nil {
-		return model.Fail(model.Corrupt)
+// scan_time entries of every page. The records of the pages are read in the order the log holds them and forgotten after the read (a
+// page is hashed once, a minute after it was written; the log's pages are not the page cache's to keep, L2w20Admission35), and the entries
+// are looked up in key order: a Seek per page in the order of the commits fetched, from every run of the index, the block that holds the
+// key, 128 KiB each, which at the single-host gate was 46,600 pages x the sealed windows x 128 KiB a minute (G7, 18-30 s of one thread).
+func (e *Engine) validateIndexTail(tx *bolt.Tx, poll *cancelPoll, entries *atomic.Uint64) error {
+	rows, err := rowsOf(tx)
+	if err != nil {
+		return err
+	}
+	times, err := openOrderedCursor(tx, "scan_time")
+	if err != nil {
+		return err
 	}
 	// The digest itself must parse (it is CRC-protected); a damaged one is corruption.
 	for _, name := range []string{"scan_time", "scan_postings"} {
@@ -309,10 +409,24 @@ func (e *Engine) validateIndexTail(tx *bolt.Tx) error {
 			return err
 		}
 	}
+	var batch []tailPage
+	scan := func() error {
+		slices.SortFunc(batch, func(a, b tailPage) int { return bytes.Compare(a.from, b.from) })
+		for i := range batch {
+			if err := scanTailPage(times, poll, &batch[i], entries); err != nil {
+				return err
+			}
+		}
+		batch = batch[:0]
+		return nil
+	}
 	for slot := range uint16(64) {
 		applied := appliedOf(tx, slot)
 		for index := e.verifiedFrom(slot, applied); index <= applied; index++ {
-			raw := commits.Get(commitKey(model.Cursor{Group: e.group(slot), Index: model.Uint64(index)}))
+			if err := poll.tick(); err != nil {
+				return err
+			}
+			raw := rows.Get(tblCommits, commitKey(model.Cursor{Group: e.group(slot), Index: model.Uint64(index)}))
 			if raw == nil {
 				continue // not a batch command
 			}
@@ -321,41 +435,69 @@ func (e *Engine) validateIndexTail(tx *bolt.Tx) error {
 				return model.Fail(model.Corrupt)
 			}
 			for _, id := range ids {
-				if err := e.validateTailPage(pages, times, id.ID); err != nil {
+				page, ok, err := e.checkTailPage(rows, id.ID)
+				if err != nil {
 					return err
+				}
+				if !ok {
+					continue
+				}
+				if batch = append(batch, page); len(batch) == tailPageBatch {
+					if err := scan(); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
-	return nil
+	if err := scan(); err != nil {
+		return err
+	}
+	return rows.Err()
 }
 
-func (e *Engine) validateTailPage(pages, times *bolt.Bucket, id model.ID) error {
-	raw := pages.Get(id[:])
+// checkTailPage checks a page's reference and its record (hot or in the log) against the hash of the reference, and returns what the
+// lookup of its entries needs; ok is false for a page erased with its batch.
+func (e *Engine) checkTailPage(rows *rowStore, id model.ID) (page tailPage, ok bool, err error) {
+	raw := rows.Get(tblPages, id[:])
 	if raw == nil {
-		return nil // erased with its batch
+		return tailPage{}, false, nil // erased with its batch
 	}
 	ref, err := parsePageRef(raw)
 	if err != nil || ref.ID != id {
-		return model.Fail(model.Corrupt)
+		return tailPage{}, false, model.Fail(model.Corrupt)
 	}
 	if ref.Hot != nil && model.HashCanonical(ref.Hot) != ref.Hash {
-		return model.Fail(model.Corrupt)
+		return tailPage{}, false, model.Fail(model.Corrupt)
+	}
+	if isPayloadRef(ref.Log) {
+		hot, err := e.payload.readCold(ref.Log)
+		if err != nil || model.HashCanonical(hot) != ref.Hash {
+			return tailPage{}, false, model.Fail(model.Corrupt)
+		}
 	}
 	prefix := pageNamespace(ref.Org, ref.Project, ref.Kind, ref.Restricted, ref.Source, ref.Subject)
-	upper := append(append([]byte(nil), prefix...), timeKey(ref.End)...)
+	from := append(append(make([]byte, 0, len(prefix)+8), prefix...), timeKey(ref.Start)...)
+	upper := append(append(make([]byte, 0, len(prefix)+8), prefix...), timeKey(ref.End)...)
+	return tailPage{id: id, from: from, upper: upper, count: ref.Count}, true, nil
+}
+
+// scanTailPage finds the entries of a page in the index and checks them: as many as the page's reference says, each with the CRC of its value.
+func scanTailPage(times orderedCursor, poll *cancelPoll, p *tailPage, entries *atomic.Uint64) error {
 	var found uint32
-	c := times.Cursor()
-	for k, v := c.Seek(append(append([]byte(nil), prefix...), timeKey(ref.Start)...)); k != nil && len(k) >= len(upper) && bytes.Compare(k[:len(upper)], upper) <= 0; k, v = c.Next() {
-		e.ver.entries.Add(1)
-		if len(v) >= 16 && bytes.Equal(v[:16], id[:]) {
+	for k, v := times.Seek(p.from); k != nil && len(k) >= len(p.upper) && bytes.Compare(k[:len(p.upper)], p.upper) <= 0; k, v = times.Next() {
+		if err := poll.tick(); err != nil {
+			return err
+		}
+		entries.Add(1)
+		if len(v) >= 16 && bytes.Equal(v[:16], p.id[:]) {
 			if !validIndexValue(k, v) {
 				return model.Fail(model.Corrupt)
 			}
 			found++
 		}
 	}
-	if found != ref.Count {
+	if found != p.count {
 		return model.Fail(model.Corrupt)
 	}
 	return nil
@@ -365,9 +507,12 @@ func (e *Engine) validateTailPage(pages, times *bolt.Bucket, id model.ID) error 
 // were hashed (or carried from a verified manifest) by the publication, so the segment set stays
 // verified, while the verified applied indexes and index digests stay where they were. e.mu held.
 func (e *Engine) rebindVerifiedLocked(old model.Hash, next manifestState) {
+	e.ver.file.Lock()
+	defer e.ver.file.Unlock()
 	e.ver.mu.Lock()
-	defer e.ver.mu.Unlock()
+	e.ver.gen++
 	r := e.ver.rec
+	e.ver.mu.Unlock()
 	if r == nil || r.ManifestDigest != old {
 		return
 	}
@@ -377,28 +522,61 @@ func (e *Engine) rebindVerifiedLocked(old model.Hash, next manifestState) {
 	for _, s := range next.Manifest.Segments {
 		nr.Segments = append(nr.Segments, verifiedSegment{ID: s.ID, File: s.File, Checksum: s.Checksum, Bytes: s.Bytes})
 	}
-	if e.writeVerifiedRecord(&nr) != nil {
+	written := e.writeVerifiedRecord(&nr) == nil
+	e.ver.mu.Lock()
+	if written {
+		e.ver.rec = &nr
+	} else {
 		e.ver.rec = nil // the old file is now bound to a retired manifest: the next start verifies in full
-		return
 	}
-	e.ver.rec = &nr
+	e.ver.mu.Unlock()
+}
+
+// recordVerified writes next as the verified record and makes it the current one, unless a manifest publication, an identity
+// install or a failed pass changed what the record is bound to since gen was read (the next pass records the point then). The pass
+// that calls it holds no engine lock: writing the record is a file fsync, a rename and the directory's fsync, each a commit of the
+// file system's journal, which waits for everything the engine has dirtied meanwhile, and the 64 slot groups apply under e.mu: held
+// for it, every ack of the node waited out those commits once a minute, seconds at a time at the gate's write rate (L2w20Admission29).
+// needCurrent says a record must exist and be bound to next's manifest (an advance has nothing to advance from without one; the
+// full pass records one when there is none).
+func (e *Engine) recordVerified(next *verifiedRecord, gen uint64, needCurrent bool) error {
+	e.ver.file.Lock()
+	defer e.ver.file.Unlock()
+	e.ver.mu.Lock()
+	stale := e.ver.gen != gen || needCurrent && (e.ver.rec == nil || e.ver.rec.ManifestDigest != next.ManifestDigest)
+	e.ver.mu.Unlock()
+	if stale {
+		return nil
+	}
+	if e.writeVerifiedRecord(next) == nil {
+		e.ver.mu.Lock()
+		e.ver.rec = next
+		e.ver.mu.Unlock()
+	}
+	return nil
 }
 
 // commitVerifiedStart is called once Open has recovered: the state verified by this start becomes
 // the new verified point.
 func (e *Engine) commitVerifiedStart() {
+	e.ver.file.Lock()
+	defer e.ver.file.Unlock()
 	e.ver.mu.Lock()
-	defer e.ver.mu.Unlock()
 	p := e.ver.pending
 	e.ver.pending = nil
+	e.ver.mu.Unlock()
 	if p == nil {
 		return
 	}
-	if e.writeVerifiedRecord(p) != nil {
+	written := e.writeVerifiedRecord(p) == nil
+	e.ver.mu.Lock()
+	e.ver.gen++
+	if written {
+		e.ver.rec = p
+	} else {
 		e.ver.rec = nil
-		return
 	}
-	e.ver.rec = p
+	e.ver.mu.Unlock()
 }
 
 // StartupVerification reports what Open verified.
@@ -433,19 +611,71 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 	}
 	cat, identity := e.catalog, e.identity
 	e.mu.Unlock()
+	poll := &cancelPoll{ctx: ctx}
+	if err := e.verifySegments(ctx, cat, nil); err != nil {
+		return err
+	}
+	var rec *verifiedRecord
+	err := e.db.View(func(tx *bolt.Tx) error {
+		if err := e.trip("verify_full_view"); err != nil {
+			return err
+		}
+		if err := validateReplicaNamespacesTx(tx, poll, nil, nil); err != nil {
+			return err
+		}
+		if err := validateIndexIntegrityPolled(tx, poll); err != nil {
+			return err
+		}
+		if err := validateWindowRecordsTx(tx, poll); err != nil {
+			return err
+		}
+		var err error
+		rec, err = e.buildVerifiedRecord(tx, identity, cat)
+		return err
+	})
+	if err != nil {
+		if isCancelled(err) {
+			return err // the pass was stopped (Close); nothing it saw is damage
+		}
+		return e.failVerify(err)
+	}
+	if err = e.trip("verify_built"); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	if e.closed || e.failed || e.catalog.Hash != cat.Hash || e.identity != identity {
+		e.mu.Unlock()
+		return nil // the manifest or the identity moved on: the next pass records the new point
+	}
+	e.ver.mu.Lock()
+	gen := e.ver.gen
+	e.ver.mu.Unlock()
+	e.mu.Unlock()
+	return e.recordVerified(rec, gen, false)
+}
+
+// verifySegments hashes the segments of cat that pick selects (every one when pick is nil) and checks their file headers. A segment a
+// publication retired while the pass ran is skipped; any other failure fails the engine closed.
+func (e *Engine) verifySegments(ctx context.Context, cat manifestState, pick func(SegmentManifest) bool) error {
 	for _, s := range cat.Manifest.Segments {
 		if err := ctx.Err(); err != nil {
 			return model.Fail(model.Cancelled)
 		}
+		if pick != nil && !pick(s) {
+			continue
+		}
 		path, err := segmentPath(e.dir, s.File)
 		if err == nil {
 			var h model.Hash
-			if h, err = hashFile(path); err == nil && h != s.Checksum {
+			if h, err = hashFileCtx(ctx, path); err == nil && h != s.Checksum {
 				err = model.Fail(model.Corrupt)
 			}
 			if err == nil {
 				err = verifySegmentFileHeader(path, s)
 			}
+		}
+		if isCancelled(err) {
+			return err
 		}
 		if err != nil {
 			e.mu.Lock()
@@ -460,38 +690,116 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 			return e.failVerify(err)
 		}
 	}
-	var rec *verifiedRecord
+	return nil
+}
+
+// verifyAdvanceInterval is how often a running engine moves its verified point up to what it has applied.
+var verifyAdvanceInterval = time.Minute
+
+// verifyStats counts the advance passes of the process (a diagnostic build reports them, diag_stats_on.go): the passes, the time of their
+// read transaction (and the longest), the index entries they examined, and the writes of the record (count, time and the longest).
+var verifyStats struct {
+	passes, readNS, maxReadNS, entries atomic.Int64
+	records, recordNS, maxRecordNS     atomic.Int64
+}
+
+// noteSpan adds one event that began at began to a count, a total and a longest.
+func noteSpan(n, total, longest *atomic.Int64, began time.Time) {
+	took := time.Since(began).Nanoseconds()
+	n.Add(1)
+	total.Add(took)
+	for old := longest.Load(); took > old && !longest.CompareAndSwap(old, took); old = longest.Load() {
+	}
+}
+
+// advanceVerified verifies what the engine applied since the verified record exactly as a start does (the commands above each group's verified
+// index, the index entries and pages they produced, the segments the record does not list) and records the new point. The record used to be
+// written only by a start and by the full pass at that start: a node that ran for an hour under load still held the point of its first second,
+// and its first restart verified that whole hour before readiness (L2w20Admission22). A node with no record has nothing to advance from: the full
+// pass records one. Damage fails the engine closed, as in the full pass, and the point stays where it was.
+func (e *Engine) advanceVerified(ctx context.Context) error {
+	if !e.lockCtx(ctx) {
+		return model.Fail(model.Cancelled)
+	}
+	if e.closed || e.failed {
+		e.mu.Unlock()
+		return model.Fail(model.Unavailable)
+	}
+	cat, identity := e.catalog, e.identity
+	e.mu.Unlock()
+	if e.verifiedRec() == nil {
+		return nil
+	}
+	if err := e.verifySegments(ctx, cat, func(s SegmentManifest) bool { return !e.recordHasSegment(s) }); err != nil {
+		return err
+	}
+	var next *verifiedRecord
+	poll := &cancelPoll{ctx: ctx}
+	var entries atomic.Uint64 // the counters of StartupVerification are the start's, not the advance's
+	viewAt := time.Now()
 	err := e.db.View(func(tx *bolt.Tx) error {
-		if err := validateReplicaNamespacesTx(tx, nil, nil); err != nil {
+		if err := e.trip("verify_advance_view"); err != nil {
 			return err
 		}
-		if err := validateIndexIntegrity(tx); err != nil {
+		if err := validateReplicaNamespacesTx(tx, poll, e.verifiedFrom, nil, true); err != nil {
 			return err
 		}
-		if err := validateWindowRecordsTx(tx); err != nil {
+		if err := e.validateIndexTail(tx, poll, &entries); err != nil {
 			return err
 		}
 		var err error
-		rec, err = e.buildVerifiedRecord(tx, identity, cat)
+		next, err = e.buildVerifiedRecord(tx, identity, cat)
 		return err
 	})
+	noteSpan(&verifyStats.passes, &verifyStats.readNS, &verifyStats.maxReadNS, viewAt)
+	verifyStats.entries.Add(int64(entries.Load()))
 	if err != nil {
+		if ctx.Err() != nil {
+			return model.Fail(model.Cancelled)
+		}
 		return e.failVerify(err)
 	}
-	if err = e.trip("verify_built"); err != nil {
-		return err
+	if !e.lockCtx(ctx) {
+		return model.Fail(model.Cancelled)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.closed || e.failed || e.catalog.Hash != cat.Hash || e.identity != identity {
-		return nil // the manifest or the identity moved on: the next pass records the new point
+		e.mu.Unlock()
+		return nil // the manifest or the identity moved on: the next pass starts from the record the publication carried
 	}
 	e.ver.mu.Lock()
-	defer e.ver.mu.Unlock()
-	if e.writeVerifiedRecord(rec) == nil {
-		e.ver.rec = rec
+	gen, rec := e.ver.gen, e.ver.rec
+	e.ver.mu.Unlock()
+	e.mu.Unlock()
+	if rec == nil || rec.ManifestDigest != cat.Hash {
+		return nil
 	}
-	return nil
+	if old, err := rec.encode(); err == nil {
+		if fresh, err := next.encode(); err == nil && bytes.Equal(old, fresh) {
+			return nil // nothing new: no write
+		}
+	}
+	return e.recordVerified(next, gen, true)
+}
+
+// closeVerifyBudget bounds the advance that a graceful close makes (verifyAtClose).
+var closeVerifyBudget = 10 * time.Second
+
+// verifyAtClose moves the verified point to what the engine applied, once the groups no longer apply: the advance runs once a minute, so
+// the point of a node that is stopped is up to a minute behind, and its start verifies that minute (every page's record and index
+// entries, one thread) before it answers /readyz: 40 s at the single-host gate after the hour (L2w20Admission34, G7). The pass is the
+// advance itself, bounded by closeVerifyBudget; a pass that does not finish leaves the point where it was (the start verifies the tail), and
+// damage fails the engine closed, as in the background.
+func (e *Engine) verifyAtClose() {
+	// A publication holds e.mu for a whole segment rewrite and Close must not wait behind it longer than closeDeadline
+	// (TestCloseDeadlineAndPublicationStop): a node that cannot take the engine in that time leaves the verified point
+	// where it is, and the start verifies the tail.
+	if !e.lockWithin(closeDeadline) {
+		return
+	}
+	e.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), closeVerifyBudget)
+	defer cancel()
+	_ = e.advanceVerified(ctx)
 }
 
 // dropVerifiedLocked forgets the verified record and removes its file; e.mu is held. A record
@@ -499,10 +807,13 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 // record of the old identity must neither stay in memory nor be what the next start finds
 // (loadVerifiedRecord would refuse it as foreign, at the price of a full verification).
 func (e *Engine) dropVerifiedLocked() {
+	e.ver.file.Lock()
+	defer e.ver.file.Unlock()
 	_ = durablefs.Remove(e.verifiedPath())
 	e.ver.mu.Lock()
 	e.ver.rec = nil
 	e.ver.pending = nil
+	e.ver.gen++
 	e.ver.mu.Unlock()
 }
 
@@ -522,22 +833,25 @@ func (e *Engine) kickVerify() {
 // record is removed so the next start verifies everything before readiness.
 func (e *Engine) failVerify(cause error) error {
 	err := model.Fail(model.Corrupt)
+	e.ver.file.Lock()
 	_ = durablefs.Remove(e.verifiedPath())
 	e.ver.mu.Lock()
 	e.ver.rec = nil
 	e.ver.pending = nil
+	e.ver.gen++
 	if e.ver.err == nil {
 		e.ver.err = err
 	}
 	e.ver.mu.Unlock()
+	e.ver.file.Unlock()
 	e.mu.Lock()
 	e.failLocked()
 	e.mu.Unlock()
 	return err
 }
 
-// startBackgroundVerify runs VerifyFull at start, again whenever kickVerify asks, and otherwise
-// every verifyInterval until Close.
+// startBackgroundVerify runs VerifyFull at start (of a node opened with OpenReplicated: once its start is complete and verifyStartDelay
+// has passed, advancing the verified point meanwhile), again whenever kickVerify asks, and otherwise every verifyInterval until Close.
 func (e *Engine) startBackgroundVerify() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -545,8 +859,14 @@ func (e *Engine) startBackgroundVerify() {
 	e.ver.mu.Lock()
 	e.ver.cancel, e.ver.done, e.ver.kick = cancel, done, kick
 	e.ver.mu.Unlock()
+	expiryDone := make(chan struct{})
+	go func() {
+		defer close(expiryDone)
+		e.expiry.keepUp(ctx, e)
+	}()
 	go func() {
 		defer close(done)
+		defer func() { <-expiryDone }() // Close cancels ctx, which ends both
 		if gate := verifyGate; gate != nil {
 			select {
 			case <-gate:
@@ -554,19 +874,65 @@ func (e *Engine) startBackgroundVerify() {
 				return
 			}
 		}
+		if first := e.ver.first; first != nil {
+			advance := time.NewTicker(verifyAdvanceInterval)
+			defer advance.Stop()
+			var delay *time.Timer
+			defer func() {
+				if delay != nil {
+					delay.Stop()
+				}
+			}()
+			var due <-chan time.Time // the end of the delay, once the start is complete
+			limit := time.NewTimer(verifyStartMax)
+			defer limit.Stop()
+			for started := false; !started; {
+				select {
+				case <-first:
+					first = nil // closed: never selected again
+					delay = time.NewTimer(verifyStartDelay)
+					due = delay.C
+				case <-due:
+					started = true
+				case <-limit.C: // a node that never completes a replicated start (none enables replication) is still verified
+					started = true
+				case <-advance.C:
+					if err := e.advanceVerified(ctx); err != nil && e.VerifyFailure() != nil {
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
 		for {
+			e.ver.fullPasses.Add(1)
 			if err := e.VerifyFull(ctx); err != nil && e.VerifyFailure() != nil {
 				return
 			}
-			timer := time.NewTimer(verifyInterval)
-			select {
-			case <-timer.C:
-			case <-kick:
-				timer.Stop()
-			case <-ctx.Done():
-				timer.Stop()
-				return
+			full := time.NewTimer(verifyInterval)
+			advance := time.NewTicker(verifyAdvanceInterval)
+			due := false
+			for !due {
+				select {
+				case <-full.C:
+					due = true
+				case <-kick:
+					due = true
+				case <-advance.C:
+					if err := e.advanceVerified(ctx); err != nil && e.VerifyFailure() != nil {
+						full.Stop()
+						advance.Stop()
+						return
+					}
+				case <-ctx.Done():
+					full.Stop()
+					advance.Stop()
+					return
+				}
 			}
+			full.Stop()
+			advance.Stop()
 		}
 	}()
 }
@@ -579,4 +945,14 @@ func (e *Engine) stopBackgroundVerify() {
 		cancel()
 		<-done
 	}
+}
+
+// releaseFirstPass lets the first full pass of a node opened with OpenReplicated begin, after verifyStartDelay: its start is over
+// (EnableReplication returned, whatever it returned: a node that failed to start is closed by its caller, which ends the loop).
+func (e *Engine) releaseFirstPass() {
+	e.ver.firstOnce.Do(func() {
+		if e.ver.first != nil {
+			close(e.ver.first)
+		}
+	})
 }

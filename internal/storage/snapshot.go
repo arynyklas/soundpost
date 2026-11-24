@@ -56,24 +56,36 @@ const (
 func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 	e := m.engine
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.failed || e.closed {
+		e.mu.Unlock()
 		return replica.Ledger{}, model.Fail(model.Unavailable)
 	}
-	ledger := replica.Ledger{Version: 1, Group: e.group(m.slot), Generation: e.catalog.Manifest.TombstoneGeneration, Entries: []replica.LedgerEntry{}}
-	table, err := e.windowTableLocked(m.slot, true)
-	if err != nil {
-		return replica.Ledger{}, err
+	generation, cut, application := e.catalog.Manifest.TombstoneGeneration, m.cut, e.indexes[m.slot]
+	e.mu.Unlock()
+	var table []windowRecord
+	if cut != nil && cut.application == application {
+		// The table CompactSnapshot just derived for this cut: the ledger kinds of a command are not changed by
+		// the redaction of a batch, so deriving the open window again would only repeat its decode.
+		table = cut.windows
+	} else {
+		var err error
+		if table, _, err = e.windowTableForCut(m.slot); err != nil {
+			return replica.Ledger{}, err
+		}
 	}
+	ledger := replica.Ledger{Version: 1, Group: e.group(m.slot), Generation: generation, Entries: []replica.LedgerEntry{}}
 	for _, rec := range table {
 		ledger.Entries = append(ledger.Entries, rec.Ledger...)
 	}
 	var fenced int
-	if err = e.db.View(func(tx *bolt.Tx) error {
+	e.cutMu.RLock()
+	err := e.db.View(func(tx *bolt.Tx) error {
 		rows, err := tombstonesWithPrefix(tx, slotKey(m.slot))
 		fenced = len(rows)
 		return err
-	}); err != nil {
+	})
+	e.cutMu.RUnlock()
+	if err != nil {
 		return replica.Ledger{}, err
 	}
 	ledger.Generation += uint64(fenced)
@@ -86,81 +98,69 @@ func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 // table, into a staging directory the release removes. Slot 0 also carries the derived segment
 // transfer set (so 64 slot snapshots do not copy it 64 times), again naming a segment the
 // selected snapshot holds. Compaction defers the removal of any pinned segment until release.
+// The window files are written without the engine lock (stageWindows): the engine lock is held only for
+// the engine's own state, for a moment.
 func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 	e := m.engine
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.failed || e.closed {
+		e.mu.Unlock()
 		return nil, nil, model.Fail(model.Unavailable)
 	}
 	have := map[string]replica.SnapshotFile{}
+	var prior replica.Snapshot
+	hasPrior := false
 	if m.snaps != nil {
 		if cur, ok := m.snaps.Current(); ok {
+			prior, hasPrior = cur, true
 			for _, f := range cur.Manifest.Files {
 				have[f.Name] = f
 			}
 		}
 	}
+	cut, application := m.cut, e.indexes[m.slot]
+	e.mu.Unlock()
 	reusable := func(name string, size uint64, sum model.Hash) bool {
 		h, ok := have["files/"+name]
 		return ok && h.Size == size && h.SHA256 == sum
 	}
-	cut := m.cut
-	if cut == nil || cut.application != e.indexes[m.slot] {
-		table, err := e.windowTableLocked(m.slot, true)
+	if cut == nil || cut.application != application {
+		table, applied, err := e.windowTableForCut(m.slot)
 		if err != nil {
 			return nil, nil, err
 		}
-		cut = &cutTable{application: e.indexes[m.slot], windows: table}
+		cut = &cutTable{application: applied, windows: table}
 	}
-	var files []replica.PinnedFile
-	var stage string
+	// The previous snapshot's file of a window the cut extends is the prefix of the new one (writeWindowFilesFromPrior).
+	priorFile := func(n uint64) (*os.File, windowFile, bool) {
+		h, ok := have["files/"+winName(n)]
+		if !ok || !hasPrior {
+			return nil, windowFile{}, false
+		}
+		f, err := prior.File("files/" + winName(n))
+		if err != nil {
+			return nil, windowFile{}, false
+		}
+		return f, windowFile{Size: h.Size, SHA256: h.SHA256}, true
+	}
+	files, stage, err := m.stageWindows(cut, reusable, priorFile)
 	removeStage := func() {
 		if stage != "" {
 			_ = os.RemoveAll(stage)
 		}
 	}
-	for _, rec := range cut.windows {
-		type part struct {
-			name  string
-			file  windowFile
-			reuse bool
-		}
-		parts := []part{{name: winName(rec.N), file: rec.File}, {name: evName(rec.N), file: rec.Ev}}
-		fresh := false
-		for i := range parts {
-			parts[i].reuse = reusable(parts[i].name, parts[i].file.Size, parts[i].file.SHA256)
-			fresh = fresh || !parts[i].reuse
-		}
-		if fresh {
-			if stage == "" {
-				parent := filepath.Join(e.dir, "snapshot-stage")
-				if err := os.MkdirAll(parent, 0700); err != nil {
-					return nil, nil, err
-				}
-				var err error
-				if stage, err = os.MkdirTemp(parent, fmt.Sprintf("cut-%d-", m.slot)); err != nil {
-					return nil, nil, err
-				}
-			}
-			err := e.db.View(func(tx *bolt.Tx) error {
-				return writeWindowFiles(tx.Bucket([]byte("replica_commands")), m.slot, rec, stage)
-			})
-			if err != nil {
-				removeStage()
-				return nil, nil, err
-			}
-		}
-		for _, p := range parts {
-			if p.reuse {
-				files = append(files, replica.PinnedFile{Name: p.name, Reuse: true, Size: p.file.Size, SHA256: p.file.SHA256})
-			} else {
-				files = append(files, replica.PinnedFile{Name: p.name, Path: filepath.Join(stage, p.name)})
-			}
-		}
+	if err != nil {
+		removeStage()
+		return nil, nil, err
 	}
 	var paths []string
 	if m.slot == 0 {
+		e.mu.Lock()
+		if e.failed || e.closed {
+			e.mu.Unlock()
+			removeStage()
+			return nil, nil, model.Fail(model.Unavailable)
+		}
 		if e.catalog.File != "" {
 			path := filepath.Join(e.dir, e.catalog.File)
 			files = append(files, replica.PinnedFile{Name: "storage-manifest.json", Path: path})
@@ -169,6 +169,7 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 		for i, s := range e.catalog.Manifest.Segments {
 			path, err := segmentPath(e.dir, s.File)
 			if err != nil {
+				e.mu.Unlock()
 				removeStage()
 				return nil, nil, err
 			}
@@ -187,6 +188,7 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 		for _, path := range paths {
 			e.snap.pinned[path]++
 		}
+		e.mu.Unlock()
 	}
 	var once sync.Once
 	return files, func() {
@@ -210,6 +212,59 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 			}
 		})
 	}, nil
+}
+
+// stageWindows names the window files of a cut, and writes those the selected snapshot does not hold into a
+// staging directory (returned even on an error, for the caller to remove). A window the slot's cache derived and the
+// previous snapshot holds an earlier state of (prior) is written from that file and the commands added since; any other
+// is derived whole. It holds cutMu shared and no engine lock.
+func (m *slotMachine) stageWindows(cut *cutTable, reusable func(string, uint64, model.Hash) bool, prior func(uint64) (*os.File, windowFile, bool)) (files []replica.PinnedFile, stage string, err error) {
+	e := m.engine
+	e.cutMu.RLock()
+	defer e.cutMu.RUnlock()
+	for _, rec := range cut.windows {
+		type part struct {
+			name  string
+			file  windowFile
+			reuse bool
+		}
+		parts := []part{{name: winName(rec.N), file: rec.File}, {name: evName(rec.N), file: rec.Ev}}
+		fresh := false
+		for i := range parts {
+			parts[i].reuse = reusable(parts[i].name, parts[i].file.Size, parts[i].file.SHA256)
+			fresh = fresh || !parts[i].reuse
+		}
+		if fresh {
+			if stage == "" {
+				parent := filepath.Join(e.dir, "snapshot-stage")
+				if err = os.MkdirAll(parent, 0700); err != nil {
+					return nil, stage, err
+				}
+				if stage, err = os.MkdirTemp(parent, fmt.Sprintf("cut-%d-", m.slot)); err != nil {
+					return nil, stage, err
+				}
+			}
+			// The commands are read through short read transactions, the payload log outside them (fetchedCommands).
+			src := e.fetchedCommands(m.slot)
+			err = func() error {
+				if done, err := e.writeWindowFilesFromPrior(src, m.slot, rec, stage, prior); done || err != nil {
+					return err
+				}
+				return writeWindowFiles(src, rec, stage)
+			}()
+			if err != nil {
+				return nil, stage, err
+			}
+		}
+		for _, p := range parts {
+			if p.reuse {
+				files = append(files, replica.PinnedFile{Name: p.name, Reuse: true, Size: p.file.Size, SHA256: p.file.SHA256})
+			} else {
+				files = append(files, replica.PinnedFile{Name: p.name, Path: filepath.Join(stage, p.name)})
+			}
+		}
+	}
+	return files, stage, nil
 }
 
 // retireFileLocked removes a replaced segment unless a snapshot copy is reading
@@ -459,6 +514,19 @@ type WindowEvidence struct {
 	Charge   model.Hash `json:"charge"`
 	Identity model.Hash `json:"identity"`
 	Detail   bool       `json:"detail,omitempty"`
+	// Part and Parts state the parts of a window control settled in parts (Settlement.Windows holds it as an
+	// incomplete record): the commands of a part and, for every part that carries batches, its batches and
+	// charge digest as the data holds them. Control's settled parts must be among them, and the rows its cut
+	// holds for the window the others.
+	Part  uint64               `json:"part,omitempty,string"`
+	Parts []WindowPartEvidence `json:"parts,omitempty"`
+}
+
+// WindowPartEvidence is one part of a window as WindowEvidence states it.
+type WindowPartEvidence struct {
+	J       uint32     `json:"j"`
+	Batches uint64     `json:"batches,string"`
+	Charge  model.Hash `json:"charge"`
 }
 
 // QuotaEvidence is the reservation consumption/release evidence a sealed D carries. Version 1
@@ -910,7 +978,7 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 		if _, known := bundle.Cut.Reservations[c.ID.String()]; known {
 			continue
 		}
-		if _, inSettled := settled.Window(c.Cursor); inSettled {
+		if settled.Covers(c.Cursor) {
 			continue // charged once already, inside the settled charge
 		}
 		touch(c.Org, c.Project, c.Source) // created after C, consumed in D: reconstruct its single charge
@@ -956,7 +1024,7 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 		if c.Redacted {
 			indexed = c.Retained // erased records' series are charged but no longer indexed
 		}
-		if _, inSettled := settled.Window(c.Cursor); inSettled {
+		if settled.Covers(c.Cursor) {
 			if refs[k] == nil {
 				return QuotaReconciliation{}, model.Fail(model.Corrupt)
 			}
@@ -1030,6 +1098,7 @@ func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle
 	if e.repl != nil || bundle.Version != 1 && bundle.Version != 2 || bundle.Identity != e.identity || bundle.Digest != bundle.seal() || len(bundle.Snapshots) != 64 || len(bundle.Replay.Intervals) < 64 || bundle.Replay.Digest != bundle.Replay.seal() || len(bundle.Cut.Processed) != 64 {
 		return model.Fail(model.Invalid)
 	}
+	e.dropWindowCaches() // the restore replays commands under the engine: nothing derived from the commands read before it stands
 	if _, err := ReconcileQuota(bundle); err != nil {
 		return err // missing consumption/release proof blocks readiness
 	}
@@ -1189,7 +1258,8 @@ func (e *Engine) CommitQuotaReconciliation(ctx context.Context, cert QuotaReconc
 	}
 	recomputed := map[string]map[string]bool{}
 	err = e.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("batches")).ForEach(func(k, v []byte) error {
+		return tableForEach(tx, tblBatches, func(k, v []byte) error {
+			v = storedTx(tx, v)
 			parts := strings.Split(string(k), ":")
 			if len(parts) < 2 {
 				return model.Fail(model.Corrupt)

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"hash/crc32"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 
 	bolt "go.etcd.io/bbolt"
@@ -93,6 +95,89 @@ func TestDeletionClusterReadsAJournalsRange(t *testing.T) {
 	all, err := dcJournals(dir)
 	if err != nil || len(all) != 3 || all["raft/data/slot-8/ready.wal"].Snapshot != 9 || all["raft/control/ready.wal"].Last != 3 {
 		t.Fatalf("every journal under the directory, keyed by relative path: %+v %v", all, err)
+	}
+}
+
+// walRawFrame frames body as one ready.wal frame.
+func walRawFrame(body []byte) []byte {
+	table := crc32.MakeTable(crc32.Castagnoli)
+	header := make([]byte, 16)
+	copy(header, "SPR1")
+	binary.BigEndian.PutUint32(header[4:], uint32(len(body)))
+	binary.BigEndian.PutUint32(header[8:], crc32.Checksum(body, table))
+	binary.BigEndian.PutUint32(header[12:], crc32.Checksum(header[:12], table))
+	return append(header, body...)
+}
+
+// walChain writes a snapshot as internal/replica does when it does not fit one record: part records
+// (each a slice of the snapshot's protobuf encoding), then the record that carries snapshot_parts and
+// the entries. It returns the frames of the parts and of the closing record apart.
+func walChain(t *testing.T, snapshot *pb.Snapshot, parts int, declared int, entries ...*pb.Entry) (partFrames, closing []byte) {
+	t.Helper()
+	raw, err := proto.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := (len(raw) + parts - 1) / parts
+	for off := 0; off < len(raw); off += step {
+		body, err := json.Marshal(map[string]any{"group": "00000000-0000-0000-0000-000000000001", "node": "3", "snapshot_part": raw[off:min(off+step, len(raw))]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		partFrames = append(partFrames, walRawFrame(body)...)
+	}
+	var encoded [][]byte
+	for _, e := range entries {
+		b, err := proto.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded = append(encoded, b)
+	}
+	body, err := json.Marshal(map[string]any{"group": "00000000-0000-0000-0000-000000000001", "node": "3", "snapshot_parts": strconv.Itoa(declared), "entries": encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return partFrames, walRawFrame(body)
+}
+
+// A snapshot written as a chain of part records is joined like the replica joins it; a chain whose last
+// record never reached the disk is ignored; a missing, extra or damaged part is an error.
+func TestDeletionClusterReadsAChainedJournal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "raft/ready.wal")
+	snap := &pb.Snapshot{Data: bytes.Repeat([]byte("state"), 40), Metadata: &pb.SnapshotMetadata{Index: new(uint64(9)), Term: new(uint64(1)), ConfState: &pb.ConfState{Voters: []uint64{1, 2, 3}}}}
+	head := walFrame(t, walSnapshot(0))
+	parts, closing := walChain(t, snap, 3, 3, walEntries(10, 11)...)
+	writeDCFile(t, dir, "raft/ready.wal", slices.Concat(head, parts, closing))
+	if got, err := dcReadJournal(path); err != nil || got != (dcJournal{Snapshot: 9, Last: 11}) {
+		t.Fatalf("chain: %+v %v", got, err)
+	}
+
+	// The record that completes the chain never reached the disk (absent, or torn): the chain is ignored.
+	prior := slices.Concat(head, walFrame(t, nil, walEntries(1, 4)...))
+	for name, tail := range map[string][]byte{"absent": nil, "torn": closing[:len(closing)-5]} {
+		writeDCFile(t, dir, "raft/ready.wal", slices.Concat(prior, parts, tail))
+		if got, err := dcReadJournal(path); err != nil || got != (dcJournal{Snapshot: 0, Last: 4}) {
+			t.Fatalf("unfinished chain, last record %s: %+v %v", name, got, err)
+		}
+	}
+
+	missing, missingEnd := walChain(t, snap, 3, 4)
+	extra, extraEnd := walChain(t, snap, 3, 2)
+	loose := walRawFrame([]byte(`{"group":"00000000-0000-0000-0000-000000000001","node":"3","snapshot_part":"AAAA"}`))
+	fat := walRawFrame([]byte(`{"group":"00000000-0000-0000-0000-000000000001","node":"3","snapshot_part":"AAAA","entries":["AAAA"]}`))
+	for name, bad := range map[string][]byte{
+		"missing part":             slices.Concat(prior, missing, missingEnd),
+		"extra part":               slices.Concat(prior, extra, extraEnd),
+		"part cut off by a record": slices.Concat(prior, loose, walFrame(t, nil, walEntries(5, 5)...)),
+		"chain end without parts":  slices.Concat(prior, closing),
+		"part carrying entries":    slices.Concat(prior, fat),
+	} {
+		writeDCFile(t, dir, "raft/ready.wal", bad)
+		if _, err := dcReadJournal(path); err == nil {
+			t.Errorf("%s accepted", name)
+		}
 	}
 }
 

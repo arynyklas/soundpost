@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
 
@@ -55,5 +56,83 @@ func TestControlStatePatchGateReadsTheControlGroupsOwnMembers(t *testing.T) {
 	}
 	if (&Engine{}).ControlStatePatchReady(slotZero) {
 		t.Fatal("the gate is open on an engine with no replication")
+	}
+}
+
+// A state patch of the ledger layout names the digest of the committed state with the admission ledger
+// folded in (control ledger.go): a voter of the previous release (protocol 5) computes another digest
+// over its own bytes and could not apply it. The gate of that patch therefore waits for protocol 6 on
+// every member, while the gate of the first protocol (5), which control uses only against an empty
+// ledger, stays open for a group whose oldest member is the previous release, and the gates of the
+// older protocols (audit delta 4, bounds 3) open as they did.
+func TestControlStatePatchGateWaitsForTheLedgerProtocol(t *testing.T) {
+	if statePatchProtocol != 8 || legacyStatePatchProtocol != 5 || declaredProtocol != 8 {
+		t.Fatalf("state patch protocol %d, first protocol %d, declared %d: the ledger layout with the grouping issues and the command log as records is protocol 8, the previous release declares 5", statePatchProtocol, legacyStatePatchProtocol, declaredProtocol)
+	}
+	f := newWithdrawFixtureUndeclared(t) // the voters declare below (the declared fixture of 10.35#12 has every voter at protocol 8 already)
+	ctx := context.Background()
+	for _, node := range []uint64{1, 2} {
+		f.v.leadSlotZero(t, node)
+		if err := f.v.engines[node].declareErasure(ctx); err != nil {
+			t.Fatalf("node %d declare: %v", node, err)
+		}
+	}
+	// Node 3 is the previous release: it declares the protocol it speaks, 5, in the shape it proposes.
+	f.v.leadSlotZero(t, 3)
+	e3 := f.v.engines[3]
+	id, identity, _ := e3.selfMember()
+	if err := e3.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
+		return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(id), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(5), Cursor: cursor}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	slotZero := f.v.engines[1].repl.groups[eraseAckSlot].Status().Members.Nodes
+	for node := uint64(1); node <= 3; node++ {
+		e := f.v.engines[node]
+		if !eventually(30*time.Second, e.ControlAuditDeltaReady) {
+			t.Fatalf("node %d: the audit delta gate is held back by a member that declared protocol 5", node)
+		}
+		if e.ControlStatePatchReady(slotZero) {
+			t.Fatalf("node %d: the state patch gate is open while node 3 declared only protocol 5", node)
+		}
+		if !e.ControlLegacyStatePatchReady(slotZero) {
+			t.Fatalf("node %d: the gate of the first patch protocol is closed although every member declared 5 or more", node)
+		}
+	}
+	// Node 3 is a build of the ledger layout that kept the job and issue books in the blob (protocol 6): the
+	// digest a patch names covers a blob that holds them, so the gate stays closed for it.
+	if err := e3.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
+		return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(id), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(6), Cursor: cursor}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for node := uint64(1); node <= 3; node++ {
+		e := f.v.engines[node]
+		if e.ControlStatePatchReady(slotZero) || !e.ControlLegacyStatePatchReady(slotZero) {
+			t.Fatalf("node %d: the gate of the books-in-the-ledger protocol is open while node 3 declared protocol 6", node)
+		}
+	}
+	// Node 3 is the build before D85 (protocol 7): it holds the grouping issues and the command log in its blob
+	// and has no record tables for them, so a patch that addresses those records stays held back.
+	if err := e3.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
+		return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(id), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(7), Cursor: cursor}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for node := uint64(1); node <= 3; node++ {
+		e := f.v.engines[node]
+		if e.ControlStatePatchReady(slotZero) || !e.ControlLegacyStatePatchReady(slotZero) {
+			t.Fatalf("node %d: the gate of the records protocol is open while node 3 declared protocol 7", node)
+		}
+	}
+	// Node 3 is upgraded and declares: the gate opens on every member.
+	if err := e3.declareErasure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for node := uint64(1); node <= 3; node++ {
+		e := f.v.engines[node]
+		if !eventually(30*time.Second, func() bool { return e.ControlStatePatchReady(slotZero) && e.ControlLegacyStatePatchReady(slotZero) }) {
+			t.Fatalf("node %d: a gate stays closed after every member declared protocol 8", node)
+		}
 	}
 }

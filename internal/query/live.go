@@ -468,7 +468,8 @@ func (s *LiveService) start(ctx context.Context, scope auth.Scope, tk *liveTicke
 	s.goroutines.Add(1)
 	s.mu.Unlock()
 
-	feedReq := storage.SubscribeRequest{Projects: spec.req.Projects, Signal: model.Log}
+	// CatchUp: a feed overrun is answered from durable storage, so every committed line reaches the stream (D97).
+	feedReq := storage.SubscribeRequest{Projects: spec.req.Projects, Signal: model.Log, CatchUp: true, CatchUpLag: s.cfg.CatchUpLag}
 	if spec.req.Source != nil {
 		// A restricted-raw read names its one source; the feed itself is narrowed to
 		// it (the pipeline never sees another source's rows).
@@ -1052,6 +1053,22 @@ func (it *liveIter) watermarks() []model.Cursor {
 	return s.iter.Watermarks()
 }
 
+// lagFeed is implemented by a change iterator that can say how far behind its consumer is.
+type lagFeed interface {
+	Lag() uint64
+}
+
+func (it *liveIter) lag() model.Uint64 {
+	s := it.s
+	s.mu.Lock()
+	up := s.terminal == nil && !s.dead && s.feed.Err() == nil
+	s.mu.Unlock()
+	if l, ok := s.iter.(lagFeed); ok && up {
+		return model.Uint64(l.Lag())
+	}
+	return 0
+}
+
 // Next returns the next event of this attachment. Every event is released only
 // after this attachment's scope and the delete generation were revalidated; a
 // failure yields one terminal revoke/error event and then io.EOF. A consumer
@@ -1077,7 +1094,7 @@ func (it *liveIter) Next(ctx context.Context) (LiveEvent, error) {
 				return it.terminate(err)
 			}
 			it.opened = true
-			return LiveEvent{Type: LiveOpen, StreamID: s.id, Watermarks: it.watermarks()}, nil
+			return LiveEvent{Type: LiveOpen, StreamID: s.id, Watermarks: it.watermarks(), Lag: it.lag()}, nil
 		}
 		s.mu.Lock()
 		pk := s.pickLocked(it, s.svc.now())
@@ -1121,7 +1138,7 @@ func (it *liveIter) Next(ctx context.Context) (LiveEvent, error) {
 				}
 				return it.terminate(err)
 			}
-			return LiveEvent{Type: LiveHeartbeat, StreamID: s.id, Watermarks: it.watermarks()}, nil
+			return LiveEvent{Type: LiveHeartbeat, StreamID: s.id, Watermarks: it.watermarks(), Lag: it.lag()}, nil
 		}
 	}
 }

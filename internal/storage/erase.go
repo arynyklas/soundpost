@@ -76,7 +76,14 @@ type eraseSelector struct {
 	operations []model.ID
 	record     func(org, project model.ID, r model.Record, receipt model.Receipt) (bool, model.UnixNano)
 	blob       func(m model.BlobManifest) (bool, model.UnixNano)
+	// skip, when set, rules a stored batch command out from its bytes alone (true: nothing in it can match), which spares its decode.
+	// It must never say true for a command record would select: a false answer only costs the decode.
+	skip func(raw []byte) bool
 }
+
+// eraseScanChunk is how many stored commands one read transaction of the candidate scan covers (see eraseCandidates).
+var eraseScanChunk = 512
+
 type eraseBatchJob struct {
 	slot  uint16
 	index uint64
@@ -204,6 +211,79 @@ func (e *Engine) erase(ctx context.Context, sel eraseSelector, guard EraseGuard)
 	return report, nil
 }
 
+// scanChunks walks bucket in read transactions of at most eraseScanChunk keys each (and eraseScanBytes of values), every one resuming after
+// the last key of the one before. A read transaction blocks the remap of the apply database, and a write that has to grow the mapping
+// waits for every open reader and holds each new transaction behind it: one transaction over the whole history stopped every
+// acknowledgement for as long as the scan lasted (the journal-expiry plan at the single-host load, L2w20Admission22: 40 s at the 15th
+// minute, 80 s at the 30th). The view of the bucket is therefore not one snapshot: a command appended meanwhile is seen or not, and
+// one a redaction rewrites is seen before or after it, which the callers accept (the write phase of an erasure re-verifies each command
+// by digest; a plan only lists). The chunk is copied and fn runs after its transaction ended: a callback that follows a payload
+// reference reads the disk, which no read transaction waits for (command_source.go). fn gets keys and values valid only during the call.
+func (e *Engine) scanChunks(ctx context.Context, bucket string, fn func(k, v []byte) error) error {
+	return e.scanChunksRange(ctx, bucket, nil, nil, fn)
+}
+
+// eraseScanBytes bounds the values one chunk of scanChunksRange copies.
+const eraseScanBytes = 4 << 20
+
+// scanChunksRange is scanChunks over the keys from from (the first key when nil) up to, not including, to (the last key when nil).
+func (e *Engine) scanChunksRange(ctx context.Context, bucket string, from, to []byte, fn func(k, v []byte) error) error {
+	var after []byte
+	started := false
+	type entry struct{ k0, k1, v1 int }
+	for {
+		if err := ctx.Err(); err != nil {
+			return model.Fail(model.Cancelled)
+		}
+		more := false
+		var buf []byte
+		var chunk []entry
+		err := e.db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(bucket))
+			if b == nil {
+				return model.Fail(model.Corrupt)
+			}
+			c := b.Cursor()
+			var k, v []byte
+			if from != nil {
+				k, v = c.Seek(from)
+			} else {
+				k, v = c.First()
+			}
+			if started {
+				if k, v = c.Seek(after); k != nil && bytes.Equal(k, after) {
+					k, v = c.Next()
+				}
+			}
+			for ; k != nil && (to == nil || bytes.Compare(k, to) < 0); k, v = c.Next() {
+				if len(chunk) == eraseScanChunk || len(buf) >= eraseScanBytes {
+					more = true
+					return nil
+				}
+				k0 := len(buf)
+				buf = append(buf, k...)
+				k1 := len(buf)
+				buf = append(buf, v...)
+				chunk = append(chunk, entry{k0, k1, len(buf)})
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for _, en := range chunk {
+			k, v := buf[en.k0:en.k1:en.k1], buf[en.k1:en.v1:en.v1]
+			after, started = append(after[:0], k...), true
+			if err := fn(k, v); err != nil {
+				return err
+			}
+		}
+		if !more {
+			return nil
+		}
+	}
+}
+
 // eraseCandidates reads (without e.mu: bolt reads are snapshots) which commands and artifact
 // roots match, then asks the guard outside any lock. The write phase re-verifies each command
 // by digest, so a change between the two phases can only skip work, never erase the wrong bytes.
@@ -215,41 +295,37 @@ func (e *Engine) eraseCandidates(ctx context.Context, sel eraseSelector, guard E
 	var pend []pending
 	var blobCands []EraseCandidate
 	var blobJobs []eraseBlobJob
-	err := e.db.View(func(tx *bolt.Tx) error {
-		commands := tx.Bucket([]byte("replica_commands"))
-		if commands == nil {
-			return model.Fail(model.Corrupt)
+	err := e.scanChunks(ctx, "replica_commands", func(k, raw []byte) error {
+		if isPayloadRef(raw) {
+			if raw = storedFromDBCold(e.db.DB, raw); raw == nil {
+				return model.Fail(model.Corrupt) // a candidate that cannot be read is never skipped
+			}
 		}
-		if err := commands.ForEach(func(k, raw []byte) error {
-			if len(k) != 10 || !bytes.HasPrefix(raw, batchCommandPrefix) {
-				return nil
-			}
-			if err := ctx.Err(); err != nil {
-				return model.Fail(model.Cancelled)
-			}
-			var entry walEntry
-			if err := json.Unmarshal(raw, &entry); err != nil || entry.Batch == nil || entry.Receipt == nil {
-				return model.Fail(model.Corrupt)
-			}
-			p := pending{job: eraseBatchJob{slot: binary.BigEndian.Uint16(k[:2]), index: binary.BigEndian.Uint64(k[2:]), sum: model.HashCanonical(raw), erase: map[model.ID]bool{}}}
-			for i := range entry.Batch.Records {
-				r := entry.Batch.Records[i]
-				if match, deadline := sel.record(entry.Batch.Org, entry.Batch.Project, r, *entry.Receipt); match {
-					p.cands = append(p.cands, EraseCandidate{Org: entry.Batch.Org, Project: entry.Batch.Project, Slot: p.job.slot, Cursor: entry.Receipt.Cursor, Kind: r.Kind, Deadline: deadline, Record: &r})
-				}
-			}
-			if len(p.cands) > 0 {
-				pend = append(pend, p)
-			}
+		if len(k) != 10 || !bytes.HasPrefix(raw, batchCommandPrefix) {
 			return nil
-		}); err != nil {
-			return err
 		}
-		roots := tx.Bucket([]byte("artifact_roots"))
-		if roots == nil {
+		if sel.skip != nil && sel.skip(raw) {
+			return nil
+		}
+		var entry walEntry
+		if err := json.Unmarshal(raw, &entry); err != nil || entry.Batch == nil || entry.Receipt == nil {
 			return model.Fail(model.Corrupt)
 		}
-		return roots.ForEach(func(k, raw []byte) error {
+		slot := binary.BigEndian.Uint16(k[:2])
+		var cands []EraseCandidate
+		for i := range entry.Batch.Records {
+			r := entry.Batch.Records[i]
+			if match, deadline := sel.record(entry.Batch.Org, entry.Batch.Project, r, *entry.Receipt); match {
+				cands = append(cands, EraseCandidate{Org: entry.Batch.Org, Project: entry.Batch.Project, Slot: slot, Cursor: entry.Receipt.Cursor, Kind: r.Kind, Deadline: deadline, Record: &r})
+			}
+		}
+		if len(cands) > 0 {
+			pend = append(pend, pending{job: eraseBatchJob{slot: slot, index: binary.BigEndian.Uint64(k[2:]), sum: model.HashCanonical(raw), erase: map[model.ID]bool{}}, cands: cands})
+		}
+		return nil
+	})
+	if err == nil {
+		err = e.scanChunks(ctx, "artifact_roots", func(k, raw []byte) error {
 			var r model.BlobReceipt
 			if err := model.StrictJSON(raw, &r); err != nil {
 				return model.Fail(model.Corrupt)
@@ -263,7 +339,7 @@ func (e *Engine) eraseCandidates(ctx context.Context, sel eraseSelector, guard E
 			blobJobs = append(blobJobs, eraseBlobJob{key: bytes.Clone(k), raw: bytes.Clone(raw), receipt: r})
 			return nil
 		})
-	})
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -308,6 +384,10 @@ func (e *Engine) eraseBatch(ctx context.Context, guard EraseGuard, job eraseBatc
 			return 0, 0, 0, err
 		}
 	}
+	e.cutMu.Lock() // a snapshot cut derives its windows from the stored commands without mu: not while one is rewritten
+	defer e.cutMu.Unlock()
+	defer e.dropWindowCaches() // after the rewrite, still under cutMu: a cache built while it ran is never the current epoch's
+	e.dropWindowCaches()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -348,7 +428,8 @@ func (e *Engine) eraseBatch(ctx context.Context, guard EraseGuard, job eraseBatc
 // the whole transaction back, which is what a crash at that point does.
 func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (records, pages uint64, err error) {
 	commands := tx.Bucket([]byte("replica_commands"))
-	raw := commands.Get(commandKey(job.slot, job.index))
+	commandRef := commands.Get(commandKey(job.slot, job.index))
+	raw := storedValue(commands, commandRef)
 	if raw == nil || model.HashCanonical(raw) != job.sum {
 		return 0, 0, nil // already redacted or replaced since the candidate scan
 	}
@@ -358,7 +439,11 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 	}
 	b, receipt := *entry.Batch, *entry.Receipt
 	key := batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID)
-	stored := tx.Bucket([]byte("batches")).Get(key)
+	storedRef, err := tableGet(tx, tblBatches, key)
+	if err != nil {
+		return 0, 0, err
+	}
+	stored := storedTx(tx, storedRef)
 	var rows []model.Record
 	if stored == nil || json.Unmarshal(stored, &rows) != nil {
 		return 0, 0, model.Fail(model.Corrupt)
@@ -388,7 +473,14 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = tx.Bucket([]byte("batches")).Put(key, raw2); err != nil {
+	rs, err := rowsOf(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err = rs.Set(tblBatches, key, raw2); err != nil {
+		return 0, 0, err
+	}
+	if err = owePayloadScrub(tx, storedRef); err != nil { // the records the row named are zeroed in the log
 		return 0, 0, err
 	}
 	if err = e.indexAppliedRows(tx, b, receipt, keptRows); err != nil {
@@ -402,6 +494,9 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 		return 0, 0, err
 	}
 	if err = commands.Put(commandKey(job.slot, job.index), redacted); err != nil {
+		return 0, 0, err
+	}
+	if err = owePayloadScrub(tx, commandRef); err != nil {
 		return 0, 0, err
 	}
 	if err = dropWindowTx(tx, job.slot, job.index); err != nil { // the sealed-window record no longer describes this command
@@ -430,8 +525,13 @@ func eraseDerived(tx *bolt.Tx, b model.NormalizedBatch, r model.Record) error {
 		if err != nil {
 			return model.Fail(model.Corrupt)
 		}
-		if bucket := tx.Bucket([]byte("metrics")); bytes.Equal(bucket.Get(k), v) {
-			return bucket.Delete(k)
+		rs, err := rowsOf(tx)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(rs.Get(tblMetrics, k), v) {
+			_, err = rs.Delete(tblMetrics, k)
+			return err
 		}
 	case model.JobAttempt:
 		k := jobKey(b, r.Payload.Job)
@@ -531,13 +631,22 @@ func (e *Engine) deleteBatchIndex(tx *bolt.Tx, b model.NormalizedBatch, receipt 
 	if err = postings.finish(); err != nil {
 		return 0, err
 	}
-	pages := tx.Bucket([]byte("scan_pages"))
+	rs, err := rowsOf(tx)
+	if err != nil {
+		return 0, err
+	}
 	for _, id := range pageIDs {
-		if pages.Get(id[:]) == nil {
-			return 0, model.Fail(model.Corrupt)
+		if old := rs.Get(tblPages, id[:]); old != nil {
+			if ref, perr := parsePageRef(old); perr == nil {
+				if err = owePayloadScrub(tx, ref.Log); err != nil { // the hot page of the erased records
+					return 0, err
+				}
+			}
 		}
-		if err = pages.Delete(id[:]); err != nil {
+		if found, err := rs.Delete(tblPages, id[:]); err != nil {
 			return 0, err
+		} else if !found {
+			return 0, model.Fail(model.Corrupt)
 		}
 	}
 	return uint64(len(pageIDs)), nil
@@ -580,6 +689,10 @@ func (e *Engine) eraseBlob(ctx context.Context, guard EraseGuard, job eraseBlobJ
 	if err = syncGuard(ctx, guard, job.cand); err != nil {
 		return false, 0, err
 	}
+	e.cutMu.Lock()
+	defer e.cutMu.Unlock()
+	defer e.dropWindowCaches()
+	e.dropWindowCaches()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -622,7 +735,8 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 			return false, model.Fail(model.Corrupt)
 		}
 		ck := commandKey(slot, uint64(f.Cursor.Index))
-		raw := commands.Get(ck)
+		commandRef := commands.Get(ck)
+		raw := storedValue(commands, commandRef)
 		var entry walEntry
 		if raw == nil || json.Unmarshal(raw, &entry) != nil {
 			return false, model.Fail(model.Corrupt)
@@ -637,6 +751,9 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 				return false, err
 			}
 			if err = commands.Put(ck, redacted); err != nil {
+				return false, err
+			}
+			if err = owePayloadScrub(tx, commandRef); err != nil {
 				return false, err
 			}
 			if err = dropWindowTx(tx, slot, uint64(f.Cursor.Index)); err != nil {
@@ -676,7 +793,7 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 func (e *Engine) staleSegmentsLocked() (uint64, error) {
 	home := map[model.ID]string{} // page -> segment file it is currently read from ("" = hot)
 	err := e.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("scan_pages")).ForEach(func(k, v []byte) error {
+		return tableForEach(tx, tblPages, func(k, v []byte) error {
 			var id model.ID
 			if len(k) != len(id) {
 				return model.Fail(model.Corrupt)
@@ -782,22 +899,25 @@ func (e *Engine) applyBatchRedactedTx(tx *bolt.Tx, slot uint16, index uint64, en
 		return model.Fail(model.Corrupt)
 	}
 	key := batchKey(b.Org, b.Project, b.Source, b.Producer, slot, b.ID)
-	if tx.Bucket([]byte("receipts")).Get(key) != nil {
+	rows, err := rowsOf(tx)
+	if err != nil {
+		return err
+	}
+	if rows.Get(tblReceipts, key) != nil {
 		return model.Fail(model.Corrupt)
 	}
 	records := make([]model.Record, 0, len(b.Records))
 	for _, record := range b.Records {
 		if record.Kind == model.Metric {
 			k := metricKey(b, record)
-			bucket := tx.Bucket([]byte("metrics"))
-			if bucket.Get(k) != nil {
+			if rows.Get(tblMetrics, k) != nil {
 				continue
 			}
 			v, err := model.CanonicalJSON(record.Payload.Metric)
 			if err != nil {
 				return err
 			}
-			if err = bucket.Put(k, v); err != nil {
+			if err = rows.Insert(tblMetrics, k, v); err != nil {
 				return err
 			}
 		}
@@ -812,7 +932,7 @@ func (e *Engine) applyBatchRedactedTx(tx *bolt.Tx, slot uint16, index uint64, en
 	if err != nil {
 		return err
 	}
-	if err = tx.Bucket([]byte("batches")).Put(key, raw); err != nil {
+	if err = rows.Insert(tblBatches, key, raw); err != nil {
 		return err
 	}
 	if err = e.indexAppliedRows(tx, b, r, records); err != nil {
@@ -821,7 +941,7 @@ func (e *Engine) applyBatchRedactedTx(tx *bolt.Tx, slot uint16, index uint64, en
 	if raw, err = json.Marshal(r); err != nil {
 		return err
 	}
-	if err = tx.Bucket([]byte("receipts")).Put(key, raw); err != nil {
+	if err = rows.Insert(tblReceipts, key, raw); err != nil {
 		return err
 	}
 	consumed := b.Reservation
@@ -830,7 +950,7 @@ func (e *Engine) applyBatchRedactedTx(tx *bolt.Tx, slot uint16, index uint64, en
 	if raw, err = json.Marshal(consumed); err != nil {
 		return err
 	}
-	return tx.Bucket([]byte("consumed")).Put([]byte(consumed.ID.String()), raw)
+	return putConsumed(rows, consumed.ID, raw)
 }
 
 // redactionOf returns the redaction of a stored command, or nil when it is an ordinary command.

@@ -655,8 +655,8 @@ func eachControlVoterRedactsItsOwnCopy(t *testing.T, patches bool) {
 				t.Fatalf("voter %d holds %s after its own pass: %v", id, canary, hits)
 			}
 		}
-		if hits := v.fx[id].raftHits(kept); !contains(hits, "raft-control/ready.wal") {
-			t.Fatalf("voter %d lost a payload no deletion covers: %v", id, hits)
+		if !v.fx[id].stateHolds(kept) { // the journal no longer keeps the state (compact snapshot, D86): the state does
+			t.Fatalf("voter %d lost a payload no deletion covers", id)
 		}
 	}
 	v.await(1, v.mustRevision(2))

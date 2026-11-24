@@ -47,7 +47,7 @@ type StateDeleteGenerations interface {
 
 func (g sourceLifecycle) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
 	var out uint64
-	err := g.service.store.View(ctx, func(st model.ControlState) (err error) {
+	err := g.service.store.View(model.WithoutBooks(ctx), func(st model.ControlState) (err error) {
 		out, _, err = g.DeleteGenerationFromState(st, org, projects)
 		return err
 	})
@@ -462,7 +462,7 @@ func (s *Service) visibleSourceViews(ctx context.Context, scope Scope) ([]source
 		return nil, err
 	}
 	var out []sourceView
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
 		}

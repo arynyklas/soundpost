@@ -502,7 +502,7 @@ func scanJournalEntries(in io.Reader, visit func(*pb.Entry) error) error {
 			return ErrInvalid
 		}
 		length := binary.BigEndian.Uint32(header[4:8])
-		if length == 0 || length > maxReadyBytes {
+		if length == 0 || uint64(length) > uint64(maxReady()) {
 			return ErrInvalid
 		}
 		raw := make([]byte, length)

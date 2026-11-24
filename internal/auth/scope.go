@@ -114,7 +114,7 @@ func (s *Service) Authorize(ctx context.Context, c Credential, org model.ID, pro
 	}
 	checkedAt := s.now()
 	out := Scope{service: s, credential: c, org: org, projects: append([]model.ID(nil), projects...), action: action, lease: &scopeLease{}}
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, c); err != nil {
 			return err
 		}
@@ -282,7 +282,7 @@ func (s *Service) revalidate(ctx context.Context, scope Scope, within func(model
 		// scope is still authorized: it reads the shared decode of the committed state.
 		return s.viewShared(ctx, check)
 	}
-	return s.store.View(ctx, func(st model.ControlState) error {
+	return s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := check(model.ReadOnlyOf(&st)); err != nil {
 			return err
 		}

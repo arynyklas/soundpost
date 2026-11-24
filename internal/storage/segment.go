@@ -17,6 +17,12 @@ func (e *Engine) readPageColumns(ref pageRef, resources, payload bool) (Page, er
 	var data []byte
 	if ref.Segment == "" {
 		data = ref.Hot
+		if len(data) == 0 && isPayloadRef(ref.Log) {
+			var err error
+			if data, err = e.payload.read(ref.Log); err != nil {
+				return Page{}, err
+			}
+		}
 		if len(data) == 0 {
 			return Page{}, model.Fail(model.Corrupt)
 		}
@@ -155,7 +161,7 @@ func (e *Engine) writeSegment(ctx context.Context, refs []pageRef) ([]pageRef, S
 		ref.Length = uint32(len(b))
 		ref.Hash = model.HashCanonical(b)
 		ref.Segment = name
-		ref.Hot = nil
+		ref.Hot, ref.Log = nil, nil
 		out = append(out, ref)
 		manifest.Pages = append(manifest.Pages, ref.ID)
 		offset += int64(len(b))
@@ -193,15 +199,29 @@ func (e *Engine) writeSegment(ctx context.Context, refs []pageRef) ([]pageRef, S
 	ok = true
 	return out, manifest, nil
 }
-func hashFile(path string) (model.Hash, error) {
+func hashFile(path string) (model.Hash, error) { return hashFileCtx(context.Background(), path) }
+
+// hashFileBlock is how much of a segment hashFileCtx reads between two looks at its context.
+const hashFileBlock = 1 << 20
+
+// hashFileCtx is the SHA-256 of the file at path; a context that is done stops it at the next block (a segment is up to hundreds of
+// megabytes, read from a cold disk by the background pass that Close waits for).
+func hashFileCtx(ctx context.Context, path string) (model.Hash, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return model.Hash{}, err
 	}
 	defer f.Close()
 	h := newFileHash()
-	if _, err = io.Copy(h, f); err != nil {
-		return model.Hash{}, err
+	for {
+		if ctx.Err() != nil {
+			return model.Hash{}, model.Fail(model.Cancelled)
+		}
+		if _, err = io.CopyN(h, f, hashFileBlock); err == io.EOF {
+			break
+		} else if err != nil {
+			return model.Hash{}, err
+		}
 	}
 	var out model.Hash
 	copy(out[:], h.Sum(nil))

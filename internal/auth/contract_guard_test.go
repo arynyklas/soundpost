@@ -110,17 +110,21 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, g := range groups {
-		led := false
-		for range 600 {
-			if g.Status().Leader == 1 {
-				led = true
+	// An election that is still settling (a loaded run) gets ten seconds, for all the groups together: a group another node leads
+	// never becomes this node's by waiting, and ten seconds for each of the 65 groups took 305 s of a run on a loaded host (the
+	// stack of the stuck run was this wait's Sleep, L2w20Admission32/mem1.log). The guard under test is D70's (a contracted
+	// installation admits only a member that reads the contracted layout; D72: a fresh installation is contracted from its first
+	// write): no rule of D70/D72 changes here, only how long the test waits for node 1 to lead the groups it asks.
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		led := true
+		for _, g := range groups {
+			if g.Status().Leader != 1 {
+				led = false
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
-		if !led {
-			t.Fatalf("group %v: node 1 did not lead within 60s (a loaded host elects slowly); the steps below need every group led here", g.Status().Group)
+		if led {
+			break
 		}
 	}
 	cluster.App(2).LimitLiveLayoutForTest(true)
@@ -150,11 +154,12 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 	// A learner nothing runs for is added in every group this node leads (the red of the membership-replace drill:
 	// every new installation is contracted from its first write, so every add-learner before the start was refused),
 	// and promoting it is refused while nothing runs for it.
-	added := 0
+	added, addedIn := 0, map[int]bool{}
 	for i, o := range appcore.StepMembership(ctx, groups, layout, appcore.MembershipChange{Op: appcore.MembershipAddLearner, Member: absent}) {
 		switch o.Result {
 		case appcore.OutcomeApplied:
 			added++
+			addedIn[i] = true
 		case appcore.OutcomeNotLeader:
 		default:
 			t.Fatalf("group %d: %q, want the learner nothing runs for added", i, o.Result)
@@ -163,17 +168,32 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 	if added == 0 {
 		t.Fatal("no group added the learner nothing runs for yet")
 	}
+	refusedPromotion := 0
 	for i, o := range appcore.StepMembership(ctx, groups, layout, appcore.MembershipChange{Op: appcore.MembershipReplace, Remove: 3, Promote: 9}) {
 		switch o.Result {
 		case appcore.OutcomeLayoutIncompatible:
+			refusedPromotion++
 			if o.Detail != "layout_incompatible:node-9" {
 				t.Fatalf("group %d: promotion refusal detail %q does not name the member", i, o.Detail)
 			}
 		case appcore.OutcomeNotLeader:
+		case appcore.OutcomeRejected:
+			// A group this node did not lead when the learner was added (the loaded run had not made it leader of every group
+			// yet: answered not-leader above) has no learner 9 here, and the plan of the step is checked before the leadership
+			// (appcore stepGroup, unchanged by this release): "rejected" is its answer, not a verdict on the D70 guard. A group the
+			// learner was added in must refuse it naming it, and at least one group must (refusedPromotion): the guard is exercised
+			// wherever the precondition holds, and the covered groups are logged below.
+			if addedIn[i] {
+				t.Fatalf("group %d: promotion of a learner nothing runs for: %q, want a refusal naming it", i, o.Result)
+			}
 		default:
 			t.Fatalf("group %d: promotion of a learner nothing runs for: %q, want a refusal naming it", i, o.Result)
 		}
 	}
+	if refusedPromotion == 0 {
+		t.Fatal("no group refused the promotion of the learner nothing runs for")
+	}
+	t.Logf("the learner was added in %d of %d groups (the ones this node led), the promotion was refused naming it in %d", added, len(groups), refusedPromotion)
 	for i, s := range leader.ReplicationStatus() {
 		for _, m := range s.Members.Nodes {
 			if m.ID != 9 && m.Learner {

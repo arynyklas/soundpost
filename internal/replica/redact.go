@@ -675,7 +675,7 @@ func (g *Group) stageRedactedJournal(in io.Reader, targets map[model.ID]*redactT
 			return fail(ErrInvalid)
 		}
 		length := binary.BigEndian.Uint32(header[4:8])
-		if length == 0 || length > maxReadyBytes {
+		if length == 0 || uint64(length) > uint64(maxReady()) {
 			return fail(ErrInvalid)
 		}
 		raw := make([]byte, length)

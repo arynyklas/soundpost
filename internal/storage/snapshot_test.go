@@ -115,8 +115,8 @@ func storedBatch(t *testing.T, e *Engine, b model.NormalizedBatch) (batch, recei
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.db.View(func(tx *bolt.Tx) error {
-		batch = bytes.Clone(tx.Bucket([]byte("batches")).Get(key))
-		receipt = bytes.Clone(tx.Bucket([]byte("receipts")).Get(key))
+		batch = bytes.Clone(logicalGet(tx, "batches", key))
+		receipt = bytes.Clone(logicalGet(tx, "receipts", key))
 		return nil
 	}); err != nil {
 		t.Fatal(err)

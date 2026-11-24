@@ -1074,7 +1074,17 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 		return Result{}, model.Fail(model.Unsupported)
 	}
 	var out Result
-	err := s.updateAs(ctx, writerTransactIssues, func(st *State) error {
+	// A lifecycle commit writes the project's issue book, the issues it changed and the command's record:
+	// those are committed as the records they are, without the whole state (sparse.go). The grouping
+	// migration, a project a finished deletion covers and anything the plan cannot judge go through the
+	// whole-state funnel.
+	handled, err := s.sparseUpdate(ctx, func(core *State, l *ledgerTx) ([]patchOp, error) {
+		return planIssueCommit(scope, cmd, operation, handler, core, l, &out)
+	})
+	if handled {
+		return out, err
+	}
+	err = s.updateAs(withCommandKey(retryLostProposals(ctx), cmd.CommandID.String()), writerTransactIssues, func(st *State) error {
 		binding := scope.PrincipalID().String() + ":" + scope.OrgID().String() + ":" + cmd.Kind
 		if v, ok := st.Commands[cmd.CommandID.String()]; ok {
 			replay := issueReplayable
@@ -1100,6 +1110,113 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 		return nil
 	})
 	return out, err
+}
+
+// planIssueCommit is the plan of TransactIssues for a lifecycle commit or acknowledgement: the handler runs
+// on a state that holds the project's issue book and issues and nothing the command writes besides, and what
+// it left is written as records: the book, the issues that changed, the audit rows it appended and the
+// command's own record.
+func planIssueCommit(scope auth.Scope, cmd Command, operation string, handler Handler, core *State, l *ledgerTx, out *Result) ([]patchOp, error) {
+	var head struct {
+		Project model.ID `json:"project"`
+	}
+	if operation == issueOpMigrate || json.Unmarshal(cmd.Payload, &head) != nil {
+		return nil, errSparseFallback
+	}
+	org := scope.OrgID()
+	if lateErasureMayApply(core, org, head.Project) {
+		return nil, errSparseFallback
+	}
+	key := issueBookKey(org, head.Project)
+	before := l.t[tableIssueBooks].Get([]byte(key))
+	ov := *core
+	ov.IssueBooks = map[string]json.RawMessage{}
+	if before != nil {
+		ov.IssueBooks[key] = before
+	}
+	ov.Audits = nil
+	// The project's issues are the records under its key prefix; held keeps the bytes each was read as, to tell
+	// the ones the handler changed.
+	issues, held := map[string]model.GroupingIssue{}, map[string][]byte{}
+	var corrupt bool
+	l.each(tableGroupingIssues, []byte(org.String()+":"+head.Project.String()+":"), func(k, v []byte) bool {
+		var gi model.GroupingIssue
+		if json.Unmarshal(v, &gi) != nil {
+			corrupt = true
+			return false
+		}
+		if gi.Org == org && gi.Project == head.Project {
+			issues[string(k)], held[string(k)] = gi, bytes.Clone(v)
+		}
+		return true
+	})
+	if corrupt {
+		return nil, model.Fail(model.Corrupt)
+	}
+	ov.GroupingIssues = issues
+	binding := scope.PrincipalID().String() + ":" + scope.OrgID().String() + ":" + cmd.Kind
+	id := cmd.CommandID.String()
+	if recorded := l.t[tableCommands].Get([]byte(id)); recorded != nil {
+		var v Result
+		if json.Unmarshal(recorded, &v) != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		ov.Commands = map[string]Result{id: v}
+		ov.CommandOwners = map[string]string{id: string(l.t[tableCommandOwners].Get([]byte(id)))}
+		replay := issueReplayable
+		if err := replay(scope, &ov, cmd, binding); err != nil {
+			return nil, err
+		}
+		*out = v
+		return nil, nil
+	}
+	effect, err := handler(scope, &ov, cmd)
+	if err != nil {
+		return nil, err
+	}
+	*out = Result{AffectedIDs: append([]model.ID(nil), effect.AffectedIDs...), Phase: effect.Phase, Revision: core.Revision + 1, Cursor: model.Cursor{Group: core.Installation, Index: model.Uint64(core.Revision + 1)}}
+	var ops []patchOp
+	if after, ok := ov.IssueBooks[key]; ok && !bytes.Equal(before, after) {
+		ops = append(ops, patchOp{Op: opSet, Path: []string{"IssueBooks", key}, Value: after})
+	} else if !ok && before != nil {
+		return nil, errSparseFallback
+	}
+	for k := range held {
+		if _, ok := issues[k]; !ok {
+			return nil, errSparseFallback
+		}
+	}
+	for k, gi := range issues {
+		raw, err := json.Marshal(gi)
+		if err != nil {
+			return nil, model.Fail(model.Invalid)
+		}
+		if prev, ok := held[k]; ok && bytes.Equal(prev, raw) {
+			continue
+		}
+		ops = append(ops, patchOp{Op: opSet, Path: []string{"GroupingIssues", k}, Value: raw})
+	}
+	result, err := json.Marshal(*out)
+	if err != nil {
+		return nil, model.Fail(model.Invalid)
+	}
+	owner, err := json.Marshal(binding)
+	if err != nil {
+		return nil, model.Fail(model.Invalid)
+	}
+	ops = append(ops, patchOp{Op: opSet, Path: []string{"Commands", id}, Value: result}, patchOp{Op: opSet, Path: []string{"CommandOwners", id}, Value: owner})
+	if len(ov.Audits) != 0 {
+		raw, err := json.Marshal(ov.Audits)
+		if err != nil {
+			return nil, model.Fail(model.Invalid)
+		}
+		if len(core.Audits) == 0 {
+			ops = append(ops, patchOp{Op: opSet, Path: []string{"Audits"}, Value: raw})
+		} else {
+			ops = append(ops, patchOp{Op: opArray, Path: []string{"Audits"}, Value: raw})
+		}
+	}
+	return ops, nil
 }
 
 // issueOperationOf is the operation named by a KindApplyIssueEvidence payload.

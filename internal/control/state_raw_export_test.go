@@ -8,12 +8,14 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// StateBytesForTest is a copy of the encoding of the committed state, as the voter stores it.
+// StateBytesForTest is a copy of the encoding of the committed state, as the voter holds it (a file of
+// layout 2 keeps the revision beside the blob: it is joined).
 func (s *Store) StateBytesForTest() ([]byte, error) {
 	var out []byte
 	err := s.db.View(func(tx *bolt.Tx) error {
-		out = bytes.Clone(tx.Bucket([]byte("control")).Get([]byte("state")))
-		return nil
+		raw, err := stateRaw(tx.Bucket([]byte("control")))
+		out = bytes.Clone(raw)
+		return err
 	})
 	return out, err
 }

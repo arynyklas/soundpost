@@ -50,7 +50,7 @@ func (s *Service) AuthenticateSource(ctx context.Context, raw, origin string, br
 		return SourceCredential{}, e
 	}
 	c := SourceCredential{service: s, digest: d, origin: origin, browser: browser}
-	e = s.store.View(ctx, func(st model.ControlState) error {
+	e = s.viewCore(ctx, func(st model.ControlState) error {
 		id, ok := st.SourceCredentials[d]
 		if !ok {
 			return model.Fail(model.Forbidden)
@@ -125,7 +125,7 @@ func (s *Service) checkSource(st model.ControlState, c SourceCredential, admissi
 }
 func (s *Service) SourceAuthority(ctx context.Context, c SourceCredential, admission bool) (model.SourceAuthority, error) {
 	var out model.SourceAuthority
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.viewCore(ctx, func(st model.ControlState) error {
 		if e := s.checkSource(st, c, admission); e != nil {
 			return e
 		}
@@ -136,7 +136,7 @@ func (s *Service) SourceAuthority(ctx context.Context, c SourceCredential, admis
 }
 func (s *Service) SourceScope(ctx context.Context, c SourceCredential, historical bool) (Scope, error) {
 	var out Scope
-	e := s.store.View(ctx, func(st model.ControlState) error {
+	e := s.viewCore(ctx, func(st model.ControlState) error {
 		if e := s.checkSource(st, c, !historical); e != nil {
 			return e
 		}
@@ -165,7 +165,7 @@ func (scope Scope) RevalidateSource(ctx context.Context, project, source model.I
 	if scope.service == nil {
 		return model.Fail(model.Forbidden)
 	}
-	return scope.service.store.View(ctx, func(st model.ControlState) error { return scope.ValidateSourceState(st, project, source, admission) })
+	return scope.service.viewCore(ctx, func(st model.ControlState) error { return scope.ValidateSourceState(st, project, source, admission) })
 }
 func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboarding) (SourceOnboarded, error) {
 	if c.service != s || c.machine || !c.Fresh() || r.CommandID == (model.ID{}) || r.Source == (model.ID{}) || r.Project == (model.ID{}) || r.Org == (model.ID{}) || int64(r.Expires) <= s.now().UnixNano() || r.Reason == "" || len(r.Reason) > 512 {
@@ -194,7 +194,7 @@ func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboa
 	credentialID := model.NewID()
 	auditID := model.NewID()
 	var sealed string
-	if e = s.store.View(ctx, func(st model.ControlState) error { sealed = st.PolicySigningKey; return nil }); e != nil {
+	if e = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error { sealed = st.PolicySigningKey; return nil }); e != nil {
 		return SourceOnboarded{}, e
 	}
 	if sealed == "" {

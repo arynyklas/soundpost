@@ -3,6 +3,7 @@
 package replica
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -23,8 +24,6 @@ import (
 
 var readyCRC = crc32.MakeTable(crc32.Castagnoli)
 
-const maxReadyBytes = 256 << 20
-
 type readyRecord struct {
 	Group    model.ID `json:"group"`
 	Node     uint64   `json:"node,string"`
@@ -32,6 +31,11 @@ type readyRecord struct {
 	Hard     []byte   `json:"hard,omitempty"`
 	Snapshot []byte   `json:"snapshot,omitempty"`
 	Entries  [][]byte `json:"entries,omitempty"`
+	// SnapshotPart is one slice of a snapshot that does not fit one record, and SnapshotParts, on the record
+	// that completes it, how many part records precede it (ready_parts.go). Neither is ever written for a
+	// snapshot that fits.
+	SnapshotPart  []byte `json:"snapshot_part,omitempty"`
+	SnapshotParts uint64 `json:"snapshot_parts,string,omitempty"`
 }
 type readyWAL struct {
 	file       *os.File
@@ -72,6 +76,8 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 	memory := raft.NewMemoryStorage()
 	offset := int64(0)
 	records := 0
+	var pending [][]byte // the part records of a snapshot whose last record has not been read yet
+	pendingStart := int64(0)
 	for {
 		var header [16]byte
 		n, e := io.ReadFull(f, header[:])
@@ -96,7 +102,7 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 			return fail(ErrInvalid)
 		}
 		length := binary.BigEndian.Uint32(header[4:8])
-		if length == 0 || length > maxReadyBytes {
+		if length == 0 || uint64(length) > uint64(maxReady()) {
 			return fail(ErrInvalid)
 		}
 		raw := make([]byte, length)
@@ -121,11 +127,36 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 			return fail(ErrInvalid)
 		}
 		w.members = cloneMembers(r.Members)
+		switch {
+		case len(r.SnapshotPart) > 0:
+			if r.SnapshotParts != 0 || len(r.Snapshot) > 0 || len(r.Hard) > 0 || len(r.Entries) > 0 {
+				return fail(ErrInvalid)
+			}
+			if len(pending) == 0 {
+				pendingStart = offset
+			}
+			pending = append(pending, r.SnapshotPart)
+			offset += int64(16 + length)
+			continue
+		case r.SnapshotParts > 0:
+			if len(r.Snapshot) > 0 || uint64(len(pending)) != r.SnapshotParts {
+				return fail(ErrInvalid)
+			}
+			r.Snapshot, pending = bytes.Join(pending, nil), nil
+		case len(pending) > 0:
+			return fail(ErrInvalid)
+		}
 		if e = installRecord(memory, r); e != nil {
 			return fail(e)
 		}
 		records++
 		offset += int64(16 + length)
+	}
+	if len(pending) > 0 {
+		// The chain of a snapshot whose last record never reached the disk: nothing acknowledged it.
+		if err = w.truncate(pendingStart); err != nil {
+			return fail(err)
+		}
 	}
 	if !fresh && records == 0 {
 		return fail(ErrInvalid)
@@ -223,7 +254,7 @@ func (w *readyWAL) tornFinal(offset, frame int64) (bool, error) {
 	if frame > 0 && offset+frame != size {
 		return false, nil
 	}
-	if frame == 0 && size-offset > 16+maxReadyBytes {
+	if frame == 0 && size-offset > 16+int64(maxReady()) {
 		return false, nil
 	}
 	rest := make([]byte, size-offset)
@@ -294,27 +325,9 @@ func (b *readyBuffer) release() {
 // straight into the record, where json.Marshal would hold a protobuf copy of every entry, the
 // text in its own buffer and a copy of that text.
 func (w *readyWAL) appendRecord(b *readyBuffer, rd raft.Ready) ([]byte, error) {
-	head, err := json.Marshal(readyHead{Group: w.group, Node: w.node, Members: cloneMembers(w.members)})
+	head, need, scratch, err := w.recordNeed(rd)
 	if err != nil {
-		return nil, ErrInvalid
-	}
-	// The record is sized once: the head, then the base64 of every part and its separators.
-	const separators = len(`,"hard":"",`) + len(`"snapshot":"",`) + len(`"entries":[]}`)
-	need := len(head) + separators
-	scratch := 0
-	size := func(m proto.Message) int {
-		n := proto.Size(m)
-		scratch = max(scratch, n)
-		return base64.StdEncoding.EncodedLen(n)
-	}
-	if rd.HardState != nil {
-		need += size(rd.HardState)
-	}
-	if rd.Snapshot != nil {
-		need += size(rd.Snapshot)
-	}
-	for _, ent := range rd.Entries {
-		need += size(ent) + len(`"",`)
+		return nil, err
 	}
 	if cap(b.record) < need {
 		b.record = make([]byte, 0, need)
@@ -372,43 +385,56 @@ func (w *readyWAL) appendRecord(b *readyBuffer, rd raft.Ready) ([]byte, error) {
 	return b.record, nil
 }
 func (w *readyWAL) persist(rd raft.Ready) error {
+	if w.needsParts(rd) {
+		return w.persistParts(rd)
+	}
 	buf := readyBuffers.Get().(*readyBuffer)
 	defer buf.release()
 	raw, err := w.appendRecord(buf, rd)
 	if err != nil {
 		return err
 	}
-	if len(raw) > maxReadyBytes {
+	if len(raw) > maxReady() {
 		return ErrInvalid
 	}
+	if err = w.writeFrame(raw); err != nil {
+		return err
+	}
+	return w.syncFrames()
+}
+
+// writeFrame appends one record (its framing and the text raw) to the journal.
+func (w *readyWAL) writeFrame(raw []byte) error {
 	var header [16]byte
 	copy(header[:4], "SPR1")
 	binary.BigEndian.PutUint32(header[4:8], uint32(len(raw)))
 	binary.BigEndian.PutUint32(header[8:12], crc32.Checksum(raw, readyCRC))
 	binary.BigEndian.PutUint32(header[12:], crc32.Checksum(header[:12], readyCRC))
 	if w.fault != nil {
-		if err = w.fault("wal_write"); err != nil {
+		if err := w.fault("wal_write"); err != nil {
 			return err
 		}
 	}
-	if err = writeFull(w.file, header[:]); err != nil {
+	if err := writeFull(w.file, header[:]); err != nil {
 		return err
 	}
 	if w.fault != nil {
-		if err = w.fault("wal_payload_write"); err != nil {
+		if err := w.fault("wal_payload_write"); err != nil {
 			return err
 		}
 	}
-	if err = writeFull(w.file, raw); err != nil {
-		return err
-	}
+	return writeFull(w.file, raw)
+}
+
+// syncFrames makes the records written so far durable.
+func (w *readyWAL) syncFrames() error {
 	if w.beforeSync != nil {
-		if err = w.beforeSync(); err != nil {
+		if err := w.beforeSync(); err != nil {
 			return err
 		}
 	}
 	if w.fault != nil {
-		if err = w.fault("wal_sync"); err != nil {
+		if err := w.fault("wal_sync"); err != nil {
 			return err
 		}
 	}
@@ -486,10 +512,13 @@ func (g *Group) processReady() error {
 			}
 		}
 		if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
+			persistBegan := time.Now()
 			if err := g.disk.persist(rd); err != nil {
 				g.failStop(FailJournal)
 				return ErrUnavailable
 			}
+			since(&g.phases.persistNS, persistBegan)
+			g.phases.persistN.Add(1)
 		}
 		snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
 		if snapshotChanged {
@@ -560,6 +589,7 @@ func (g *Group) processReady() error {
 		g.raw.Advance(rd)
 		g.notify()
 	}
+	g.refreshSoloRead()
 	return nil
 }
 
@@ -609,7 +639,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 	switch ent.GetType() {
 	case pb.EntryNormal:
 		if len(ent.GetData()) > 0 {
-			entry, err := g.decodeEntry(ent.GetData())
+			entry, err := g.appliedEntry(ent)
 			if err != nil {
 				return err
 			}
@@ -617,12 +647,14 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			c.ApplicationCursor.Index = model.Uint64(c.Entry.ApplicationIndex)
 		}
 	case pb.EntryConfChange:
+		g.soloRead.Store(nil)
 		change := &pb.ConfChange{}
 		if proto.Unmarshal(ent.GetData(), change) != nil {
 			return ErrInvalid
 		}
 		g.conf = g.raw.ApplyConfChange(change)
 	case pb.EntryConfChangeV2:
+		g.soloRead.Store(nil)
 		change := &pb.ConfChangeV2{}
 		if proto.Unmarshal(ent.GetData(), change) != nil {
 			return ErrInvalid
@@ -636,6 +668,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			g.retiring = append([]Member(nil), g.members.Nodes...)
 			g.members = next
 			g.disk.members = cloneMembers(next)
+			g.publishMembers()
 		}
 		if len(g.conf.GetVotersOutgoing()) == 0 {
 			g.retiring = nil
@@ -651,7 +684,10 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			return err
 		}
 	}
+	applyBegan := time.Now()
 	result := g.machine.Apply(c)
+	since(&g.phases.applyNS, applyBegan)
+	g.phases.applyN.Add(1)
 	if result != nil && result != ErrConflict {
 		return result
 	}
@@ -739,6 +775,11 @@ type snapshotEnvelope struct {
 	Completed   []CommittedEntry `json:"completed"`
 	Members     Members          `json:"members"`
 	Retiring    []Member         `json:"retiring,omitempty"`
+	// RetryParts and RetryFrom: the retry table of a digest machine kept in files of the snapshot
+	// directory instead of Completed (retry_parts.go). Completed then holds only the entries of kinds
+	// that are not kept by digest.
+	RetryParts []string `json:"retry_parts,omitempty"`
+	RetryFrom  uint64   `json:"retry_from,string,omitempty"`
 }
 
 func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
@@ -765,13 +806,22 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 	g.applied = index
 	g.application = envelope.Application
 	g.members = cloneMembers(envelope.Members)
+	g.publishMembers()
 	g.retiring = append([]Member(nil), envelope.Retiring...)
 	g.conf = snap.GetMetadata().GetConfState()
+	g.resetRetryPartsLocked()
 	for _, c := range envelope.Completed {
 		if c.Group != g.group || c.Index > index {
 			return ErrInvalid
 		}
 		g.completed[c.Entry.ID] = g.retained(c)
+	}
+	if len(envelope.RetryParts) > 0 {
+		parts, err := g.loadRetryParts(envelope, index)
+		if err != nil {
+			return err
+		}
+		g.retryParts = parts
 	}
 	g.rebuildRetryOrder()
 	g.proofWithdrawn(ProofWithdrawal{Index: index, Install: true})

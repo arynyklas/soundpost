@@ -215,12 +215,45 @@ func voterTick() time.Duration {
 }
 
 // lead makes assign(slot) the leader of every data group, using real
-// campaigns and leadership transfers.
+// campaigns and leadership transfers. Slot 0 moves last: a voter that sends a snapshot first orders an
+// erase notice on slot 0 (Engine.beforeSnapshotSend, 10.35#12), the test mesh has no proposal forwarder, and
+// so the sender of a snapshot to a voter that lags (the stopped voter of the erase tests) must still lead
+// slot 0 while the other 63 groups hand over; with slot 0 first, the groups still led by the old leader could
+// never send their snapshot (166,565 refused sends in 90 s, TestStoppedVoterKeepsTheResidueNamedUntilItCatchesUp).
+// Moving it last must not leave its new term's first entry behind on a voter that the test partitions next
+// (TestAReceiptReadOnAnotherVoterIsDirtyFromTheNoticeOfASnapshotToAnAcknowledgedVoter relies on slot 0 needing no
+// snapshot): lead returns when every voter the mesh does not hold back has committed what the leader of slot 0 holds.
 func (v *voters) lead(t *testing.T, assign func(slot int) uint64) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
-	for slot := range 64 {
+	for slot := 1; slot < 64; slot++ {
 		v.leadSlot(t, slot, assign(slot), deadline)
+	}
+	v.leadSlot(t, 0, assign(0), deadline)
+	v.settleSlot(t, 0, assign(0), deadline)
+}
+
+// settleSlot waits until every voter that is not partitioned has committed the last entry of leader, the leader of slot.
+func (v *voters) settleSlot(t *testing.T, slot int, leader uint64, deadline time.Time) {
+	t.Helper()
+	for {
+		last := v.groups[leader][slot].Status().LastIndex
+		settled := true
+		for node := range v.groups {
+			v.mesh.mu.Lock()
+			down := v.mesh.blocked[node]
+			v.mesh.mu.Unlock()
+			if !down && v.groups[node][slot].Status().Commit < last {
+				settled = false
+			}
+		}
+		if settled {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slot %d: the voters never committed the last entry of its leader", slot)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -84,7 +84,11 @@ func (e *Engine) Cancel(ctx context.Context, scope auth.Scope, requested model.A
 	}
 	var old model.CancelReservation
 	err = e.db.View(func(tx *bolt.Tx) error {
-		if tx.Bucket([]byte("receipts")).Get(batchKey(r.Org, r.Project, r.Source, r.Producer, r.Slot, r.Batch)) != nil {
+		held, err := tableGet(tx, tblReceipts, batchKey(r.Org, r.Project, r.Source, r.Producer, r.Slot, r.Batch))
+		if err != nil {
+			return err
+		}
+		if held != nil {
 			return model.Fail(model.Conflict)
 		}
 		raw := tx.Bucket([]byte("cancelled")).Get([]byte(r.ID.String()))
@@ -149,7 +153,7 @@ func (e *Engine) VerifyCancellation(ctx context.Context, c model.CancelReservati
 				// inspect its entire committed history, never receipt absence.
 				for index := uint64(1); index <= legacy; index++ {
 					var entry walEntry
-					if json.Unmarshal(tx.Bucket([]byte("replica_commands")).Get(commandKey(slot, index)), &entry) != nil {
+					if json.Unmarshal(commandAt(tx.Bucket([]byte("replica_commands")), commandKey(slot, index)), &entry) != nil {
 						return model.Fail(model.Corrupt)
 					}
 					if entry.Batch != nil && entry.Batch.Reservation.ID == c.ReservationID {
@@ -160,7 +164,7 @@ func (e *Engine) VerifyCancellation(ctx context.Context, c model.CancelReservati
 				return model.Fail(model.Forbidden)
 			}
 			physical := getUint(meta, metaKey(slot, "logical:"+strconv.FormatUint(uint64(c.Fence.Index), 10)))
-			if physical == 0 || physical > getUint(meta, metaKey(slot, "physical")) {
+			if physical == 0 || physical > getCounter(tx, slot, "physical") {
 				return model.Fail(model.Forbidden)
 			}
 		}

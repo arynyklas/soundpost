@@ -380,6 +380,68 @@ func TestArtifactIntentRidingWithLedgerWriteBumps(t *testing.T) {
 	}
 }
 
+// The holds of the issue producer take or drop a hold by the workflow of the issue in the
+// transaction they commit in, so their writer is given the grouping issues (the plain ledger
+// writer is book free: every issue is unknown to it, and a resolved issue never releases its
+// maps). Like UpdateArtifactReferences it keeps AuthorityRevision for ledger entries alone.
+func TestUpdateIssueHoldsIsGivenTheGroupingIssuesAndKeepsAuthorityForLedgerEntries(t *testing.T) {
+	cases := []struct {
+		name  string
+		write func(f *fenceFx, st *control.State)
+		bumps bool
+	}{
+		{"ledger and index only", func(f *fenceFx, st *control.State) { f.ledgerKeys(st) }, false},
+		{"no change at all", func(f *fenceFx, st *control.State) {}, false},
+		{"non-ledger setting", func(f *fenceFx, st *control.State) {
+			st.Orgs[f.org.String()].Settings["source_policy:"+model.NewID().String()] = json.RawMessage(`{}`)
+		}, true},
+		{"delete generation with the ledger", func(f *fenceFx, st *control.State) {
+			f.ledgerKeys(st)
+			st.DeleteGenerations = map[string]uint64{f.org.String(): 3}
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFenceFx(t)
+			issue := model.NewID()
+			key := model.ReleaseScopeKey(f.org, f.project, issue)
+			if err := f.store.Update(f.ctx, func(st *control.State) error {
+				st.GroupingIssues = map[string]model.GroupingIssue{key: {ID: issue, Org: f.org, Project: f.project, Workflow: "resolved"}}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			rev0, auth0 := f.revisions()
+			seen := ""
+			if err := f.store.UpdateIssueHolds(f.ctx, func(st *control.State) error {
+				seen = st.GroupingIssues[key].Workflow
+				c.write(f, st)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if seen != "resolved" {
+				t.Fatalf("the transaction saw the workflow %q of the issue, want resolved", seen)
+			}
+			rev1, auth1 := f.revisions()
+			if rev1 != rev0+1 {
+				t.Fatalf("revision %d -> %d", rev0, rev1)
+			}
+			if c.bumps && auth1 != rev1 || !c.bumps && auth1 != auth0 {
+				t.Fatalf("bumps=%v: authority %d -> %d at revision %d", c.bumps, auth0, auth1, rev1)
+			}
+			if err := f.store.View(f.ctx, func(st control.State) error {
+				if st.GroupingIssues[key].Workflow != "resolved" {
+					t.Fatalf("the issue after the commit: %+v", st.GroupingIssues[key])
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // referencingFiles lists the non-test files under the module that mention the selector name.
 func referencingFiles(t *testing.T, name string) []string {
 	t.Helper()
@@ -431,6 +493,9 @@ func TestSessionAndLedgerWritersHaveExactlyTheirCallers(t *testing.T) {
 	}
 	if got := referencingFiles(t, "UpdateArtifactReferences"); !slices.Equal(got, []string{"../../internal/artifacts/references.go"}) {
 		t.Fatalf("UpdateArtifactReferences is referenced from %v, want exactly internal/artifacts/references.go", got)
+	}
+	if got := referencingFiles(t, "UpdateIssueHolds"); !slices.Equal(got, []string{"../../internal/artifacts/references.go"}) {
+		t.Fatalf("UpdateIssueHolds is referenced from %v, want exactly internal/artifacts/references.go", got)
 	}
 	if got := referencingFiles(t, "UpdatePendingLogin"); !slices.Equal(got, []string{"../../internal/auth/oidc.go"}) {
 		t.Fatalf("UpdatePendingLogin is referenced from %v, want exactly internal/auth/oidc.go", got)

@@ -2,19 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 package control
 
-import "sort"
-import "bytes"
-import "errors"
 import (
+	"bytes"
 	"context"
+	"errors"
+	"math"
+	"sort"
+	"time"
+
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
-	"math"
 )
 
 type ReserveAdmission = model.ReserveAdmission
 type FinalizeAdmission = model.FinalizeAdmission
 type CancelReservation = model.CancelReservation
+
+// newReservationID is a reservation's identity: ten random bytes after the time in milliseconds. The ledger
+// keeps the reservation rows by their identity, and a reservation is written when it is made, written again
+// when it is finalized shortly after, and read while its batch is appended: with identities that are
+// ordered by the time they are made in, every one of those touches the few pages at the end of the table
+// (the append-only part of the write set) and not a page of the table's whole history, which is what a
+// random identity does. Nothing reads meaning into an identity: it is an opaque key.
+func newReservationID() model.ID {
+	id := model.NewID()
+	ms := uint64(time.Now().UnixMilli())
+	for i := 5; i >= 0; i-- {
+		id[i] = byte(ms)
+		ms >>= 8
+	}
+	return id
+}
 
 func reservationKey(r model.AdmissionReservation) string {
 	return r.Org.String() + ":" + r.Project.String() + ":" + r.Source.String() + ":" + r.Producer.String() + ":" + stringSlot(r.Slot) + ":" + r.Batch.String()
@@ -29,6 +47,121 @@ func sourceQuotaKey(r model.AdmissionReservation) string {
 func quotaKeys(r model.AdmissionReservation) []string {
 	return []string{"org:" + r.Org.String(), "project:" + r.Org.String() + ":" + r.Project.String(), sourceQuotaKey(r)}
 }
+
+// reserveStep is the transition of ReserveAdmission: validate the source against the state without the
+// books (core), then either answer a retry of a reserved batch or charge the three quota keys and write
+// the reservation. looked and admitted are the owner's answer about a batch control holds no row for
+// once windows were settled. r is the reservation to write and, when the batch was reserved before, is
+// replaced by the stored one.
+func reserveStep(core *State, books admissionBooks, scope auth.Scope, r *model.AdmissionReservation, b model.NormalizedBatch, looked bool, admitted *model.Receipt) error {
+	if e := scope.ValidateSourceState(*core, r.Project, r.Source, true); e != nil {
+		return e
+	}
+	if scope.OrgID() != r.Org || model.Uint64(scope.PolicyEpoch()) != r.PolicyEpoch {
+		return model.Fail(model.Forbidden)
+	}
+	key := reservationKey(*r)
+	if id, exists := books.keyed(key); exists {
+		old, ok, err := books.reservation(id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return model.Fail(model.Corrupt)
+		}
+		if old.Hash != r.Hash || old.State == "cancelled" {
+			return model.Fail(model.Conflict)
+		}
+		if old.State == "reserved" && old.PolicyEpoch != r.PolicyEpoch {
+			// A refused/ambiguous attempt left this charge bound to a retired
+			// epoch. The retry was just revalidated against the current scope
+			// (source enabled, not closing, epoch current) and carries the same
+			// batch hash, so re-bind without recharging. A source whose policy
+			// revision moved on since the batch was normalized is not a legitimate
+			// retry: the batch carries the old revision and policy hash and can
+			// never be admitted, so its charge is not carried into the new epoch.
+			if b.PolicyRevision != core.Sources[r.Source.String()].Policy.Revision {
+				return model.Fail(model.Stale)
+			}
+			old.PolicyEpoch = r.PolicyEpoch
+			books.putReservation(old)
+		}
+		*r = old
+		return nil
+	}
+	if books.hasWindows() {
+		// No row for this key although windows were settled: the batch may be one of them.
+		if !looked {
+			return errNeedsAdmittedLookup
+		}
+		if admitted != nil {
+			if admitted.Hash != r.Hash {
+				return model.Fail(model.Conflict)
+			}
+			if _, ok, err := windowOf(books, admitted.Cursor); err != nil {
+				return err
+			} else if ok {
+				// The batch is in the data and its reservation was settled: the answer its
+				// row gave, consumed at the receipt's cursor, charged once already. Nothing
+				// is stored for it again.
+				cursor := admitted.Cursor
+				r.State, r.Cursor = "consumed", &cursor
+				return nil
+			}
+		}
+	}
+	p := core.Sources[r.Source.String()].Policy
+	if p.MaxBytes == 0 || p.MaxSeries == 0 {
+		return model.Fail(model.Quota)
+	}
+	sourceKey := sourceQuotaKey(*r)
+	for _, tier := range quotaKeys(*r) {
+		h, err := books.head(tier)
+		if err != nil {
+			return err
+		}
+		if tier == sourceKey {
+			// A fenced source policy is authoritative for this tier, including
+			// authorized raises. Existing charges/refcounts are never reset.
+			h.MaxBytes = p.MaxBytes
+			h.MaxSeries = p.MaxSeries
+		} else {
+			// Preserve conservative unconfigured organization/project defaults;
+			// protected explicit global quota objects remain authoritative.
+			if !h.Configured && (h.MaxBytes == 0 || p.MaxBytes < h.MaxBytes) {
+				h.MaxBytes = p.MaxBytes
+			}
+			if !h.Configured && (h.MaxSeries == 0 || p.MaxSeries < h.MaxSeries) {
+				h.MaxSeries = p.MaxSeries
+			}
+		}
+		if r.Bytes > h.MaxBytes || h.Bytes > h.MaxBytes-r.Bytes {
+			return model.Fail(model.Quota)
+		}
+		newSeries := uint64(0)
+		for _, id := range r.Series {
+			n := books.series(tier, id)
+			if n == 0 {
+				newSeries++
+			}
+			if n == math.MaxUint64 {
+				return model.Fail(model.Quota)
+			}
+		}
+		if newSeries > uint64(h.MaxSeries) || h.Series > uint64(h.MaxSeries)-newSeries {
+			return model.Fail(model.Quota)
+		}
+		h.Bytes += r.Bytes
+		for _, id := range r.Series {
+			books.setSeries(tier, id, books.series(tier, id)+1)
+		}
+		books.putHead(tier, h)
+	}
+	books.putReservation(*r)
+	books.putKey(key, r.ID.String())
+	return nil
+}
+
 func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.AdmissionReservation, error) {
 	canonical, err := model.CanonicalJSON(b.Batch)
 	if err != nil || !bytes.Equal(canonical, b.Canonical) || model.HashCanonical(canonical) != b.Hash {
@@ -49,124 +182,14 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 		b.Series = append(b.Series, id)
 	}
 	sort.Strings(b.Series)
-	r := model.AdmissionReservation{ID: model.NewID(), Org: b.Org, Project: b.Project, Source: b.Source, Producer: b.Producer, Batch: b.ID, Slot: b.RouteSlot, Hash: b.Hash, PolicyEpoch: b.PolicyEpoch, Bytes: model.Uint64(len(b.Canonical)), Series: append([]string(nil), b.Series...), State: "reserved"}
+	r := model.AdmissionReservation{ID: newReservationID(), Org: b.Org, Project: b.Project, Source: b.Source, Producer: b.Producer, Batch: b.ID, Slot: b.RouteSlot, Hash: b.Hash, PolicyEpoch: b.PolicyEpoch, Bytes: model.Uint64(len(b.Canonical)), Series: append([]string(nil), b.Series...), State: "reserved"}
 	if r.Slot >= 64 || r.Bytes == 0 {
 		return r, model.Fail(model.Invalid)
 	}
 	var looked bool
 	var admitted *model.Receipt
-	body := func(st *State) error {
-		if e := scope.ValidateSourceState(*st, r.Project, r.Source, true); e != nil {
-			return e
-		}
-		if scope.OrgID() != r.Org || model.Uint64(scope.PolicyEpoch()) != r.PolicyEpoch {
-			return model.Fail(model.Forbidden)
-		}
-		if st.Reservations == nil {
-			st.Reservations = map[string]model.AdmissionReservation{}
-		}
-		if st.AdmissionKeys == nil {
-			if len(st.Reservations) != 0 {
-				return model.Fail(model.Corrupt)
-			}
-			st.AdmissionKeys = map[string]string{}
-		}
-		if id, exists := st.AdmissionKeys[reservationKey(r)]; exists {
-			old, ok := st.Reservations[id]
-			if !ok {
-				return model.Fail(model.Corrupt)
-			}
-			if old.Hash != r.Hash || old.State == "cancelled" {
-				return model.Fail(model.Conflict)
-			}
-			if old.State == "reserved" && old.PolicyEpoch != r.PolicyEpoch {
-				// A refused/ambiguous attempt left this charge bound to a retired
-				// epoch. The retry was just revalidated against the current scope
-				// (source enabled, not closing, epoch current) and carries the same
-				// batch hash, so re-bind without recharging. A source whose policy
-				// revision moved on since the batch was normalized is not a legitimate
-				// retry: the batch carries the old revision and policy hash and can
-				// never be admitted, so its charge is not carried into the new epoch.
-				if b.PolicyRevision != st.Sources[r.Source.String()].Policy.Revision {
-					return model.Fail(model.Stale)
-				}
-				old.PolicyEpoch = r.PolicyEpoch
-				st.Reservations[id] = old
-			}
-			r = old
-			return nil
-		}
-		if st.Settlement != nil && len(st.Settlement.Windows) != 0 {
-			// No row for this key although windows were settled: the batch may be one of them.
-			if !looked {
-				return errNeedsAdmittedLookup
-			}
-			if admitted != nil {
-				if admitted.Hash != r.Hash {
-					return model.Fail(model.Conflict)
-				}
-				if _, ok := st.Settlement.Window(admitted.Cursor); ok {
-					// The batch is in the data and its reservation was settled: the answer its
-					// row gave, consumed at the receipt's cursor, charged once already. Nothing
-					// is stored for it again.
-					cursor := admitted.Cursor
-					r.State, r.Cursor = "consumed", &cursor
-					return nil
-				}
-			}
-		}
-		p := st.Sources[r.Source.String()].Policy
-		if p.MaxBytes == 0 || p.MaxSeries == 0 {
-			return model.Fail(model.Quota)
-		}
-		if st.Quotas == nil {
-			st.Quotas = map[string]model.QuotaState{}
-		}
-		sourceKey := sourceQuotaKey(r)
-		for _, key := range quotaKeys(r) {
-			q := st.Quotas[key]
-			if q.Series == nil {
-				q.Series = map[string]uint64{}
-			}
-			if key == sourceKey {
-				// A fenced source policy is authoritative for this tier, including
-				// authorized raises. Existing charges/refcounts are never reset.
-				q.MaxBytes = p.MaxBytes
-				q.MaxSeries = p.MaxSeries
-			} else {
-				// Preserve conservative unconfigured organization/project defaults;
-				// protected explicit global quota objects remain authoritative.
-				if !q.Configured && (q.MaxBytes == 0 || p.MaxBytes < q.MaxBytes) {
-					q.MaxBytes = p.MaxBytes
-				}
-				if !q.Configured && (q.MaxSeries == 0 || p.MaxSeries < q.MaxSeries) {
-					q.MaxSeries = p.MaxSeries
-				}
-			}
-			if r.Bytes > q.MaxBytes || q.Bytes > q.MaxBytes-r.Bytes {
-				return model.Fail(model.Quota)
-			}
-			newSeries := uint64(0)
-			for _, id := range r.Series {
-				if q.Series[id] == 0 {
-					newSeries++
-				}
-				if q.Series[id] == math.MaxUint64 {
-					return model.Fail(model.Quota)
-				}
-			}
-			if newSeries > uint64(q.MaxSeries) || uint64(len(q.Series)) > uint64(q.MaxSeries)-newSeries {
-				return model.Fail(model.Quota)
-			}
-			q.Bytes += r.Bytes
-			for _, id := range r.Series {
-				q.Series[id]++
-			}
-			st.Quotas[key] = q
-		}
-		st.Reservations[r.ID.String()] = r
-		st.AdmissionKeys[reservationKey(r)] = r.ID.String()
-		return nil
+	body := func(core *State, books admissionBooks) error {
+		return reserveStep(core, books, scope, &r, b, looked, admitted)
 	}
 	// Once windows were settled, a key with no row may be a retry of a settled batch, which only
 	// the owner's receipts can tell: the first run reports it (errNeedsAdmittedLookup, nothing
@@ -177,12 +200,12 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 		if admitted, e = s.admittedBatch(ctx, r); e != nil {
 			return e
 		}
-		return s.updateAs(ctx, writerReserveAdmission, body)
+		return s.admissionUpdate(ctx, writerReserveAdmission, body)
 	}
 	var e error
 	if s.settledSeen.Load() {
 		e = run()
-	} else if e = s.updateAs(ctx, writerReserveAdmission, body); errors.Is(e, errNeedsAdmittedLookup) {
+	} else if e = s.admissionUpdate(ctx, writerReserveAdmission, body); errors.Is(e, errNeedsAdmittedLookup) {
 		s.settledSeen.Store(true)
 		e = run()
 	}
@@ -205,6 +228,40 @@ func (s *Store) admittedBatch(ctx context.Context, r model.AdmissionReservation)
 	}
 	return &receipt, nil
 }
+
+// finalizeStep marks the reservation r names consumed at the cursor of its receipt.
+func finalizeStep(core *State, books admissionBooks, scope auth.Scope, r FinalizeAdmission) error {
+	old, ok, err := books.reservation(r.ReservationID.String())
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if _, settled, err := windowOf(books, r.Cursor); err != nil {
+			return err
+		} else if settled {
+			return nil // consumed and folded into a settled window already (settle.go)
+		}
+		return model.Fail(model.NotFound)
+	}
+	if e := scope.ValidateSourceState(*core, old.Project, old.Source, false); e != nil {
+		return e
+	}
+	if old.State == "cancelled" {
+		return model.Fail(model.Conflict)
+	}
+	if old.Cursor != nil {
+		if *old.Cursor != r.Cursor {
+			return model.Fail(model.Conflict)
+		}
+		return nil
+	}
+	old.State = "consumed"
+	cursor := r.Cursor
+	old.Cursor = &cursor
+	books.putReservation(old)
+	return nil
+}
+
 func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r FinalizeAdmission) error {
 	s.registryMu.RLock()
 	owner := s.ownerProof
@@ -215,30 +272,8 @@ func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r Final
 	if e := owner.VerifyFinalization(ctx, r); e != nil {
 		return e
 	}
-	return s.updateAs(ctx, writerFinalizeAdmission, func(st *State) error {
-		old, ok := st.Reservations[r.ReservationID.String()]
-		if !ok {
-			if _, settled := st.Settlement.Window(r.Cursor); settled {
-				return nil // consumed and folded into a settled window already (settle.go)
-			}
-			return model.Fail(model.NotFound)
-		}
-		if e := scope.ValidateSourceState(*st, old.Project, old.Source, false); e != nil {
-			return e
-		}
-		if old.State == "cancelled" {
-			return model.Fail(model.Conflict)
-		}
-		if old.Cursor != nil {
-			if *old.Cursor != r.Cursor {
-				return model.Fail(model.Conflict)
-			}
-			return nil
-		}
-		old.State = "consumed"
-		old.Cursor = &r.Cursor
-		st.Reservations[r.ReservationID.String()] = old
-		return nil
+	return s.admissionUpdate(ctx, writerFinalizeAdmission, func(core *State, books admissionBooks) error {
+		return finalizeStep(core, books, scope, r)
 	})
 }
 
@@ -268,6 +303,48 @@ func (s *Store) BindAdmissionOwner(owner AdmissionProofs) error {
 	s.ownerProof = owner
 	return nil
 }
+
+// cancelStep marks the reservation cancelled and refunds its charge.
+func cancelStep(core *State, books admissionBooks, scope auth.Scope, r CancelReservation) error {
+	old, ok, err := books.reservation(r.ReservationID.String())
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return model.Fail(model.NotFound)
+	}
+	if e := scope.ValidateSourceState(*core, old.Project, old.Source, false); e != nil {
+		return e
+	}
+	if old.Hash != r.Hash || old.State == "consumed" {
+		return model.Fail(model.Conflict)
+	}
+	if old.State == "cancelled" {
+		return nil
+	}
+	for _, tier := range quotaKeys(old) {
+		h, err := books.head(tier)
+		if err != nil {
+			return err
+		}
+		if h.Bytes < old.Bytes {
+			return model.Fail(model.Corrupt)
+		}
+		h.Bytes -= old.Bytes
+		for _, id := range old.Series {
+			if n := books.series(tier, id); n <= 1 {
+				books.setSeries(tier, id, 0)
+			} else {
+				books.setSeries(tier, id, n-1)
+			}
+		}
+		books.putHead(tier, h)
+	}
+	old.State = "cancelled"
+	books.putReservation(old)
+	return nil
+}
+
 func (s *Store) CancelAdmission(ctx context.Context, scope auth.Scope, r CancelReservation) error {
 	s.registryMu.RLock()
 	owner := s.ownerProof
@@ -278,37 +355,7 @@ func (s *Store) CancelAdmission(ctx context.Context, scope auth.Scope, r CancelR
 	if e := owner.VerifyCancellation(ctx, r); e != nil {
 		return e
 	}
-	return s.updateAs(ctx, writerCancelAdmission, func(st *State) error {
-		old, ok := st.Reservations[r.ReservationID.String()]
-		if !ok {
-			return model.Fail(model.NotFound)
-		}
-		if e := scope.ValidateSourceState(*st, old.Project, old.Source, false); e != nil {
-			return e
-		}
-		if old.Hash != r.Hash || old.State == "consumed" {
-			return model.Fail(model.Conflict)
-		}
-		if old.State == "cancelled" {
-			return nil
-		}
-		for _, key := range quotaKeys(old) {
-			q := st.Quotas[key]
-			if q.Bytes < old.Bytes {
-				return model.Fail(model.Corrupt)
-			}
-			q.Bytes -= old.Bytes
-			for _, id := range old.Series {
-				if q.Series[id] <= 1 {
-					delete(q.Series, id)
-				} else {
-					q.Series[id]--
-				}
-			}
-			st.Quotas[key] = q
-		}
-		old.State = "cancelled"
-		st.Reservations[r.ReservationID.String()] = old
-		return nil
+	return s.admissionUpdate(ctx, writerCancelAdmission, func(core *State, books admissionBooks) error {
+		return cancelStep(core, books, scope, r)
 	})
 }

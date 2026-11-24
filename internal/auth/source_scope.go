@@ -19,7 +19,7 @@ func (s *Service) AuthorizeRestrictedSource(ctx context.Context, c Credential, o
 	if e != nil {
 		return Scope{}, e
 	}
-	e = s.store.View(ctx, func(st model.ControlState) error {
+	e = s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, c); err != nil {
 			return err
 		}

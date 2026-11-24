@@ -220,7 +220,7 @@ func (s *Store) ClusterResidualStores() []string {
 	if g == nil {
 		return local
 	}
-	st, err := s.localState()
+	st, err := s.localCore()
 	if err != nil {
 		return []string{ResidualControlJournal, ResidualControlState}
 	}
@@ -405,7 +405,7 @@ func (s *Store) syncAttestation(ctx context.Context, publish bool) error {
 		return nil
 	}
 	// The local precheck: nothing to say and nothing to withdraw commits nothing.
-	local, err := s.localState()
+	local, err := s.localCore()
 	if err != nil {
 		return err
 	}

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify/providers"
 	"github.com/arynyklas/soundpost/internal/rules"
 )
@@ -143,7 +145,14 @@ func originOf(listen string) (string, error) {
 // startWorkers runs the leader-only background runner under ctx and returns at
 // once. The runner acts as the in-process system principal of each organization
 // (no session, no stored token); it delivers through the real providers.
-func startWorkers(ctx context.Context, core *appcore.App, s workerSettings) error {
+//
+// ready, when not nil, holds the first pass back until the node reports ready (health.Ready): after a
+// start the producers catch up on everything admitted since they last ran, a pass that decodes the
+// control state again and again and commits to it, and on a busy installation that competed with the
+// probe of readiness for the same cores and the same state until it timed out (the restart took more
+// than twice as long right after a load as on an idle installation). Nothing the runner does is owed
+// before the node serves.
+func startWorkers(ctx context.Context, core *appcore.App, s workerSettings, ready func(context.Context) (health.Readiness, error)) error {
 	sender, err := core.NotificationSender(s.notify)
 	if err != nil {
 		return fmt.Errorf("notification delivery: %w", err)
@@ -176,8 +185,39 @@ func startWorkers(ctx context.Context, core *appcore.App, s workerSettings) erro
 	if _, err = core.NewWorkers(cfg); err != nil {
 		return fmt.Errorf("background workers: %w", err)
 	}
-	go func() { _ = core.RunWorkers(ctx, cfg) }()
+	// The passes read the control state every interval and never look at the admission books, which grow
+	// with every batch admitted: they run without them (model.WithoutBooks).
+	run := func() { _ = core.RunWorkers(model.WithoutBooks(ctx), cfg) }
+	if ready == nil {
+		go run()
+		return nil
+	}
+	afterReady(ctx, ready, readyPoll, run)
 	return nil
+}
+
+// readyPoll is how often afterReady asks whether the node is ready yet.
+const readyPoll = 250 * time.Millisecond
+
+// afterReady calls run, in its own goroutine, once probe reports the node ready, and never if ctx ends
+// first. A probe that fails or times out (5 s) is a node that is not ready yet.
+func afterReady(ctx context.Context, probe func(context.Context) (health.Readiness, error), every time.Duration, run func()) {
+	go func() {
+		for {
+			asked, cancel := context.WithTimeout(ctx, 5*time.Second)
+			r, err := probe(asked)
+			cancel()
+			if err == nil && r.Ready {
+				run()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(every):
+			}
+		}
+	}()
 }
 
 // observeWorkers logs, to stderr, each distinct set of failing stages once (closed

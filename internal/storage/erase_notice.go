@@ -92,6 +92,17 @@ func (e *Engine) ControlStatePatchReady(control []replica.Member) bool {
 	return e.declaredByAll(statePatchProtocol, control)
 }
 
+// ControlLegacyStatePatchReady is ControlStatePatchReady for the first protocol of the state patch
+// (legacyStatePatchProtocol): every member declared at least 5, so a command may be proposed as a patch
+// that names the digest every release computes (control.Store.SetLegacyStatePatchGate). Control uses
+// it while its admission ledger is empty; with books in it a patch needs ControlStatePatchReady.
+func (e *Engine) ControlLegacyStatePatchReady(control []replica.Member) bool {
+	if len(control) == 0 {
+		return false
+	}
+	return e.declaredByAll(legacyStatePatchProtocol, control)
+}
+
 // declaredBy reports whether every member of the slot-0 group's committed configuration declared
 // a protocol of at least version.
 func (e *Engine) declaredBy(version uint64) bool { return e.declaredByAll(version, nil) }
@@ -101,7 +112,7 @@ func (e *Engine) declaredByAll(version uint64, extra []replica.Member) bool {
 	if e.repl == nil {
 		return false
 	}
-	members := slices.Concat(e.repl.groups[eraseAckSlot].Status().Members.Nodes, extra)
+	members := slices.Concat(e.repl.groups[eraseAckSlot].CommittedMembers().Nodes, extra)
 	if len(members) == 0 {
 		return false
 	}
@@ -121,6 +132,34 @@ func (e *Engine) declaredByAll(version uint64, extra []replica.Member) bool {
 	return ready
 }
 
+// protocolToDeclare is the protocol this voter declares now: declaredProtocol once the installation is
+// contracted, legacyStatePatchProtocol (what the previous release declares) before. Protocol 7 only
+// gates the ledger layout of control, and control keeps the ledger layout only in a contracted
+// installation (control.ledgerLayout): an installation the previous release can still read keeps its
+// books in the blob and needs no more than 5. A voter that declared 7 at its first start would commit
+// one more command in slot 0 of every upgraded installation (the slot-0 watermark of a query answer
+// moves), for a declaration nothing reads yet. The answer is sticky once true (the marker never
+// leaves) and asked at most once a second until then: it looks through the stored control state.
+func (e *Engine) protocolToDeclare(ctx context.Context) uint64 {
+	if e.contractedSeen.Load() {
+		return declaredProtocol
+	}
+	a := e.layoutAuthority.Load()
+	if a == nil {
+		return legacyStatePatchProtocol
+	}
+	now := time.Now().UnixNano()
+	if last := e.contractedAsked.Load(); last != 0 && now-last < int64(time.Second) {
+		return legacyStatePatchProtocol
+	}
+	e.contractedAsked.Store(now)
+	if contracted, err := layoutContracted(ctx, *a); err == nil && contracted {
+		e.contractedSeen.Store(true)
+		return declaredProtocol
+	}
+	return legacyStatePatchProtocol
+}
+
 // declareErasure proposes, in this order and only what is missing, this voter's protocol
 // declaration (in the shape every attributed binary applies) and, once every member has declared,
 // its disk incarnation. It returns the proposal's error (no leader yet, a lost race) and is
@@ -138,10 +177,12 @@ func (e *Engine) declareErasure(ctx context.Context) error {
 		return unavailableDB(err)
 	}
 	if declared < declaredProtocol {
-		if err := e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
-			return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(declaredProtocol), Cursor: cursor}}
-		}); err != nil {
-			return err
+		if want := e.protocolToDeclare(ctx); declared < want {
+			if err := e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
+				return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(want), Cursor: cursor}}
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	if !e.protocolReady() {

@@ -213,7 +213,7 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 	_ = s.healFencedArtifactIntents(ctx)
 	var refs []model.BlobReceipt
 	if err = model.RetryWhileStale(ctx, func() error {
-		return s.View(ctx, func(st State) error {
+		return s.viewCore(ctx, func(st State) error {
 			for key, r := range st.ArtifactIntents {
 				if err := validateArtifactReference(st, key, r); err != nil {
 					return err
@@ -268,7 +268,7 @@ func (s *Store) healFencedArtifactIntents(ctx context.Context) error {
 	var keys []string
 	if err := model.RetryWhileStale(ctx, func() error {
 		keys = keys[:0]
-		return s.View(ctx, func(st State) error {
+		return s.viewCore(ctx, func(st State) error {
 			for key, r := range st.ArtifactIntents {
 				if fencedIntent(st, r) {
 					keys = append(keys, key)

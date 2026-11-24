@@ -174,10 +174,18 @@ type CompactionResult struct {
 // journal anchored on the snapshot, and only then renames it over the old one.
 // A crash at any hook leaves either the complete old or complete new journal.
 func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
+	return g.compactJournal(ctx, g.snaps.Verify)
+}
+
+// compactJournal is CompactJournal with the verification of the current snapshot chosen by the caller: the cadence cut
+// passes SnapshotStore.VerifyCut, which hashes only what the cut wrote itself.
+func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, error)) (CompactionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CompactionResult{}, err
 	}
-	snap, err := g.snaps.Verify()
+	verifyBegan := time.Now()
+	snap, err := verify()
+	since(&g.phases.compactVerifyNS, verifyBegan)
 	if err != nil {
 		return CompactionResult{}, err
 	}
@@ -196,7 +204,11 @@ func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
 	}
 	cut := snap.Manifest.Index
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	lockedAt := time.Now()
+	defer func() {
+		sinceMax(&g.phases.compactLockNS, &g.phases.compactLockMax, lockedAt)
+		g.mu.Unlock()
+	}()
 	if g.failed || g.closed {
 		return CompactionResult{}, ErrUnavailable
 	}
@@ -220,23 +232,28 @@ func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
 		}
 	}
 	if err = g.trip(HookCompactBegin); err != nil {
+		noteFailure("compact begin", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	archived, err := g.archivePinsLocked(cut)
 	if err != nil {
+		noteFailure("archive pins", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.rewriteJournalLocked(cut); err != nil {
+		noteFailure("rewrite journal", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.trip(HookCompactMemory); err != nil {
+		noteFailure("compact memory", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.memory.Compact(cut); err != nil && !errors.Is(err, raft.ErrCompacted) {
+		noteFailure("memory compact", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
@@ -246,7 +263,7 @@ func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
 
 func encodeReady(r readyRecord) ([]byte, error) {
 	raw, err := json.Marshal(r)
-	if err != nil || len(raw) > maxReadyBytes {
+	if err != nil || len(raw) > maxReady() {
 		return nil, ErrInvalid
 	}
 	out := make([]byte, 16, 16+len(raw))
@@ -268,13 +285,7 @@ func (g *Group) rewriteJournalLocked(cut uint64) error {
 	if err != nil {
 		return err
 	}
-	write := func(r readyRecord) error {
-		raw, err := encodeReady(r)
-		if err != nil {
-			return err
-		}
-		return writeFull(f, raw)
-	}
+	write := func(r readyRecord) error { return writeReadyRecord(f, r) }
 	fail := func(err error) error { f.Close(); return err }
 	if err = g.trip(HookCompactWrite); err != nil {
 		return fail(err)
@@ -296,7 +307,7 @@ func (g *Group) rewriteJournalLocked(cut uint64) error {
 	last, _ := g.memory.LastIndex()
 	chunk, size := base, 0
 	for index := cut + 1; index <= last; {
-		entries, err := g.memory.Entries(index, last+1, 8<<20)
+		entries, err := g.memory.Entries(index, last+1, uint64(min(8<<20, maxReady()/2)))
 		if err != nil {
 			return fail(err)
 		}

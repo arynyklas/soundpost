@@ -233,6 +233,9 @@ type Group struct {
 		data  []byte
 		entry Entry
 	}
+	// replay holds the entries rebuildKnown decoded at Open that processReady is going to apply, so the
+	// first apply of each does not validate and decode the same bytes again; it is nil once Open is done.
+	replay         map[uint64]replayedEntry
 	id             uint64
 	group          model.ID
 	raw            *raft.RawNode
@@ -288,15 +291,31 @@ type Group struct {
 	retryWindow time.Duration
 	retryMax    int
 	retryOrder  []model.ID
+	// retryParts are the retry-part files the selected snapshot holds (retry_parts.go), and retryEpoch counts
+	// the events that made that belief void; both under mu.
+	retryParts []retryPart
+	retryEpoch uint64
 	// cadence state: applied commands and entry bytes since the last cut.
 	cadence       Cadence
 	sinceCommands uint64
 	sinceBytes    int64
+	cutBytes      int64  // bytes the last cadence cut wrote itself (cutDue scales the bounds by it)
 	appliedData   uint64 // entry data bytes countApplied has seen (AppliedDataBytes)
 	cadenceWake   chan struct{}
 	cadenceCuts   atomic.Uint64 // cuts the cadence loop completed
 	cadenceLong   atomic.Int64  // nanoseconds the longest of them took
-	domain        *FailDomain
+	// phases are the cumulative times the group spent in the stages of its pipeline (phases.go).
+	phases phaseCounters
+	domain *FailDomain
+	// soloRead is the cursor a read of this group answers while the group is a single voter that
+	// leads: such a leader has nobody to confirm its leadership with, and every command it
+	// acknowledged is applied, so a read needs neither g.mu (held across the journal fsync and
+	// the state machine's commit of the command in flight) nor a Raft round. nil in every other
+	// case; refreshSoloRead keeps it current at the end of processReady.
+	soloRead atomic.Pointer[model.Cursor]
+	// membersView is the committed configuration, published whenever g.members changes, for the readers
+	// that must not wait for g.mu (CommittedMembers).
+	membersView atomic.Pointer[Members]
 }
 
 func Open(c Config) (*Group, error) {
@@ -363,6 +382,7 @@ func Open(c Config) (*Group, error) {
 	if g.pinTTL <= 0 {
 		g.pinTTL = DefaultPinTTL
 	}
+	g.publishMembers()
 	if g.now == nil {
 		g.now = time.Now
 	}
@@ -417,6 +437,7 @@ func Open(c Config) (*Group, error) {
 	}
 	// Rebuild command identity and known reservations from the entire durable log,
 	// including committed-but-unapplied and uncommitted entries before intake.
+	g.replay = map[uint64]replayedEntry{}
 	if err = g.rebuildKnown(); err != nil {
 		disk.Close()
 		return nil, err
@@ -431,6 +452,7 @@ func Open(c Config) (*Group, error) {
 		disk.Close()
 		return nil, err
 	}
+	g.replay = nil
 	if c.Domain != nil {
 		if err = c.Domain.add(g); err != nil {
 			disk.Close()
@@ -486,6 +508,7 @@ func (g *Group) closeLocked() error {
 }
 func (g *Group) fail() {
 	g.failed = true
+	g.soloRead.Store(nil)
 	for id, waiters := range g.pending {
 		for _, ch := range waiters {
 			ch <- proposalResult{err: ErrUnavailable}
@@ -568,6 +591,20 @@ func (g *Group) Status() Status {
 	last, _ := g.memory.LastIndex()
 	return Status{Group: g.group, ID: g.id, Leader: s.Lead, Term: s.HardState.GetTerm(), Commit: s.HardState.GetCommit(), Applied: g.applied, LastIndex: last, ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}, Revision: g.members.Revision, Failed: g.failed || g.closed, Members: cloneMembers(g.members)}
 }
+
+// publishMembers makes the configuration g.members holds the one CommittedMembers answers. g.mu is held (or
+// the group is not shared yet).
+func (g *Group) publishMembers() {
+	m := cloneMembers(g.members)
+	g.membersView.Store(&m)
+}
+
+// CommittedMembers is the committed configuration of the group as of the last change this voter applied. It
+// takes no lock: Status waits for g.mu, which is held across the journal fsync and the state machine's commit
+// of the command in flight, and a gate that asks which members a group has before every command of another
+// group (the protocol gates of control and storage) waited for that commit each time. The members are shared:
+// the caller must not change them.
+func (g *Group) CommittedMembers() Members { return *g.membersView.Load() }
 func (g *Group) Propose(ctx context.Context, e Entry) (CommittedEntry, error) {
 	return g.propose(ctx, e, nil)
 }
@@ -627,7 +664,10 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 	var wait <-chan time.Time
 	var leader uint64
 	for done := false; !done; {
+		lockWait := time.Now()
 		g.mu.Lock()
+		g.phases.proposeN.Add(1)
+		sinceMax(&g.phases.proposeWaitNS, &g.phases.proposeWaitMax, lockWait)
 		if g.failed || g.closed {
 			g.mu.Unlock()
 			return CommittedEntry{}, ErrUnavailable
@@ -772,7 +812,33 @@ func equalPayload(a, b []byte) bool {
 	}
 	return true
 }
+
+// refreshSoloRead publishes the cursor of a read served without g.mu when this group is a single
+// voter that leads and has applied everything committed (g.mu held).
+func (g *Group) refreshSoloRead() {
+	if g.failed || g.closed || g.conf == nil {
+		g.soloRead.Store(nil)
+		return
+	}
+	s := g.raw.BasicStatus()
+	voters := g.conf.GetVoters()
+	if s.RaftState != raft.StateLeader || s.Lead != g.id || len(voters) != 1 || voters[0] != g.id || len(g.conf.GetVotersOutgoing()) != 0 || len(g.conf.GetLearnersNext()) != 0 || s.HardState.GetCommit() > g.applied {
+		g.soloRead.Store(nil)
+		return
+	}
+	if old := g.soloRead.Load(); old != nil && old.Index == model.Uint64(g.application) {
+		return
+	}
+	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
+	g.soloRead.Store(&cursor)
+}
 func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
+	if cursor := g.soloRead.Load(); cursor != nil {
+		if ctx.Err() != nil {
+			return model.Cursor{}, ErrStale // a caller that gave up gets what the waiting path gives it
+		}
+		return *cursor, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
@@ -864,6 +930,25 @@ func (g *Group) decodeEntry(data []byte) (Entry, error) {
 	g.decoded.data, g.decoded.entry = data, e
 	return e, nil
 }
+
+// replayedEntry is an entry rebuildKnown decoded, with the Raft data slice it was decoded from.
+type replayedEntry struct {
+	data  []byte
+	entry Entry
+}
+
+// appliedEntry is the command of an entry about to be applied: the one rebuildKnown decoded when this
+// is the replay of the journal at Open (the same Raft data slice, so the same bytes), otherwise a
+// decode of the data.
+func (g *Group) appliedEntry(ent *pb.Entry) (Entry, error) {
+	if r, ok := g.replay[ent.GetIndex()]; ok {
+		delete(g.replay, ent.GetIndex())
+		if data := ent.GetData(); len(data) > 0 && len(data) == len(r.data) && &data[0] == &r.data[0] {
+			return r.entry, nil
+		}
+	}
+	return g.decodeEntry(ent.GetData())
+}
 func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 	if ent.GetType() != pb.EntryNormal || len(ent.GetData()) == 0 {
 		return nil
@@ -871,6 +956,9 @@ func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 	e, err := g.decodeEntry(ent.GetData())
 	if err != nil {
 		return err
+	}
+	if g.replay != nil && ent.GetIndex() > g.applied {
+		g.replay[ent.GetIndex()] = replayedEntry{data: ent.GetData(), entry: e}
 	}
 	if e.ApplicationIndex > g.logApplication {
 		g.logApplication = e.ApplicationIndex

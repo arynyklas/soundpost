@@ -95,6 +95,15 @@ func (e *Engine) scrubFreePages(ctx context.Context) (zeroed uint64, pending boo
 		return 0, true, err
 	}
 	cfg := e.scrub.withDefaults()
+	if busy, err := e.scrubPayload(ctx, cfg); err != nil || busy {
+		return 0, true, err
+	}
+	if err = e.sweepPayloadOrphans(ctx); err != nil { // records a crashed append left in the log that no reference names
+		return 0, true, err
+	}
+	if e.payloadOn.Load() && e.payloadDirty.Load() { // this process left records of its own that it cannot name: the restart's sweep reaches them
+		return 0, true, nil
+	}
 	file, err := os.OpenFile(e.db.Path(), os.O_WRONLY, 0)
 	if err != nil {
 		return 0, true, err

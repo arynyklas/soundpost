@@ -194,6 +194,10 @@ test('a consumer that stops reading is dropped by the server, the view says the 
   path.stall(true);
   for(let i=0;i<400;i++)await ingestLog(api,logSource,{at:at(60+i),name:`user${i%12}`});
   await page.waitForTimeout(15_000);
+  const ended=page.locator('[data-live-end]:not([data-live-end=""])');
+  // Chromium ends this view when its own HTTP/2 keepalive has failed through the paused relay (measured pause: about 25 s, whatever the ingest speed), so the
+  // relay stays paused until the view says so; no fixed pause is guessed from how fast the lines were accepted.
+  if(browserName==='chromium')await expect(ended).toBeVisible({timeout:60_000});
   path.stall(false);
   if(browserName!=='chromium'){
    // Measured (l3w15-iso3): what ends this view in Chromium is its own HTTP/2 keepalive failing through the paused relay (net::ERR_HTTP2_PING_FAILED); the
@@ -205,7 +209,6 @@ test('a consumer that stops reading is dropped by the server, the view says the 
    await expect(page.getByTestId('live-status')).toContainText('Live: connected');
    return;
   }
-  const ended=page.locator('[data-live-end]:not([data-live-end=""])');
   await expect(ended).toBeVisible({timeout:60_000});
   const how=await ended.getAttribute('data-live-end');
   expect(['interrupted','error']).toContain(how);

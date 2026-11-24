@@ -356,6 +356,9 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 		if st.CommandOwners == nil {
 			st.CommandOwners = map[string]string{}
 		}
+		if st.Commands == nil {
+			st.Commands = map[string]model.ControlResult{}
+		}
 		st.CommandOwners[r.CommandID.String()] = binding
 		st.Commands[r.CommandID.String()] = out
 		return nil
@@ -377,7 +380,7 @@ func (s *Service) AdminRead(ctx context.Context, c Credential, r AdminReadReques
 		return AdminView{}, err
 	}
 	var out AdminView
-	err := s.store.View(ctx, func(st model.ControlState) error {
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, c); err != nil {
 			return err
 		}

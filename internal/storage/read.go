@@ -313,11 +313,14 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			if it.posting != "" {
 				name = "scan_postings"
 			}
-			bucket := tx.Bucket([]byte(name))
-			if bucket == nil || tx.Bucket([]byte("scan_pages")) == nil {
-				return model.Fail(model.Corrupt)
+			rows, err := rowsOf(tx)
+			if err != nil {
+				return err
 			}
-			c := bucket.Cursor()
+			c, err := openOrderedCursor(tx, name)
+			if err != nil {
+				return err
+			}
 			start := append(append([]byte(nil), prefix...), timeKey(it.req.Start)...)
 			var k, v []byte
 			if len(it.last) > 0 {
@@ -363,7 +366,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 				var id model.ID
 				copy(id[:], v[:16])
 				if id != current {
-					raw := tx.Bucket([]byte("scan_pages")).Get(id[:])
+					raw := rows.Get(tblPages, id[:])
 					if raw == nil {
 						return model.Fail(model.Corrupt)
 					}

@@ -166,7 +166,7 @@ func TestMixedFormatProposersLeaveIdenticalState(t *testing.T) {
 		}
 		_ = e.db.View(func(tx *bolt.Tx) error {
 			for _, f := range envReceipt.Fragments {
-				raw := tx.Bucket([]byte("replica_commands")).Get(commandKey(model.BlobOwnerSlot(envManifest.Org, envManifest.Project, envManifest.Root), uint64(f.Cursor.Index)))
+				raw := commandAt(tx.Bucket([]byte("replica_commands")), commandKey(model.BlobOwnerSlot(envManifest.Org, envManifest.Project, envManifest.Root), uint64(f.Cursor.Index)))
 				if len(raw) == 0 || raw[0] != '{' {
 					t.Fatalf("voter %d stores an envelope fragment as %.8q, want JSON text", node, raw)
 				}

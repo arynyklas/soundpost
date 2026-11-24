@@ -116,6 +116,18 @@ type SubscribeRequest struct {
 	Signal    model.Kind
 	Selectors []Matcher
 	After     []model.Cursor
+	// CatchUp makes the subscription answer an overrun of its queue by reading the commits it dropped from
+	// durable storage and handing them over in order, instead of announcing them as a slow_consumer gap:
+	// no committed row is lost and none is repeated. A window opened by After or by a group change is still
+	// announced as a gap.
+	CatchUp bool
+	// CatchUpLag bounds how far behind a catch-up subscription may fall (D99): the number of commits, per
+	// replica group, between what the consumer has been handed and the newest commit. While the window is
+	// within it the dropped commits are read back and handed over exactly once, in order. Beyond it the part
+	// that is older than the bound is announced as one exact slow_consumer gap (After is the consumer's
+	// position, Through the last commit skipped) and the stream resumes at the newest CatchUpLag commits.
+	// Zero means DefaultCatchUpLag. It has no effect without CatchUp.
+	CatchUpLag uint64
 }
 type ChangeGap struct {
 	After   []model.Cursor

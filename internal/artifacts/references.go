@@ -66,11 +66,22 @@ type StateStore interface {
 }
 
 // ledgerUpdater is implemented by *control.Store: an update that does not move the control
-// AuthorityRevision when it wrote nothing but ledger entries. Reference and Unreference use it;
-// the GC fence (bump set) keeps the always-bumping Update. A StateStore without it falls back to
-// Update.
+// AuthorityRevision when it wrote nothing but ledger entries. Reference, Unreference and the
+// profile holds use it; the GC fence (bump set) keeps the always-bumping Update. A StateStore
+// without it falls back to Update. Its state carries no job or issue book: an evaluation that
+// reads an issue uses issueHoldUpdater.
 type ledgerUpdater interface {
 	UpdateArtifactReferences(context.Context, func(*model.ControlState) error) error
+}
+
+// issueHoldUpdater is implemented by *control.Store: ledgerUpdater for the holds of the issue
+// producer, whose decision reads the workflow of an issue. The state it gives fn carries the job
+// and issue books and the grouping issues; the one UpdateArtifactReferences gives does not, and an
+// evaluation over it finds every issue unknown. A StateStore without it falls back to Update, which
+// carries all of it. A *control.Store is both; the two are separate interfaces so that neither
+// can be taken for the other.
+type issueHoldUpdater interface {
+	UpdateIssueHolds(context.Context, func(*model.ControlState) error) error
 }
 
 // SnapshotPins reports whether any local snapshot, journal or replica state
@@ -196,6 +207,17 @@ func (p plan) write(st *model.ControlState, org model.ID, bump bool) error {
 // inside the transaction, over the state it really changes. The instant is fixed per call,
 // so both evaluations decide on the same time.
 func (l *Lifecycle) run(ctx context.Context, org model.ID, bump bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
+	return l.runUsing(ctx, org, bump, false, evaluate)
+}
+
+// runIssues is run for an evaluation that reads the workflow of an issue (HoldIssues,
+// SettleIssues): the transaction it commits in must be given the grouping issues, which the
+// plain ledger writer's state does not carry (issueHoldUpdater).
+func (l *Lifecycle) runIssues(ctx context.Context, org model.ID, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
+	return l.runUsing(ctx, org, false, true, evaluate)
+}
+
+func (l *Lifecycle) runUsing(ctx context.Context, org model.ID, bump, issues bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
 	now := model.UnixNano(l.cfg.Now().UnixNano())
 	pending := false
 	if err := l.cfg.State.View(ctx, func(st model.ControlState) error {
@@ -206,8 +228,14 @@ func (l *Lifecycle) run(ctx context.Context, org model.ID, bump bool, evaluate f
 		return err
 	}
 	update := l.cfg.State.Update
-	if u, ok := l.cfg.State.(ledgerUpdater); ok && !bump {
-		update = u.UpdateArtifactReferences // Reference / Unreference / holds: ledger bookkeeping, not authority
+	if !bump {
+		if issues {
+			if u, ok := l.cfg.State.(issueHoldUpdater); ok {
+				update = u.UpdateIssueHolds // issue holds: ledger bookkeeping decided by the issue book, not authority
+			}
+		} else if u, ok := l.cfg.State.(ledgerUpdater); ok {
+			update = u.UpdateArtifactReferences // Reference / Unreference / profile holds: ledger bookkeeping, not authority
+		}
 	}
 	return update(ctx, func(st *model.ControlState) error {
 		p, err := evaluate(*st, now)

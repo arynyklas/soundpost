@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -44,6 +45,24 @@ const (
 	threeMemberRecord = `{"group":"00000000000000000000000000000001","node":"2","members":{"revision":"1","nodes":[{"id":"1","address":"https://a","node_identity":"n1","failure_domain":"d1"},{"id":"2","address":"https://b","node_identity":"n2","failure_domain":"d2"},{"id":"3","address":"https://c","node_identity":"n3","failure_domain":"d3"}]}}`
 	singleRecord      = `{"group":"00000000000000000000000000000001","node":"1","members":{"revision":"1","nodes":[{"id":"1","address":"https://single.invalid","node_identity":"single","failure_domain":"local-disk"}]}}`
 )
+
+// A journal whose first record is a part record of a chained snapshot (a snapshot larger than one
+// record) is classified by the node and members that part record carries, like a whole first record.
+func TestIsDistributedDirectoryReadsAJournalThatStartsWithASnapshotPart(t *testing.T) {
+	part := func(record string) string {
+		return strings.TrimSuffix(record, "}") + `,"snapshot_part":"AAAA"}`
+	}
+	dir := t.TempDir()
+	writeFirstRecord(t, dir, part(threeMemberRecord))
+	if got, err := IsDistributedDirectory(dir); err != nil || !got {
+		t.Fatalf("three-member chain: %v %v", got, err)
+	}
+	dir = t.TempDir()
+	writeFirstRecord(t, dir, part(singleRecord))
+	if got, err := IsDistributedDirectory(dir); err != nil || got {
+		t.Fatalf("single-node chain: %v %v", got, err)
+	}
+}
 
 func TestIsDistributedDirectoryClassifiesByTheControlJournal(t *testing.T) {
 	for _, tc := range []struct {

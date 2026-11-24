@@ -55,7 +55,7 @@ func TestBackupSealsACutHoldingARejectedBatchStub(t *testing.T) {
 	engine.mu.Lock()
 	var stored walEntry
 	err = engine.db.View(func(tx *bolt.Tx) error {
-		return json.Unmarshal(tx.Bucket([]byte("replica_commands")).Get(commandKey(slot, logical)), &stored)
+		return json.Unmarshal(commandAt(tx.Bucket([]byte("replica_commands")), commandKey(slot, logical)), &stored)
 	})
 	engine.mu.Unlock()
 	if err != nil || stored.Type != "rejected" || stored.Batch != nil {

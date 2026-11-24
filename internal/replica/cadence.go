@@ -33,7 +33,20 @@ const (
 type Cadence struct {
 	Commands uint64
 	Bytes    int64
+	// Amortize makes the bounds grow with the size of the snapshot the last cut produced (cutDue): for a
+	// machine whose cut writes the whole state, so that the cost of the cut stays proportional to the
+	// journal it replaces. A machine that cuts incrementally (the data groups) leaves it off.
+	Amortize bool
+	// Stagger is the share of its bounds, in StaggerBase ths, after which this group cuts (0: all of them). The 64
+	// data groups of a node are loaded alike, so with the same bounds they all reach them at the same instant, and
+	// their cuts together held the engine lock they share for seconds at the single-host load, with every
+	// acknowledgement queued behind (L2w20Admission19). Each group is given a different share, so the cuts of a node
+	// are spread over the time one bound takes instead of falling together.
+	Stagger uint16
 }
+
+// StaggerBase is the denominator of Cadence.Stagger.
+const StaggerBase = 1024
 
 func (c Cadence) Enabled() bool { return c.Commands > 0 || c.Bytes > 0 }
 
@@ -124,8 +137,24 @@ func (g *Group) countApplied(dataBytes int) {
 }
 
 // cutDue reports whether a bound of the cadence is reached. g.mu is held.
+//
+// With Cadence.Amortize the bounds grow with the snapshot the last cut produced: a cut costs the size of the state (the
+// control group's snapshot streams every admission reservation row, 170 MB at 100,000 unsettled
+// batches, and the cadence cut it every 8 MiB of journal, 10 s of load: 24 % of the server's CPU
+// in the live profile of L2w20Admission7), a restart replays the journal, which costs ~35 ms per MB.
+// A bound of at most half the last snapshot's size in journal keeps the cut cost amortized (at
+// most 2 bytes cut per byte journaled) and the replay below half of what a cut writes.
 func (g *Group) cutDue() bool {
-	return g.cadence.Commands > 0 && g.sinceCommands >= g.cadence.Commands || g.cadence.Bytes > 0 && g.sinceBytes >= g.cadence.Bytes
+	scale := uint64(1)
+	if g.cadence.Amortize && g.cadence.Bytes > 0 && g.cutBytes > 2*g.cadence.Bytes {
+		scale = uint64(g.cutBytes / (2 * g.cadence.Bytes))
+	}
+	commands, bytes := g.cadence.Commands*scale, g.cadence.Bytes*int64(scale)
+	if s := uint64(g.cadence.Stagger); s != 0 && s < StaggerBase {
+		commands = max(commands*s/StaggerBase, min(commands, 1))
+		bytes = max(bytes*int64(s)/StaggerBase, min(bytes, 1))
+	}
+	return g.cadence.Commands > 0 && g.sinceCommands >= commands || g.cadence.Bytes > 0 && g.sinceBytes >= bytes
 }
 
 // AppliedDataBytes is the entry data bytes the cadence has counted since the group was opened (0
@@ -179,18 +208,36 @@ func (g *Group) cutAndCompact() error {
 	commands, size := g.sinceCommands, g.sinceBytes
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
 	g.mu.Unlock()
-	if _, err := g.CreateSnapshot(ctx, cursor); err != nil {
+	snap, err := g.CreateSnapshot(ctx, cursor)
+	if err != nil {
 		return err
 	}
+	cut := g.snaps.freshBytes(snap.Manifest) // what the cut wrote itself: files it linked from the previous snapshot cost nothing
+	if cut == 0 {
+		for _, f := range snap.Manifest.Files {
+			cut += int64(f.Size)
+		}
+	}
+	// The journal is compacted onto the cut before the snapshot it supersedes is dropped: until it is, the journal
+	// head is anchored on the superseded snapshot, whose directory holds the retry parts that head names.
+	compactBegan := time.Now()
+	verify := g.snaps.Verify
+	if g.snaps.wroteLast() {
+		verify = g.snaps.VerifyCut // the files the cut linked were hashed when they were written
+	}
+	if _, err := g.compactJournal(ctx, verify); err != nil {
+		return err
+	}
+	since(&g.phases.cutCompactNS, compactBegan)
+	dropBegan := time.Now()
 	if _, err := g.snaps.DropSuperseded(); err != nil {
 		return err
 	}
-	if _, err := g.CompactJournal(ctx); err != nil {
-		return err
-	}
+	since(&g.phases.cutDropNS, dropBegan)
 	g.mu.Lock()
 	g.sinceCommands -= min(commands, g.sinceCommands)
 	g.sinceBytes -= min(size, g.sinceBytes)
+	g.cutBytes = cut
 	g.mu.Unlock()
 	g.cadenceCuts.Add(1)
 	for took := int64(time.Since(began)); ; {

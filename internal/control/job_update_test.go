@@ -26,9 +26,13 @@ type jobFx struct {
 	group  model.ID
 }
 
-func newJobFx(t *testing.T) *jobFx {
+func newJobFx(t *testing.T) *jobFx { return newJobFxOn(t, newFenceFx(t)) }
+
+// newJobFxOn is newJobFx over the fixture fence, so that a test chooses the mode of the group
+// (newFenceFxPatch: the state patch gate is open and the books are in the ledger).
+func newJobFxOn(t *testing.T, fence *fenceFx) *jobFx {
 	t.Helper()
-	f := &jobFx{fenceFx: newFenceFx(t), group: model.ID{0xe1}}
+	f := &jobFx{fenceFx: fence, group: model.ID{0xe1}}
 	if err := f.store.BindJobUpdate(); err != nil {
 		t.Fatal(err)
 	}

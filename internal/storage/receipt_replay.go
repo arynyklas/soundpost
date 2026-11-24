@@ -35,7 +35,7 @@ func (e *Engine) ReceiptReplayChunks(ctx context.Context, scope auth.Scope, r mo
 		if commands == nil {
 			return model.Fail(model.Corrupt)
 		}
-		raw := commands.Get(commandKey(r.RouteSlot, uint64(receipt.Cursor.Index)))
+		raw := commandAt(commands, commandKey(r.RouteSlot, uint64(receipt.Cursor.Index)))
 		if raw == nil {
 			return nil
 		}
