@@ -293,3 +293,16 @@ test("a late start is recorded: the first checkpoint is gap-marked and lateStart
  expect(thrown.recorder.lateStart()).toBe("probe_failed"); // an unknown start is never claimed supported
  expect(thrown.chunks[0]!.gap).toBe(true);
 });
+
+test("no page node stays referenced between callbacks: the batch scratch, the trailing-node run included, is empty after an append batch", () => {
+ const {html, items} = list(5);
+ const r = page(html);
+ r.deliver(add(items, el("p", txt())), add(items, el("span", txt())));
+ expect(r.chunks).toHaveLength(2);
+ const scratch = r.recorder as unknown as Record<string, {length?: number; size?: number}>;
+ for (const name of ["run", "rewalkNodes", "rewalkIds", "groups", "below", "appended", "fresh", "seen", "rewalk"]) {
+  const held = scratch[name];
+  expect(held, name).toBeDefined();
+  expect(held!.length ?? held!.size, name).toBe(0);
+ }
+});

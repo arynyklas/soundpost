@@ -99,3 +99,10 @@ test("a chunk the fit had to truncate keeps its hash chain", () => {
  expect(chunks.some(chunk => chunk.nodes.some(node => node.class === "masked"))).toBe(true);
  for (let i = 1; i < chunks.length; i++) expect(chunks[i]!.previous_hash).toBe(createHash("sha256").update(canonicalJSON(chunks[i - 1])).digest("hex"));
 });
+
+test("NodeTable.of refuses a tag outside the closed vocabulary instead of storing a mark for it", () => {
+ const node = (tag: string): ReplayNode => ({id: "1", parent: "0", tag, class: "", text: ""} as ReplayNode);
+ expect(() => NodeTable.of([node("h1")])).toThrow("closed vocabulary");
+ expect(() => NodeTable.of([node("div"), node("")])).toThrow("closed vocabulary");
+ expect(NodeTable.of([node("div")]).length).toBe(1);
+});

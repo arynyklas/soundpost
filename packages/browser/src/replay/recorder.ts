@@ -22,8 +22,8 @@ function detectLateStart(): string | null {
 /** The frozen number columns behind each chunk this module emitted (the chunk's own `nodes` getter is their lazy object form). A consumer that only forwards the chunk (the core client's delivery) reads the nodes from here and never makes the objects. */
 const NODE_COLUMNS = new WeakMap<ReplayChunk, Nodes>();
 export function chunkNodes(chunk: ReplayChunk): Nodes | undefined { return NODE_COLUMNS.get(chunk); }
-/** The new children an append delta records under one node the replay holds: `records` counts the child-list records at the end of its children this batch named it for, `roots` the new children (nodes the replay does not hold, ending its children) in document order. A dropped group is `dead`. */
-interface Appended { readonly id: number; readonly parent: object; records: number; roots: readonly object[]; dead: boolean }
+/** The new children an append delta records under one node the replay holds: `roots` the new children (nodes the replay does not hold, ending its children) in document order. A dropped group is `dead`. */
+interface Appended { readonly id: number; readonly parent: object; roots: readonly object[]; dead: boolean }
 const NO_ROOTS: readonly object[] = [];
 /** An id-space checkpoint being prepared in slices: the second epoch of ids it builds (its own id map, shadow-root set, node table and child links), how far it is, and what its fit found. */
 class Preparation {
@@ -346,8 +346,7 @@ class Recorder implements ReplayRecorder {
    else if (kind === "inside" || !this.appendable(dom, node)) { this.addRewalk(id, node); const old = appended.get(node); if (old !== undefined) this.dropGroup(old); }
    else {
     let group = appended.get(node);
-    if (group === undefined) { group = {id, parent: node, records: 0, roots: NO_ROOTS, dead: false}; appended.set(node, group); groups.push(group); this.liveGroups++; }
-    group.records++;
+    if (group === undefined) { group = {id, parent: node, roots: NO_ROOTS, dead: false}; appended.set(node, group); groups.push(group); this.liveGroups++; }
    }
    if (this.rewalkIds.length + this.liveGroups > MAX_MUTATION_ROOTS) { full = true; break; }
   }
@@ -397,7 +396,7 @@ class Recorder implements ReplayRecorder {
  private releaseBatch(): void {
   this.rewalk.clear(); this.rewalkIds.length = 0; this.rewalkNodes.length = 0;
   this.appended.clear(); this.groups.length = 0; this.liveGroups = 0;
-  this.fresh.clear(); this.seen.clear(); this.below.length = 0;
+  this.fresh.clear(); this.seen.clear(); this.below.length = 0; this.run.length = 0;
  }
 
  /** A node the replay holds whose new children may be recorded alone: it shows its children (no widget, input, editable or shadow root). A custom element is never appended to: while it had no children it may have been recorded as an inferred closed shadow host, which the child itself ends, so its record re-walks it. */
