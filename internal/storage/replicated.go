@@ -1306,10 +1306,24 @@ func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, a
 	}
 	for _, min := range minimum {
 		found := false
-		for _, mark := range marks {
-			if mark.Group == min.Group && mark.Index >= min.Index {
-				found = true
+		for i := range marks {
+			if marks[i].Group != min.Group {
+				continue
 			}
+			if marks[i].Index < min.Index {
+				// A cursor is a command its group acknowledged or published, not one ahead of the group: the
+				// group may not have recorded it as applied yet. Wait for it, within the replica layer's bounded
+				// wait; only a group that stays behind for that long is stale.
+				if owner := e.repl.owner(min.Group); owner != nil {
+					cut, err := owner.ReadIndexAtLeast(ctx, min)
+					if err == nil {
+						marks[i] = cut
+					} else if !allowPartial {
+						return nil, false, replicaFaultUnder(ctx, err)
+					}
+				}
+			}
+			found = marks[i].Index >= min.Index
 		}
 		if !found {
 			if !allowPartial {
@@ -1368,12 +1382,8 @@ func (e *Engine) replicaBeforeCursor(ctx context.Context, cursor model.Cursor) e
 	if group == nil {
 		return model.Fail(model.Stale)
 	}
-	cut, err := group.ReadIndex(ctx)
-	if err != nil {
+	if _, err := group.ReadIndexAtLeast(ctx, cursor); err != nil { // a cursor the group has not applied yet is waited for, not refused
 		return replicaFaultUnder(ctx, err)
-	}
-	if cut.Index < cursor.Index {
-		return model.Fail(model.Stale)
 	}
 	return nil
 }

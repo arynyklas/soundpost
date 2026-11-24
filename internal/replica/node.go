@@ -313,6 +313,10 @@ type Group struct {
 	// the state machine's commit of the command in flight) nor a Raft round. nil in every other
 	// case; refreshSoloRead keeps it current at the end of processReady.
 	soloRead atomic.Pointer[model.Cursor]
+	// afterAck is a test seam: called by applyCommitted (g.mu held) once it has answered the waiters of
+	// a command, so a test can hold the group exactly there and read from another goroutine. Nil in
+	// production.
+	afterAck func()
 	// membersView is the committed configuration, published whenever g.members changes, for the readers
 	// that must not wait for g.mu (CommittedMembers).
 	membersView atomic.Pointer[Members]
@@ -832,6 +836,20 @@ func (g *Group) refreshSoloRead() {
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
 	g.soloRead.Store(&cursor)
 }
+
+// advanceSoloRead moves the cursor of the lock-free reads of a lone voter up to the command applyCommitted
+// has just applied (g.mu held). refreshSoloRead runs once processReady has drained the Ready, and the waiters
+// of a command are answered before that: a waiter that is not the goroutine running processReady would be
+// handed a receipt while the reads still answered the cut before the command. A group that does not
+// serve lock-free reads (soloRead is nil: not a lone leader, a configuration change, or entries committed
+// but not yet applied since the group opened) is left to refreshSoloRead, which decides that.
+func (g *Group) advanceSoloRead() {
+	if old := g.soloRead.Load(); old == nil || old.Index == model.Uint64(g.application) {
+		return
+	}
+	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
+	g.soloRead.Store(&cursor)
+}
 func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 	if cursor := g.soloRead.Load(); cursor != nil {
 		if ctx.Err() != nil {
@@ -888,6 +906,56 @@ func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 			return model.Cursor{}, ErrStale
 		}
 	}
+}
+
+// ReadIndexAtLeast is ReadIndex for a caller that holds a receipt: the cut it returns is at least min, the
+// cursor a command was acknowledged at. A group that has not applied min yet is waited for, within one
+// bounded wait (5 seconds, or ctx); a group that does not reach it in that time answers ErrStale, an
+// explicit freshness error, never a cut below min.
+func (g *Group) ReadIndexAtLeast(ctx context.Context, min model.Cursor) (model.Cursor, error) {
+	if min.Group != g.group {
+		return model.Cursor{}, ErrInvalid
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if cut := g.soloRead.Load(); cut != nil && cut.Index >= min.Index && ctx.Err() == nil {
+		return *cut, nil
+	}
+	// g.mu is held across the journal fsync and the state machine's Apply, and neither the waiting path of
+	// ReadIndex nor WaitApplied can stop waiting for it when ctx ends: the bound is kept here.
+	type answer struct {
+		cut model.Cursor
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		cut, err := g.readIndexAtLeast(ctx, min)
+		done <- answer{cut, err}
+	}()
+	select {
+	case a := <-done:
+		return a.cut, a.err
+	case <-ctx.Done():
+		return model.Cursor{}, ErrStale
+	}
+}
+func (g *Group) readIndexAtLeast(ctx context.Context, min model.Cursor) (model.Cursor, error) {
+	cut, err := g.ReadIndex(ctx)
+	if err != nil || cut.Index >= min.Index {
+		return cut, err
+	}
+	if err = g.WaitApplied(ctx, min); err != nil {
+		return model.Cursor{}, err
+	}
+	// The fence is taken again after the wait: the cut of a read that began before the group applied min
+	// proves nothing about leadership now.
+	if cut, err = g.ReadIndex(ctx); err != nil {
+		return model.Cursor{}, err
+	}
+	if cut.Index < min.Index {
+		return model.Cursor{}, ErrStale
+	}
+	return cut, nil
 }
 func (g *Group) WaitApplied(ctx context.Context, c model.Cursor) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

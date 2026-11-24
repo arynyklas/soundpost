@@ -711,6 +711,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 	}
 	g.applied = ent.GetIndex()
 	g.application = uint64(c.ApplicationCursor.Index)
+	g.advanceSoloRead() // before any waiter below is answered: its receipt is not ahead of a read made after it
 	if c.Entry.Kind != Noop {
 		if old, ok := g.completed[c.Entry.ID]; ok {
 			c = old
@@ -726,6 +727,9 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			// Applied: the retry table answers every later retry, and the log index only
 			// matters for a command that is in the log and not yet applied.
 			delete(g.logCommands, c.Entry.ID)
+		}
+		if g.afterAck != nil {
+			g.afterAck()
 		}
 	}
 	g.countApplied(len(ent.GetData()))
