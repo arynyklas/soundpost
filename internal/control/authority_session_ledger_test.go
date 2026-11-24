@@ -485,11 +485,12 @@ func referencingFiles(t *testing.T, name string) []string {
 }
 
 // The session writer is reached from the auth login paths only (the one interface and its
-// dispatch live in service.go); the ledger writer from the artifacts ledger only. A second
-// caller is a change a reviewer has to look at.
+// dispatch live in service.go) and from the store's own record-scoped login writer, which commits it as
+// the previous form where the scoped delta is not proposed (scoped_delta.go, D102); the ledger writer from
+// the artifacts ledger only. A further caller is a change a reviewer has to look at.
 func TestSessionAndLedgerWritersHaveExactlyTheirCallers(t *testing.T) {
-	if got := referencingFiles(t, "UpdateSessionCreate"); !slices.Equal(got, []string{"../../internal/auth/service.go"}) {
-		t.Fatalf("UpdateSessionCreate is referenced from %v, want exactly internal/auth/service.go", got)
+	if got := referencingFiles(t, "UpdateSessionCreate"); !slices.Equal(got, []string{"../../internal/auth/service.go", "../../internal/control/scoped_delta.go"}) {
+		t.Fatalf("UpdateSessionCreate is referenced from %v, want exactly internal/auth/service.go and internal/control/scoped_delta.go", got)
 	}
 	if got := referencingFiles(t, "UpdateArtifactReferences"); !slices.Equal(got, []string{"../../internal/artifacts/references.go"}) {
 		t.Fatalf("UpdateArtifactReferences is referenced from %v, want exactly internal/artifacts/references.go", got)

@@ -19,22 +19,35 @@ import (
 // still catching up with the cluster or has lost the race for its index to another write.
 // Nothing is committed by a refused call. kdfInside counts the password-KDF runs made while a
 // write's transition runs (the window in which another commit makes the write stale), and
-// beforeWrite, when set, runs once before the first write reaches the store.
+// beforeWrite, when set, runs once before the first write reaches the store. When cutOff is set, a
+// call after the refused ones does not commit: it waits for its context to end and answers cutOff, as
+// a proposal the stale-wait budget cut off midway does.
 type staleOnLogin struct {
 	*control.Store
 	refuse      int32
 	calls       atomic.Int32
 	kdfInside   atomic.Int64
 	beforeWrite func(context.Context, *control.Store)
+	cutOff      error
 }
 
 // SharesUpdateOf: this double is the one that implements UpdateSessionCreate, so the service must
 // call it (a wrapper that does not override the writer answers false, like control.Store does for it).
 func (s *staleOnLogin) SharesUpdateOf(c auth.ControlStore) bool { return c == auth.ControlStore(s) }
 
+// UpdateSessionCreateRecords is the same write for a transition that names the records it reads: the double
+// stands in for a store that commits the previous form, so it answers it through UpdateSessionCreate.
+func (s *staleOnLogin) UpdateSessionCreateRecords(ctx context.Context, _ model.ControlRecords, fn func(*model.ControlState) error) error {
+	return s.UpdateSessionCreate(ctx, fn)
+}
+
 func (s *staleOnLogin) UpdateSessionCreate(ctx context.Context, fn func(*model.ControlState) error) error {
 	if s.calls.Add(1) <= s.refuse {
 		return model.Fail(model.Stale)
+	}
+	if s.cutOff != nil {
+		<-ctx.Done()
+		return s.cutOff
 	}
 	if hook := s.beforeWrite; hook != nil {
 		s.beforeWrite = nil
@@ -87,6 +100,23 @@ func TestLoginWaitsOutAStaleControlWriteInsteadOfAnsweringIt(t *testing.T) {
 	if _, err = service.Authenticate(context.Background(), session.Token); err != nil {
 		t.Fatalf("the session the login returned does not authenticate: %v", err)
 	}
+}
+
+// The wait of a login whose budget ends inside an attempt after index races were seen answers the typed
+// `stale` the documentation promises, not the stage the deadline cut (`unavailable`); a login that never
+// saw a race keeps the answer it got.
+func TestLoginWhoseBudgetEndsInsideAnAttemptAnswersStale(t *testing.T) {
+	service, store := loginFixture(t, 3)
+	service.SetLoginStaleBudget(300 * time.Millisecond)
+	store.cutOff = model.Fail(model.Unavailable)
+	_, err := service.Login(context.Background(), "stale-login@example.test", "stale login password 2026", "")
+	assertCode(t, err, model.Stale)
+
+	service, store = loginFixture(t, 0)
+	service.SetLoginStaleBudget(300 * time.Millisecond)
+	store.cutOff = model.Fail(model.Unavailable)
+	_, err = service.Login(context.Background(), "stale-login@example.test", "stale login password 2026", "")
+	assertCode(t, err, model.Unavailable)
 }
 
 // The wait is bounded and wrong credentials are never retried: a stale write that does not clear

@@ -16,17 +16,24 @@ import (
 
 // staleOnUpdate is a control store whose plain write answers the typed `stale` for its first `refuse`
 // calls, as a replicated control write does when it lost the race for its index to another control
-// commit (every node runs background writers). Nothing is committed by a refused call.
+// commit (every node runs background writers). Nothing is committed by a refused call. When cutOff is
+// set, a call after the refused ones does not commit either: it waits for its context to end and
+// answers cutOff, as a proposal the stale-wait budget cut off midway does.
 type staleOnUpdate struct {
 	*control.Store
 	refuse atomic.Int32
 	calls  atomic.Int32
+	cutOff error
 }
 
 func (s *staleOnUpdate) Update(ctx context.Context, fn func(*model.ControlState) error) error {
 	s.calls.Add(1)
 	if s.refuse.Add(-1) >= 0 {
 		return model.Fail(model.Stale)
+	}
+	if s.cutOff != nil {
+		<-ctx.Done()
+		return s.cutOff
 	}
 	return s.Store.Update(ctx, fn)
 }
@@ -122,4 +129,49 @@ func TestInstanceScopeStaleWaitIsBoundedAndOtherRefusalsAreNotRetried(t *testing
 	if store.calls.Load() != 0 {
 		t.Fatalf("a refused scope request reached the control write %d times", store.calls.Load())
 	}
+}
+
+// A wait whose budget ends INSIDE an attempt used to answer whatever stage the deadline cut: the
+// proposal's own context error (`unavailable`), the read fence's (`timeout`), a cancelled validation.
+// `soundpost backup failed: unavailable` tells an operator the cluster is down when it is healthy and
+// only kept losing the race for its index (measured: the instance scope on a voter against a
+// saturating competing writer, -race, 15 s budget: of 300 scopes 3 ended `unavailable` and 2 `stale`,
+// all at 15.01 s after 317 to 324 stale answers: one cause, two answers). The documented
+// answer of a spent budget is the typed `stale` (docs/operations/distributed.md).
+func TestInstanceScopeWhoseBudgetEndsInsideAnAttemptAnswersStale(t *testing.T) {
+	for _, cut := range []model.Code{model.Unavailable, model.Timeout, model.Cancelled} {
+		t.Run(string(cut), func(t *testing.T) {
+			service, store, credential := instanceScopeFixture(t)
+			service.SetLoginStaleBudget(300 * time.Millisecond)
+			store.refuse.Store(3)
+			store.cutOff = model.Fail(cut)
+			start := time.Now()
+			_, err := service.InstanceScope(context.Background(), credential, "a budget cut off inside an attempt")
+			assertCode(t, err, model.Stale)
+			if elapsed := time.Since(start); elapsed < 300*time.Millisecond || elapsed > 5*time.Second {
+				t.Fatalf("the wait ended after %s, want its 300 ms budget", elapsed)
+			}
+			if calls := store.calls.Load(); calls != 4 {
+				t.Fatalf("%d control write attempts, want 3 refused and the one the budget cut off", calls)
+			}
+		})
+	}
+}
+
+// The answer of a spent budget is the stale only when an index race was seen. A first attempt that finds
+// the cluster unavailable is not turned into one, and a caller that gave up gets its own cancellation.
+func TestInstanceScopeKeepsItsAnswerWhenNoIndexRaceWasSeenOrTheCallerGaveUp(t *testing.T) {
+	service, store, credential := instanceScopeFixture(t)
+	service.SetLoginStaleBudget(300 * time.Millisecond)
+	store.cutOff = model.Fail(model.Unavailable)
+	_, err := service.InstanceScope(context.Background(), credential, "the cluster is down")
+	assertCode(t, err, model.Unavailable)
+
+	store.refuse.Store(3)
+	store.cutOff = model.Fail(model.Timeout)
+	service.SetLoginStaleBudget(time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err = service.InstanceScope(ctx, credential, "the caller's own deadline")
+	assertCode(t, err, model.Timeout)
 }

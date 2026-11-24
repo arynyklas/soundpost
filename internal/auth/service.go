@@ -102,9 +102,10 @@ type Service struct {
 	sourceBarrier SourceBarrier
 	throttle      *loginThrottle
 	// staleWaiting counts the logins inside the bounded stale wait; staleLimit is how many may
-	// (loginStaleWaiters, lowered by tests).
+	// (loginStaleWaiters, lowered by tests); staleBudget bounds one wait (loginStaleBudget, shortened by tests).
 	staleWaiting atomic.Int32
 	staleLimit   int32
+	staleBudget  time.Duration
 	// indexContractor is the contraction ContractIndexes applies to an organization (D70); nil: unavailable.
 	indexContractor atomic.Pointer[IndexContractor]
 }
@@ -137,7 +138,7 @@ func NewService(d AuthDependencies) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now), staleLimit: loginStaleWaiters}
+	s := &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now), staleLimit: loginStaleWaiters, staleBudget: loginStaleBudget}
 	// The dummy digest stands in for unknown and disabled addresses. It is derived here, once per
 	// process and before any request is served, so the first unknown-address login costs one KDF
 	// run like every other login instead of two.
@@ -242,6 +243,36 @@ func (s *Service) updateSession(ctx context.Context, fn func(*model.ControlState
 	}
 	return s.store.Update(ctx, fn)
 }
+
+// recordScoper is implemented by *control.Store: the two writes that name the records they read (D102).
+// Their commit is judged against those records alone, so a control commit of anything else (admission,
+// jobs, issues, another organization) does not make it stale; where the installation does not take the
+// form (a member that does not speak it, an installation the previous release can still read) the store
+// commits the previous form of the same transition. A ControlStore without them, or one that wraps the
+// store and may override Update (SharesUpdateOf, the rule of sessionCreator), takes the previous form.
+type recordScoper interface {
+	UpdateSessionCreateRecords(context.Context, model.ControlRecords, func(*model.ControlState) error) error
+	UpdateAuditRecords(context.Context, model.ControlRecords, func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
+}
+
+// updateSessionRecords is updateSession for a transition that reads and writes only the records in reads,
+// which fn is given alone (the state it is handed holds those records and nothing else).
+func (s *Service) updateSessionRecords(ctx context.Context, reads model.ControlRecords, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(recordScoper); ok && u.SharesUpdateOf(s.store) {
+		return u.UpdateSessionCreateRecords(ctx, reads, fn)
+	}
+	return s.updateSession(ctx, fn)
+}
+
+// updateAuditRecords is Update for a transition that reads only the records in reads and appends audit
+// rows (the grant of an instance scope).
+func (s *Service) updateAuditRecords(ctx context.Context, reads model.ControlRecords, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(recordScoper); ok && u.SharesUpdateOf(s.store) {
+		return u.UpdateAuditRecords(ctx, reads, fn)
+	}
+	return s.store.Update(ctx, fn)
+}
 func (s *Service) Login(ctx context.Context, email, p, code string) (Session, error) {
 	if e := s.throttle.check(ctx, email); e != nil {
 		return Session{}, e
@@ -277,8 +308,25 @@ const loginStaleWaiters = 16
 // assert that a login did not need the bounded wait.
 var loginStaleRetries atomic.Int64
 
+// errStaleBudget is the cause of a wait context that ended because its budget was spent (not
+// because the caller gave up): retryStale answers the typed stale for it.
+var errStaleBudget = errors.New("auth: the stale wait budget is spent")
+
+// waitOutStale runs one attempt of a control write, fn, again as long as it is answered the typed
+// stale, pausing between attempts, for at most the service's stale budget (loginStaleBudget) and
+// within the service's waiter slots. fn is given the context bounded by that budget.
+func (s *Service) waitOutStale(ctx context.Context, fn func(wait context.Context) error) error {
+	wait, cancel := context.WithTimeoutCause(ctx, s.staleBudget, errStaleBudget)
+	defer cancel()
+	return retryStale(wait, func() error { return fn(wait) }, s.admitStaleWaiter)
+}
+
 // retryStale repeats fn, pausing briefly between attempts, for as long as it fails with the typed
-// retryable Stale fault and ctx is alive. The last Stale is returned when ctx ends; every other
+// retryable Stale fault and ctx is alive. When ctx ends, the answer is the typed Stale if the budget
+// ended it after an index race was seen (an attempt the deadline cut off answers whatever stage it
+// was in: unavailable, timeout, cancelled; none of them says what is wrong, which is a lost race for
+// the index), and the attempt's own answer otherwise: a caller that gave up gets its cancellation,
+// and a first attempt that found the cluster down is not turned into an index race. Every other
 // result is returned at once. admit is asked once, after the first stale answer: it returns the
 // function that gives the wait's slot back, or nil when no slot is free, and then the stale answer
 // is returned at once.
@@ -289,12 +337,26 @@ func retryStale(ctx context.Context, fn func() error, admit func() (release func
 			release()
 		}
 	}()
+	var sawStale bool
 	for {
 		err := fn()
+		if err == nil {
+			return nil
+		}
 		var fault *model.Fault
-		if err == nil || ctx.Err() != nil || !errors.As(err, &fault) || fault.Code != model.Stale {
+		typed := errors.As(err, &fault)
+		stale := typed && fault.Code == model.Stale
+		if ctx.Err() != nil {
+			if (sawStale || stale) && errors.Is(context.Cause(ctx), errStaleBudget) &&
+				(!typed || stale || fault.Code == model.Unavailable || fault.Code == model.Timeout || fault.Code == model.Cancelled) {
+				return model.Fail(model.Stale)
+			}
 			return err
 		}
+		if !stale {
+			return err
+		}
+		sawStale = true
 		if release == nil {
 			if release = admit(); release == nil {
 				return err
@@ -357,7 +419,9 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 		if !checkedOK || !known {
 			return model.Fail(model.Unauthenticated)
 		}
-		return s.updateSession(wait, func(st *model.ControlState) error {
+		// The transition reads the account it verified the password against and writes its session: the
+		// control write is judged against those two records, not against the revision of the whole state.
+		return s.updateSessionRecords(wait, model.ControlRecords{Users: []string{key}, Sessions: []string{hashToken(out.Token)}}, func(st *model.ControlState) error {
 			u, ok := st.Users[key]
 			if !ok || u.Disabled || u.Email != email || u.Password != seen.Password {
 				// The account changed after the password was verified: verify it again.
@@ -386,10 +450,7 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 	// is still catching up with the cluster (a restart is the common case) or lost the race for its
 	// index to another control write is therefore waited out for loginStaleBudget instead of being
 	// answered to the caller, within loginStaleWaiters logins at a time.
-	wait, cancel := context.WithTimeout(ctx, loginStaleBudget)
-	defer cancel()
-	e := retryStale(wait, func() error { return attempt(wait) }, s.admitStaleWaiter)
-	return out, e
+	return out, s.waitOutStale(ctx, attempt)
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {
 	var out Credential

@@ -476,6 +476,8 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			switch {
 			case cmd.delta != nil:
 				err = m.verifyCurrentDelta(*cmd.delta)
+			case cmd.scoped != nil:
+				err = m.verifyCurrentScoped(*cmd.scoped, model.Revision(c.ApplicationCursor.Index))
 			case cmd.patch != nil:
 				err = m.verifyCurrentPatch(*cmd.patch)
 			default:
@@ -491,7 +493,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		if err != nil {
 			return model.Fail(model.Corrupt)
 		}
-		// A delta carries no key files: only a replacement and a patch install them.
+		// A delta, audit or scoped, carries no key files: only a replacement and a patch install them.
 		var keys map[string][]byte
 		switch {
 		case cmd.replacement != nil:
@@ -499,7 +501,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		case cmd.patch != nil:
 			keys = cmd.patch.Keys
 		}
-		if cmd.delta == nil {
+		if cmd.delta == nil && cmd.scoped == nil {
 			if err := m.store.installReplicaKeys(keys); err != nil {
 				return err
 			}
@@ -589,11 +591,14 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 			var installation model.ID
 			var expected model.Revision
-			if cmd.delta != nil {
+			switch {
+			case cmd.delta != nil:
 				installation, expected = cmd.delta.Installation, cmd.delta.Expected
-			} else if cmd.patch != nil {
+			case cmd.scoped != nil:
+				installation = cmd.scoped.Installation // it names no revision: the records it read are its precondition
+			case cmd.patch != nil:
 				installation, expected = cmd.patch.Installation, cmd.patch.Expected
-			} else {
+			default:
 				if cmd.replacement.State.Revision != cmd.replacement.Expected+1 {
 					return model.Fail(model.Corrupt)
 				}
@@ -604,7 +609,20 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 			var next []byte // the encoding of the state this command leaves
 			settled := false
-			if expected != revision0 {
+			stale := expected != revision0
+			if cmd.scoped != nil {
+				// The command is stale when a record it read is no longer the one it read, whatever else
+				// was committed since (scoped_delta.go); every voter holds the same bytes and decides alike.
+				if err := raw(); err != nil {
+					return err
+				}
+				holds, e := cmd.scoped.holds(rawState, root)
+				if e != nil {
+					return e
+				}
+				stale = !holds
+			}
+			if stale {
 				rejected = true
 				revisionAfter = model.Revision(c.ApplicationCursor.Index)
 				if err := meta.Put([]byte("rejected:"+c.Entry.ID.String()), []byte{1}); err != nil {
@@ -625,6 +643,24 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 						return err
 					}
 					current.Revision = revisionAfter
+				}
+			} else if cmd.scoped != nil {
+				if revision0 == ^model.Revision(0) {
+					return model.Fail(model.Corrupt)
+				}
+				revisionAfter = revision0 + 1
+				settled = root.settled
+				if out, ok := scopedRaw(rawState, root, *cmd.scoped, revisionAfter); ok {
+					next = out
+					owe = erasureCount(cmd.scoped.Audits) > 0
+				} else {
+					if err := load(); err != nil {
+						return err
+					}
+					var e error
+					if owe, e = applyScopedDelta(&current, *cmd.scoped, revisionAfter); e != nil {
+						return e
+					}
 				}
 			} else if cmd.delta != nil {
 				owe = erasureCount(cmd.delta.Audits) > 0
@@ -1117,6 +1153,12 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 	cmd, err := decodeControlCommand(command.Payload)
 	if err != nil {
 		return model.Fail(model.Invalid)
+	}
+	if cmd.scoped != nil {
+		// It names no revision and is ordered at the next index: the records it read are its whole
+		// precondition (scoped_delta.go). It is neither held for a writer that lost nor does its own
+		// refusal make one a loser: an unrelated commit never refuses it.
+		return m.store.db.View(func(tx *bolt.Tx) error { return validateScoped(tx, *cmd.scoped, command) })
 	}
 	var installation model.ID
 	var expected, revision model.Revision

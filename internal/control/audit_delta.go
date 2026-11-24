@@ -55,11 +55,12 @@ type auditDeltaCommand struct {
 
 const auditDeltaKey = "audit_delta"
 
-// controlCommand is a decoded payload of a Control entry: exactly one of the three shapes.
+// controlCommand is a decoded payload of a Control entry: exactly one of the four shapes.
 type controlCommand struct {
 	replacement *controlReplacement
 	delta       *auditDelta
 	patch       *statePatch
+	scoped      *scopedDelta
 }
 
 // decodeControlCommand decodes a Control payload strictly (no unknown member, no duplicate key, no
@@ -83,20 +84,17 @@ func decodeControlCommand(payload []byte) (controlCommand, error) {
 		// build does not know would decode and then encode without it: the journal would hold bytes
 		// whose canonical form is not the one the proposer digested. A row is the delta's only
 		// externally supplied text; it has to be exactly what this build writes.
-		var rows struct {
-			AuditDelta struct {
-				Audits []json.RawMessage `json:"audits"`
-			} `json:"audit_delta"`
-		}
-		if json.Unmarshal(payload, &rows) != nil || len(rows.AuditDelta.Audits) != len(c.AuditDelta.Audits) {
+		if !canonicalAuditRows(payload, auditDeltaKey, c.AuditDelta.Audits) {
 			return controlCommand{}, model.Fail(model.Invalid)
 		}
-		for i, row := range c.AuditDelta.Audits {
-			if again, err := json.Marshal(row); err != nil || !bytes.Equal(again, rows.AuditDelta.Audits[i]) {
-				return controlCommand{}, model.Fail(model.Invalid)
-			}
-		}
 		return controlCommand{delta: &c.AuditDelta}, nil
+	}
+	if name, ok := key.(string); ok && name == scopedDeltaKey {
+		d, err := decodeScopedDelta(payload)
+		if err != nil {
+			return controlCommand{}, err
+		}
+		return controlCommand{scoped: &d}, nil
 	}
 	if name, ok := key.(string); ok && name == statePatchKey {
 		var c statePatchCommand
@@ -110,6 +108,23 @@ func decodeControlCommand(payload []byte) (controlCommand, error) {
 		return controlCommand{}, model.Fail(model.Invalid)
 	}
 	return controlCommand{replacement: &next}, nil
+}
+
+// canonicalAuditRows says whether the rows of the command named by member, as the payload spells them,
+// are the rows decoded from them, byte for byte once encoded again.
+func canonicalAuditRows(payload []byte, member string, rows []model.ControlAudit) bool {
+	var outer map[string]struct {
+		Audits []json.RawMessage `json:"audits"`
+	}
+	if json.Unmarshal(payload, &outer) != nil || len(outer[member].Audits) != len(rows) {
+		return false
+	}
+	for i, row := range rows {
+		if again, err := json.Marshal(row); err != nil || !bytes.Equal(again, outer[member].Audits[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetAuditDeltaGate installs the function that says whether every member of the replica group

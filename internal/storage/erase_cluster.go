@@ -111,8 +111,11 @@ const (
 	// empty, where the digest is the one every release computes, and a whole-state replacement, which
 	// every release applies, otherwise. A binary that declared 7 holds the grouping issues and the applied-command
 	// log (Commands, CommandOwners) in its blob and has no record tables for them (protocol 8, D85): a patch that
-	// addresses those records is proposed only once every member declared at least 8.
-	statePatchProtocol uint64 = 8
+	// addresses those records is proposed only once every member declared at least 8. A binary that declared
+	// 8 does not decode the scoped delta (control/scoped_delta.go, D102: the login and the grant of an
+	// instance scope carry a precondition on the records they read, not on the revision of the whole state),
+	// so that command is proposed only once every member declared at least 9, in a contracted installation.
+	statePatchProtocol uint64 = 9
 	// declaredProtocol is the version this binary declares.
 	declaredProtocol = statePatchProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced

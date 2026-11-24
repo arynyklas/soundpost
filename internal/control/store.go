@@ -47,6 +47,9 @@ type Store struct {
 	// auditDeltas and auditDeltaBytes count the delta commands AppendAudit proposed and their payload
 	// bytes (read by tests and benchmarks through AuditDeltaStatsForTest).
 	auditDeltas, auditDeltaBytes atomic.Uint64
+	// scopedDeltas and scopedDeltaBytes count the scoped delta commands the record writers proposed
+	// (scoped_delta.go) and their payload bytes (ScopedDeltaStats).
+	scopedDeltas, scopedDeltaBytes atomic.Uint64
 	// statePatchGate says whether a command may be proposed as a state patch (state_patch.go); nil:
 	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
 	statePatchGate                atomic.Pointer[func() bool]

@@ -22,6 +22,16 @@ type ControlSession struct {
 	CSRF                     string
 	Expires, Reauthenticated int64
 }
+
+// ControlRecords names records of the control state by the keys of the two maps a login and the grant of
+// an instance scope read: Users (keyed by the user's id) and Sessions (keyed by the digest of the session
+// token). A control write that names the records it reads is judged against those records alone
+// (control.Store.UpdateSessionCreateRecords, UpdateAuditRecords), not against the revision of the whole
+// state.
+type ControlRecords struct {
+	Users    []string
+	Sessions []string
+}
 type ControlTeam struct {
 	Members     []ID     `json:"members"`
 	Projects    []ID     `json:"projects"`

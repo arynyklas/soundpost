@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package auth
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // KDFRuns exposes the password-KDF evaluation counter to the external tests.
 func KDFRuns() int64 { return kdfRuns.Load() }
@@ -32,6 +35,9 @@ func LoginStaleRetries() int64 { return loginStaleRetries.Load() }
 
 // LimitLoginStaleWaiters lowers how many logins of the service may wait inside the stale budget.
 func (s *Service) LimitLoginStaleWaiters(n int32) { s.staleLimit = n }
+
+// SetLoginStaleBudget shortens how long one login or instance scope of the service waits out a stale control write.
+func (s *Service) SetLoginStaleBudget(d time.Duration) { s.staleBudget = d }
 
 // LoginStaleWaiting is how many logins of the service are inside that wait now.
 func (s *Service) LoginStaleWaiting() int32 { return s.staleWaiting.Load() }

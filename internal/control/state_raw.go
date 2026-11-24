@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -790,30 +789,9 @@ func deltaRaw(raw []byte, root stateRoot, d auditDelta) ([]byte, bool) {
 	if !root.ok {
 		return nil, false
 	}
-	rows, err := json.Marshal(d.Audits)
-	if err != nil {
+	ops, ok := stepOps(raw, root, d.Expected+1, d.At, d.Audits)
+	if !ok {
 		return nil, false
-	}
-	ops := []patchOp{revisionOp(d.Expected + 1)}
-	if m, ok := root.member(raw, "Audits"); ok && raw[m.vs] == '[' {
-		ops = append(ops, patchOp{Op: opArray, Path: []string{"Audits"}, Value: rows})
-	} else {
-		ops = append(ops, patchOp{Op: opSet, Path: []string{"Audits"}, Value: rows}) // no log yet: it starts with the rows
-	}
-	clock := State{Revision: d.Expected + 1}
-	if m, ok := root.member(raw, "revision_clock"); ok {
-		if json.Unmarshal(raw[m.vs:m.ve], &clock.RevisionClock) != nil {
-			return nil, false
-		}
-	}
-	before := slices.Clone(clock.RevisionClock)
-	noteRevisionTime(&clock, d.At)
-	if !slices.Equal(before, clock.RevisionClock) {
-		stamps, err := json.Marshal(clock.RevisionClock)
-		if err != nil {
-			return nil, false
-		}
-		ops = append(ops, patchOp{Op: opSet, Path: []string{"revision_clock"}, Value: stamps})
 	}
 	out, eff, ok := patchRaw(raw, root, ops)
 	if !ok || !eff.revisionSet || eff.revision != d.Expected+1 {

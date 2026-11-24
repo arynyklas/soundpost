@@ -236,9 +236,10 @@ func redactControlPayloadWith(current State, live *liveBooks, payload []byte) (r
 	if derr != nil {
 		return nil, false, model.Fail(model.Corrupt)
 	}
-	if cmd.delta != nil {
-		// An audit delta carries audit rows (ids, action, reason), no book a deletion erases: it
-		// is retained as it is. The audit log is append-only evidence (eraseControlText).
+	if cmd.delta != nil || cmd.scoped != nil {
+		// An audit delta carries audit rows (ids, action, reason), and a scoped delta user and session
+		// records besides: no book a deletion erases. It is retained as it is. The audit log is
+		// append-only evidence (eraseControlText).
 		return payload, false, nil
 	}
 	if cmd.patch != nil {

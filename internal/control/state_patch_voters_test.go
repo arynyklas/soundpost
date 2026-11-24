@@ -151,12 +151,41 @@ func TestStatePatchSurvivesAFollowerJournalReplayAfterARestart(t *testing.T) {
 // A voter that is behind a cut of the leader's journal learns the patches from the snapshot the
 // leader installs: the snapshot holds the whole state, the records are in it, and the voter then
 // applies the patches that follow.
+//
+// The premise (the voter is behind the journal's head, so the only way to catch up is a snapshot) is
+// made, not waited for: while the voter is cut off, the commits go in, and then the test itself cuts a
+// snapshot and compacts the journal on the two reachable voters, whichever of them leads, until the
+// head of each journal is past the first entry the lagging voter is missing. How many entries a
+// journal keeps beyond the cut does not matter, nor does when the cadence loop gets to run.
 func TestStatePatchSurvivesASnapshotInstallOnALaggingVoter(t *testing.T) {
 	d := newPatchVoters(t, replica.Cadence{Commands: 16}, true)
 	d.mesh.cut(stormVoter, true)
+	patchesBefore := d.patches()
 	d.write(1, 60)
-	leader := d.stores[1].ReplicaGroup()
-	d.eventually("the leader cut its journal at least twice", func() bool { return leader.CadenceCuts() >= 2 })
+	if n := d.patches() - patchesBefore; n < 60 {
+		t.Fatalf("%d patch commands were proposed for 60 commands (the gate is open)", n)
+	}
+	for _, id := range []uint64{1, 2} {
+		g := d.stores[id].ReplicaGroup()
+		d.eventually(fmt.Sprintf("voter %d cut a snapshot and compacted its journal past voter %d", id, stormVoter), func() bool {
+			// The cut voter takes nothing in, so its last index is read each time: the journal has to
+			// be past the entry that follows it, or it would catch up from the log.
+			_, behind := d.stores[stormVoter].ReplicaGroup().JournalRange()
+			if first, _ := g.JournalRange(); first > behind+1 {
+				return true
+			}
+			// A cadence cut that runs beside this one, or a machine that has not applied the cut yet,
+			// answers with an error: the next attempt takes the newer state.
+			if _, err := g.CreateSnapshot(context.Background(), g.Status().ApplicationCursor); err != nil {
+				return false
+			}
+			if _, err := g.CompactJournal(context.Background()); err != nil {
+				return false
+			}
+			first, _ := g.JournalRange()
+			return first > behind+1
+		})
+	}
 	d.mesh.mu.Lock()
 	installed := d.mesh.snaps[stormVoter]
 	d.mesh.mu.Unlock()
@@ -169,7 +198,7 @@ func TestStatePatchSurvivesASnapshotInstallOnALaggingVoter(t *testing.T) {
 	installed = d.mesh.snaps[stormVoter]
 	d.mesh.mu.Unlock()
 	if installed < 1 {
-		t.Fatalf("voter %d caught up without installing a snapshot: the test does not exercise the install", stormVoter)
+		t.Fatalf("voter %d caught up without installing a snapshot: the compacted journals left it no other way", stormVoter)
 	}
 	d.agree()
 	d.write(stormVoter, 4) // the installed voter proposes against the installed revision
