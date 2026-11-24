@@ -77,6 +77,38 @@ func payloadFilePaths(t *testing.T, dir string) []string {
 	return paths
 }
 
+// pageCacheTempDir points the temp dir of the test (t.TempDir) at a file system that honours fadvise. tmpfs keeps every page whatever
+// is asked, so a test of the pages the log leaves in the page cache measures nothing there: run with TMPDIR on tmpfs (the default of
+// several distributions) it failed on every kernel, 6.1 to 6.12, and passed on every kernel with the files on ext4. The temp dir is
+// tried first, then /var/tmp, then the package directory; when none of them honours the advice the test is skipped (nothing to assert).
+func pageCacheTempDir(t *testing.T) {
+	t.Helper()
+	wd, _ := os.Getwd()
+	for _, base := range []string{"", "/var/tmp", wd} {
+		if base != "" {
+			if st, err := os.Stat(base); err != nil || !st.IsDir() {
+				continue
+			}
+		}
+		dir, err := os.MkdirTemp(base, "pagecache-*")
+		if err != nil {
+			continue
+		}
+		probe := filepath.Join(dir, "probe")
+		if os.WriteFile(probe, bytes.Repeat([]byte{1}, 64<<10), 0o600) == nil && evictFile(t, probe) {
+			if base == "" {
+				os.RemoveAll(dir)
+				return
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			t.Setenv("TMPDIR", dir)
+			return
+		}
+		os.RemoveAll(dir)
+	}
+	t.Skip("no file system here keeps the pages of a file only until it is asked to forget them")
+}
+
 // noKeep drops the keep window of the log (payloadKeep): a record that was just written is past it at once, which is what the tests of a
 // cold read, written for a log with no window, measure. The window itself is TestSyncedRecordsStayCachedForTheKeepWindow's.
 func noKeep(t *testing.T) {
@@ -90,6 +122,7 @@ func noKeep(t *testing.T) {
 // (Records of a few hundred bytes are most of the log; a drop of the pages a record covers entirely forgets none of them.)
 func TestPayloadReadColdLeavesNoPageInTheCache(t *testing.T) {
 	noKeep(t)
+	pageCacheTempDir(t)
 	dir := filepath.Join(t.TempDir(), payloadDirName)
 	l, err := openPayloadLog(dir)
 	if err != nil {
@@ -136,6 +169,7 @@ func TestPayloadReadColdLeavesNoPageInTheCache(t *testing.T) {
 func TestAdvanceLeavesNoPageOfThePayloadLogInTheCache(t *testing.T) {
 	holdBackgroundVerification(t)
 	noKeep(t)
+	pageCacheTempDir(t)
 	x := newEraseEnv(t)
 	x.adoptPayload()
 	for i := range 6 { // pages of tens of KB: the records of a flush window of a busy series
@@ -179,6 +213,7 @@ func TestAdvanceLeavesNoPageOfThePayloadLogInTheCache(t *testing.T) {
 // the window drops its pages, while a cold read of a record inside the window leaves them to the drop that is due.
 func TestSyncedRecordsStayCachedForTheKeepWindow(t *testing.T) {
 	oldKeep, oldEvery := payloadKeep, payloadDropEvery
+	pageCacheTempDir(t)
 	payloadKeep, payloadDropEvery = time.Hour, 64<<10
 	t.Cleanup(func() { payloadKeep, payloadDropEvery = oldKeep, oldEvery })
 	dir := filepath.Join(t.TempDir(), payloadDirName)

@@ -73,7 +73,7 @@ func (g *groupedUpdates) run(d *trackedDB, batch []*groupedCall) {
 	for len(batch) > 0 {
 		failed := -1
 		began := time.Now()
-		err := d.DB.Update(func(tx *bolt.Tx) error {
+		err := d.Update(func(tx *bolt.Tx) error {
 			return withIndexRun(tx, func() error {
 				for i, c := range batch {
 					if err := c.fn(tx); err != nil {
@@ -104,6 +104,6 @@ func (g *groupedUpdates) run(d *trackedDB, batch []*groupedCall) {
 		}
 	}
 	for _, c := range solo {
-		c.done <- d.DB.Update(func(tx *bolt.Tx) error { return withIndexRun(tx, func() error { return c.fn(tx) }) })
+		c.done <- d.Update(func(tx *bolt.Tx) error { return withIndexRun(tx, func() error { return c.fn(tx) }) })
 	}
 }

@@ -320,7 +320,7 @@ func (e *Engine) mergeIndexRunsOf(name string, stop <-chan struct{}) (cancelled 
 			return true, first
 		default:
 		}
-		opt := compactOptions{Cancel: stop, MaxRunBytes: finalRunBytes}
+		opt := compactOptions{Cancel: stop, MaxRunBytes: finalRunBytes, Update: e.db.Update}
 		if e.payloadOn.Load() {
 			opt.Payload = e.payload
 		}

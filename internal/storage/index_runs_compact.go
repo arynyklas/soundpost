@@ -57,6 +57,9 @@ type compactOptions struct {
 	// final run, which no merge rewrites again, so its blocks are appended to the payload log and the run keeps one reference
 	// per block (paylog.go). nil stores every block in the run.
 	Payload *payloadLog
+	// Update, when set, runs the write transactions of the merge in place of db.Update: the engine passes its own, which a test
+	// observes (trackedDB.updateHook) to see every commit of apply.db.
+	Update func(fn func(*bolt.Tx) error) error
 }
 
 // indexRunsChunkHook, when set (tests), is called after every chunk transaction of a merge that is not its last,
@@ -249,6 +252,10 @@ func compactIndexRuns(db *bolt.DB, name string, opt compactOptions) (did bool, e
 	case opt.MaxRunBytes < 0:
 		return false, model.Fail(model.Invalid)
 	}
+	update := db.Update
+	if opt.Update != nil {
+		update = opt.Update
+	}
 	mu, _ := indexRunCompactLocks.LoadOrStore(db.Path()+"\x00"+name, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
@@ -274,7 +281,7 @@ func compactIndexRuns(db *bolt.DB, name string, opt compactOptions) (did bool, e
 		return false, err
 	}
 	if building {
-		err = db.Update(func(tx *bolt.Tx) error {
+		err = update(func(tx *bolt.Tx) error {
 			_, err := removeBuildingRuns(tx, name)
 			return err
 		})
@@ -301,7 +308,7 @@ func compactIndexRuns(db *bolt.DB, name string, opt compactOptions) (did bool, e
 		}
 		var done bool
 		chunkAt := time.Now()
-		err = db.Update(func(tx *bolt.Tx) error {
+		err = update(func(tx *bolt.Tx) error {
 			var err error
 			done, err = m.chunk(tx, opt.MaxChunkBytes)
 			return err

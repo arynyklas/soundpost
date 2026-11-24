@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 )
@@ -81,20 +79,21 @@ var payloadFileLimit int64 = payloadFileLimitDefault
 // payloadLog is the append-only files of one data directory.
 type payloadLog struct {
 	dir    string
+	fs     payloadFS
 	opened payloadPos // the end of the log when it was opened: what a crashed process left is before it, what this one appends after
 
 	mu      sync.Mutex
-	cur     *os.File // the file appended to; nil until the first append (or open)
+	cur     payloadFile // the file appended to; nil until the first append (or open)
 	seq     uint32
 	size    int64
 	appends uint64 // records appended so far (a background chunk that fails after appending leaves records no commit names)
 	synced  int64  // bytes of cur known durable
 	dropped int64  // bytes of cur that were handed to queue (their pages are dropped at once or after payloadKeep)
 	queue   []dropSpan
-	pending []*os.File
+	pending []payloadFile
 
 	rmu   sync.RWMutex
-	reads map[uint32]*os.File
+	reads map[uint32]payloadFile
 
 	nreads atomic.Int64 // records read (read); a test and the diagnostic build count what a start reads
 }
@@ -103,8 +102,8 @@ func payloadFileName(seq uint32) string { return fmt.Sprintf("%08d.spl", seq) }
 
 // openPayloadLog opens the log of dir (the files that exist; nothing is created until the first append).
 func openPayloadLog(dir string) (*payloadLog, error) {
-	l := &payloadLog{dir: dir, reads: map[uint32]*os.File{}}
-	entries, err := os.ReadDir(dir)
+	l := &payloadLog{dir: dir, fs: payloadFSOf(dir), reads: map[uint32]payloadFile{}}
+	names, err := l.fs.Files(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return l, nil
 	}
@@ -112,9 +111,8 @@ func openPayloadLog(dir string) (*payloadLog, error) {
 		return nil, err
 	}
 	var seqs []uint32
-	for _, en := range entries {
-		name := en.Name()
-		if en.IsDir() || !strings.HasSuffix(name, ".spl") {
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".spl") {
 			continue
 		}
 		n, err := strconv.ParseUint(strings.TrimSuffix(name, ".spl"), 10, 32)
@@ -128,7 +126,7 @@ func openPayloadLog(dir string) (*payloadLog, error) {
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
 	last := seqs[len(seqs)-1]
-	f, err := os.OpenFile(filepath.Join(dir, payloadFileName(last)), os.O_RDWR, 0)
+	f, err := l.fs.OpenFile(payloadPath(dir, last), os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -156,15 +154,15 @@ func (l *payloadLog) roll() error {
 			l.queue = append(l.queue, dropSpan{seq: l.seq, from: l.dropped, to: l.size, at: time.Now()})
 		}
 	}
-	if err := durablefs.MkdirAll(l.dir); err != nil {
+	if err := l.fs.MkdirAll(l.dir); err != nil {
 		return err
 	}
 	seq := l.seq + 1
-	f, err := os.OpenFile(filepath.Join(l.dir, payloadFileName(seq)), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := l.fs.OpenFile(payloadPath(l.dir, seq), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
-	if err = durablefs.SyncDir(l.dir); err != nil {
+	if err = l.fs.SyncDir(l.dir); err != nil {
 		f.Close()
 		return err
 	}
@@ -266,7 +264,7 @@ func (l *payloadLog) sync() error {
 	l.mu.Unlock()
 	for _, s := range due {
 		if f, err := l.reader(s.seq); err == nil {
-			dropPayloadRange(f, s.from, s.to-s.from)
+			dropRange(f, s.from, s.to-s.from)
 		}
 	}
 	return nil
@@ -279,7 +277,7 @@ func parsePayloadRef(ref []byte) (seq uint32, off int64, n uint32, sum uint32, o
 	return binary.BigEndian.Uint32(ref[1:]), int64(binary.BigEndian.Uint64(ref[5:])), binary.BigEndian.Uint32(ref[13:]), binary.BigEndian.Uint32(ref[17:]), true
 }
 
-func (l *payloadLog) reader(seq uint32) (*os.File, error) {
+func (l *payloadLog) reader(seq uint32) (payloadFile, error) {
 	l.rmu.RLock()
 	f := l.reads[seq]
 	l.rmu.RUnlock()
@@ -291,11 +289,11 @@ func (l *payloadLog) reader(seq uint32) (*os.File, error) {
 	if f = l.reads[seq]; f != nil {
 		return f, nil
 	}
-	f, err := os.Open(filepath.Join(l.dir, payloadFileName(seq)))
+	f, err := l.fs.OpenFile(payloadPath(l.dir, seq), os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
-	adviseRandomReads(f)
+	adviseRandom(f)
 	l.reads[seq] = f
 	return f, nil
 }
@@ -362,7 +360,7 @@ func (l *payloadLog) scrubAll(refs [][]byte) error {
 		bySeq[seq] = append(bySeq[seq], span{off, n})
 	}
 	for seq, spans := range bySeq {
-		f, err := os.OpenFile(filepath.Join(l.dir, payloadFileName(seq)), os.O_WRONLY, 0)
+		f, err := l.fs.OpenFile(payloadPath(l.dir, seq), os.O_WRONLY, 0)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -402,7 +400,7 @@ func (l *payloadLog) close() error {
 	for _, f := range l.reads {
 		f.Close()
 	}
-	l.reads = map[uint32]*os.File{}
+	l.reads = map[uint32]payloadFile{}
 	l.rmu.Unlock()
 	return first
 }
@@ -536,7 +534,7 @@ func (l *payloadLog) readCold(ref []byte) ([]byte, error) {
 	}
 	if seq, off, n, _, ok := parsePayloadRef(ref); ok && l.pastKeep(seq, off+payloadHeaderLen+int64(n)) {
 		if f, err := l.reader(seq); err == nil {
-			dropPayloadRange(f, off, payloadHeaderLen+int64(n))
+			dropRange(f, off, payloadHeaderLen+int64(n))
 		}
 	}
 	return raw, nil

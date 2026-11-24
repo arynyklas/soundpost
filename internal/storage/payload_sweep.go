@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,7 +127,16 @@ func (e *Engine) markPayloadClean() {
 type payloadExtent struct{ off, end int64 }
 
 // livePayloadExtents lists, by file, the records the references of the file name, in the span from from on.
-func livePayloadExtents(ctx context.Context, tx *bolt.Tx, from payloadPos) (map[uint32][]payloadExtent, error) {
+//
+// A reference lives in a bolt value of its own (a stored command, a block of a final run, a key of payload_scrub), in a page row of
+// a legacy bucket (the `Log` of the row), and, in the runs layout, INSIDE the blocks of the runs: the rows of the row store are
+// pairs of a block, and the page rows (the hot page of a batch) and the batch rows (the stored records of the batch) of
+// scan_rows are references there. The block is a bolt value (a run below finalRunBytes) or one record of the log that a reference
+// of the run names (a final run), so the references inside it are read by decoding the block. A walk of the bolt values alone does
+// not see them, and the sweep zeroed the records of acknowledged pages and batches after a crash. A block that cannot be read or
+// decoded is an error, not a skip: what it names cannot be told, and a sweep that zeroes what a damaged block might name destroys
+// what is left.
+func livePayloadExtents(ctx context.Context, tx *bolt.Tx, log *payloadLog, from payloadPos) (map[uint32][]payloadExtent, error) {
 	live := map[uint32][]payloadExtent{}
 	add := func(ref []byte) {
 		seq, off, n, _, ok := parsePayloadRef(ref)
@@ -172,8 +180,62 @@ func livePayloadExtents(ctx context.Context, tx *bolt.Tx, from payloadPos) (map[
 			return nil
 		})
 	}
-	err := tx.ForEach(func(_ []byte, b *bolt.Bucket) error { return walk(b) })
+	// walkRun is walk for the bucket of a run of the query indexes or of the row store: its values are blocks (or references to the
+	// log records that hold them), whose pairs are what names the pages and the batches of the row store.
+	var blocks blockReader
+	walkRun := func(b *bolt.Bucket) error {
+		n := 0
+		return b.ForEach(func(_, v []byte) error {
+			if n++; n&0xff == 0 {
+				if err := ctx.Err(); err != nil {
+					return model.Fail(model.Cancelled)
+				}
+			}
+			note(v) // a block of the log: the record is named
+			block := v
+			if isPayloadRef(v) {
+				// A record appended before the mark names records appended before it (the writer of a block logs what the block
+				// names first), and what lies below the mark is not in the span: it need not be read.
+				if seq, off, ln, _, _ := parsePayloadRef(v); seq < from.seq || seq == from.seq && off+payloadHeaderLen+int64(ln) <= from.off {
+					return nil
+				}
+				var err error
+				if block, err = log.readCold(v); err != nil {
+					return err
+				}
+			}
+			blk, ok := parseIndexBlock(block)
+			if !ok {
+				return model.Fail(model.Corrupt)
+			}
+			blocks.reset(blk, 0)
+			for blocks.next() {
+				note(blocks.val)
+			}
+			if blocks.bad || blocks.idx != blk.n || blocks.pos != blk.recEnd {
+				return model.Fail(model.Corrupt)
+			}
+			return nil
+		})
+	}
+	err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+		if isIndexRunBucket(name) {
+			return walkRun(b)
+		}
+		return walk(b)
+	})
 	return live, err
+}
+
+// isIndexRunBucket reports whether a top-level bucket is the bucket of a run of one of the three block-run indexes
+// (indexRunBucketName).
+func isIndexRunBucket(name []byte) bool {
+	for _, idx := range []string{"scan_time", "scan_postings", rowsIndex} {
+		if len(name) == len(idx)+2+16 && bytes.HasPrefix(name, []byte(idx)) && name[len(idx)] == '.' && name[len(idx)+1] == 'r' {
+			return true
+		}
+	}
+	return false
 }
 
 // payloadSweepBlock is the size of one read of the sweep.
@@ -185,7 +247,7 @@ func (l *payloadLog) zeroUnnamed(ctx context.Context, seq uint32, from, to int64
 	if from >= to {
 		return 0, nil
 	}
-	f, err := os.OpenFile(filepath.Join(l.dir, payloadFileName(seq)), os.O_RDWR, 0)
+	f, err := l.fs.OpenFile(payloadPath(l.dir, seq), os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
@@ -264,7 +326,7 @@ func allZero(b []byte) bool {
 
 // payloadSeqs lists the files of the log, ascending.
 func (l *payloadLog) seqs() ([]uint32, error) {
-	entries, err := os.ReadDir(l.dir)
+	names, err := l.fs.Files(l.dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -272,9 +334,8 @@ func (l *payloadLog) seqs() ([]uint32, error) {
 		return nil, err
 	}
 	var out []uint32
-	for _, en := range entries {
-		name := en.Name()
-		if en.IsDir() || !strings.HasSuffix(name, ".spl") {
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".spl") {
 			continue
 		}
 		n, err := strconv.ParseUint(strings.TrimSuffix(name, ".spl"), 10, 32)
@@ -303,7 +364,7 @@ func (e *Engine) sweepPayloadOrphans(ctx context.Context) error {
 	from, to := e.payloadSweptFrom, e.payload.opened
 	var live map[uint32][]payloadExtent
 	if err := e.db.View(func(tx *bolt.Tx) (err error) {
-		live, err = livePayloadExtents(ctx, tx, from)
+		live, err = livePayloadExtents(ctx, tx, e.payload, from)
 		return err
 	}); err != nil {
 		return unavailableDB(err)
@@ -324,11 +385,11 @@ func (e *Engine) sweepPayloadOrphans(ctx context.Context) error {
 			end = to.off
 		}
 		if end == 1<<62 { // a file the log left complete: its size when it was opened is its size now
-			fi, err := os.Stat(filepath.Join(e.payload.dir, payloadFileName(seq)))
+			size, err := e.payload.fs.Size(payloadPath(e.payload.dir, seq))
 			if err != nil {
 				return err
 			}
-			end = fi.Size()
+			end = size
 		}
 		if _, err = e.payload.zeroUnnamed(ctx, seq, start, end, live[seq]); err != nil {
 			return err

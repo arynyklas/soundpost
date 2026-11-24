@@ -20,6 +20,9 @@ type trackedDB struct {
 	// viewGap, when set, runs once in the next View after the reader was counted and before bolt
 	// opened its transaction: tests hold a reader in the window the stat cannot see.
 	viewGap atomic.Pointer[func()]
+	// updateHook, when set (tests), wraps every write transaction made through Update: it is given the function that runs the
+	// transaction and must call it once.
+	updateHook atomic.Pointer[func(run func() error) error]
 	// grouped folds the concurrent applies of the slot groups into one commit (grouped_update.go).
 	grouped groupedUpdates
 }
@@ -34,6 +37,15 @@ func (d *trackedDB) View(fn func(*bolt.Tx) error) error {
 		(*gap)()
 	}
 	return d.DB.View(fn)
+}
+
+// Update is bolt's Update; a test installs updateHook to see the commits the engine makes (the crash tests of the payload log take
+// the file's state before and after each of them).
+func (d *trackedDB) Update(fn func(*bolt.Tx) error) error {
+	if h := d.updateHook.Load(); h != nil {
+		return (*h)(func() error { return d.DB.Update(fn) })
+	}
+	return d.DB.Update(fn)
 }
 
 // openReaders is the number of View calls in progress.
