@@ -75,14 +75,14 @@ func TestRelativeCgroupRefusals(t *testing.T) {
 		anc  ancestorMount
 		own  uint64
 	}{
-		"more .. than the mount's depth":          {"/../../../../../x", anc, own},
-		".. after a name":                         {"/../kubepods-podt.slice/../x", anc, own},
-		"single dot":                              {"/../././x", anc, own},
-		"own cgroup not under the mount":          {"/../../../kubepods-podt.slice/cri-target.scope", anc, own + 1<<40},
-		"mount depth deeper than the tree":        {"/../../../../../../x", ancestorMount{dir: root, depth: 6}, own},
-		"nonexistent tail":                        {"/../../../kubepods-nope.slice", anc, own},
-		"symlink component is not followed":       {"/../../../link/cri-target.scope", anc, own},
-		"empty mount directory":                   {"/../x", ancestorMount{dir: "", depth: 1}, own},
+		"more .. than the mount's depth":    {"/../../../../../x", anc, own},
+		".. after a name":                   {"/../kubepods-podt.slice/../x", anc, own},
+		"single dot":                        {"/../././x", anc, own},
+		"own cgroup not under the mount":    {"/../../../kubepods-podt.slice/cri-target.scope", anc, own + 1<<40},
+		"mount depth deeper than the tree":  {"/../../../../../../x", ancestorMount{dir: root, depth: 6}, own},
+		"nonexistent tail":                  {"/../../../kubepods-nope.slice", anc, own},
+		"symlink component is not followed": {"/../../../link/cri-target.scope", anc, own},
+		"empty mount directory":             {"/../x", ancestorMount{dir: "", depth: 1}, own},
 	} {
 		if name == "symlink component is not followed" {
 			if err := os.Symlink(filepath.Join(root, "kubepods.slice", "kubepods-podt.slice"), filepath.Join(root, "kubepods.slice", "link")); err != nil {
