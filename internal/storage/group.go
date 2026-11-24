@@ -53,7 +53,11 @@ type Engine struct {
 	// cutEpoch is bumped, with cutMu held exclusively, before stored commands are rewritten; windows are the derivations of the open
 	// window of each slot (windowCache), valid while the epoch they were built under is the current one.
 	cutEpoch atomic.Uint64
-	windows  [64]windowCache
+	// commitRewrites counts the rewrites of a stored batch's commit record (erasure re-indexes the rows it keeps,
+	// so the pages the record names hold other rows), under mu. A live walk of a commit read its routes at a
+	// count and walks the commit again once it has moved (changeIterator.refreshPendingLocked).
+	commitRewrites uint64
+	windows        [64]windowCache
 	// expiry is the error evidence the journal-expiry plan found in the stored commands, kept so that the next plan reads only the
 	// commands appended since (expiry_scan.go); valid while cutEpoch is the one it was built under.
 	expiry expiryScan

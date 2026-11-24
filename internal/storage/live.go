@@ -26,6 +26,7 @@ type committedEvent struct {
 	Cursor       model.Cursor
 	Pages        []committedPage
 	Epoch        uint64
+	Rewrites     uint64
 }
 type changeIterator struct {
 	e                *Engine
@@ -54,8 +55,8 @@ type changeIterator struct {
 	replay        *replayWindow
 	pendingReplay bool
 	handed        int
-	// handedRows are the rows of the pending event the consumer was handed (catch-up subscriptions only): the
-	// identity that survives a rewrite of the commit record, which a route offset does not.
+	// handedRows are the rows of the pending event the consumer was handed: the identity that survives a rewrite
+	// of the commit record, which a route offset does not (refreshPendingLocked).
 	handedRows map[model.ID]struct{}
 }
 
@@ -162,7 +163,7 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 		return
 	}
 	cursor := model.Cursor{Group: e.group(slot), Index: model.Uint64(index)}
-	event := committedEvent{Cursor: cursor}
+	event := committedEvent{Cursor: cursor, Rewrites: e.commitRewrites}
 	if entry.Batch != nil {
 		event.Org = entry.Batch.Org
 		event.Project = entry.Batch.Project
@@ -316,25 +317,33 @@ func (it *changeIterator) rowHanded(id model.ID) bool {
 	return ok
 }
 
-// routeGoneLocked reports whether the commit record no longer names the page: an erasure removed it.
-func (e *Engine) routeGoneLocked(cursor model.Cursor, page model.ID) (bool, error) {
+// refreshPendingLocked walks the pending event again when a commit record was rewritten after the event read
+// its routes. An erasure re-indexes the rows it keeps, so the chunks are cut anew: the rows of a later page
+// move into a page the walk has already passed (and a page id can name other rows than before), and the routes
+// read when the commit was published would take the next page by position and never hand them. The event is
+// replaced by one holding the routes the record names now, walked from its first page; the rows the consumer
+// was handed are skipped by row ID (handedRows), so every kept row is handed once. A commit the record no
+// longer holds has no pages.
+func (it *changeIterator) refreshPendingLocked() error {
+	p := it.pending
+	if p.Rewrites == it.e.commitRewrites {
+		return nil
+	}
 	var pages []committedPage
-	err := e.db.View(func(tx *bolt.Tx) error {
-		raw, err := tableGet(tx, tblCommits, commitKey(cursor))
+	err := it.e.db.View(func(tx *bolt.Tx) error {
+		raw, err := tableGet(tx, tblCommits, commitKey(p.Cursor))
 		if err != nil || raw == nil {
 			return err
 		}
 		return json.Unmarshal(raw, &pages)
 	})
 	if err != nil {
-		return false, err
+		return err
 	}
-	for _, p := range pages {
-		if p.ID == page {
-			return false, nil
-		}
-	}
-	return true, nil
+	rewritten := *p // the routes of a published event are shared with the other subscribers: never edited in place
+	rewritten.Pages, rewritten.Rewrites = pages, it.e.commitRewrites
+	it.pending, it.offset, it.handed = &rewritten, 0, 0
+	return nil
 }
 
 const (
@@ -384,7 +393,7 @@ func (it *changeIterator) replayNextLocked() (ev committedEvent, handed map[mode
 			if r.resume != nil && r.resume.cursor == cursor {
 				handed = r.resume.handed
 			}
-			return committedEvent{Org: ref.Org, Project: ref.Project, Cursor: cursor, Pages: pages, Epoch: it.epoch}, handed, replayHit, nil
+			return committedEvent{Org: ref.Org, Project: ref.Project, Cursor: cursor, Pages: pages, Epoch: it.epoch, Rewrites: e.commitRewrites}, handed, replayHit, nil
 		}
 	}
 	return committedEvent{}, nil, replayDone, nil
@@ -562,6 +571,14 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			e.mu.Unlock()
 			return page, nil
 		}
+		if it.pending != nil {
+			if err := it.refreshPendingLocked(); err != nil {
+				it.terminal = err
+				it.closeLocked()
+				e.mu.Unlock()
+				return ChangePage{}, err
+			}
+		}
 		if it.pending != nil && it.offset < len(it.pending.Pages) {
 			pending, epoch := it.pending, it.epoch
 			route := it.pending.Pages[it.offset]
@@ -572,12 +589,6 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			}
 			ref, err := e.loadRefLocked(route.ID)
 			if err != nil {
-				// A page that an erasure removed after this commit was read is no longer named by the
-				// commit record (the erasure rewrites both in one transaction): it is withheld, not corrupt.
-				if gone, gerr := e.routeGoneLocked(pending.Cursor, route.ID); gerr == nil && gone {
-					e.mu.Unlock()
-					continue
-				}
 				it.terminal = err
 				it.closeLocked()
 				e.mu.Unlock()
@@ -618,7 +629,9 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				return page, failure
 			}
-			if it.pending != pending || it.epoch != epoch {
+			if it.pending != pending || it.epoch != epoch || pending.Rewrites != e.commitRewrites {
+				// A rewrite landed in the fence (an expiry erasure is no deletion predicate, so the filters below
+				// cannot see it): the page read before it may hold erased rows. Read the commit again.
 				e.mu.Unlock()
 				continue
 			}
@@ -651,13 +664,11 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			if it.offset == len(pending.Pages) {
 				advanceWatermark(it.delivered, cursor)
 			}
-			if it.req.CatchUp {
-				if it.handedRows == nil {
-					it.handedRows = make(map[model.ID]struct{}, len(selected.IDs))
-				}
-				for _, id := range selected.IDs {
-					it.handedRows[id] = struct{}{}
-				}
+			if it.handedRows == nil {
+				it.handedRows = make(map[model.ID]struct{}, len(selected.IDs))
+			}
+			for _, id := range selected.IDs {
+				it.handedRows[id] = struct{}{}
 			}
 			it.handed = it.offset
 			e.mu.Unlock()

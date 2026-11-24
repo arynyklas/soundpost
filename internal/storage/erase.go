@@ -483,6 +483,7 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 	if err = owePayloadScrub(tx, storedRef); err != nil { // the records the row named are zeroed in the log
 		return 0, 0, err
 	}
+	e.commitRewrites++ // under e.mu (eraseBatch): a live walk of this commit sees it before it takes another page
 	if err = e.indexAppliedRows(tx, b, receipt, keptRows); err != nil {
 		return 0, 0, err
 	}
