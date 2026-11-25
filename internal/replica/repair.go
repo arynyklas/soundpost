@@ -173,13 +173,17 @@ type CompactionResult struct {
 // applied the cut, archives entries still needed by backup pins, writes a new
 // journal anchored on the snapshot, and only then renames it over the old one.
 // A crash at any hook leaves either the complete old or complete new journal.
+// It keeps nothing below the cut: the entries a cadence cut retains in memory for a member
+// that is behind (Cadence.Retain) are dropped, so that after it nothing older than the
+// snapshot exists in this group.
 func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
-	return g.compactJournal(ctx, g.snaps.Verify)
+	return g.compactJournal(ctx, g.snaps.Verify, false)
 }
 
 // compactJournal is CompactJournal with the verification of the current snapshot chosen by the caller: the cadence cut
-// passes SnapshotStore.VerifyCut, which hashes only what the cut wrote itself.
-func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, error)) (CompactionResult, error) {
+// passes SnapshotStore.VerifyCut, which hashes only what the cut wrote itself. retain keeps the entries the
+// compaction drops in the group's tail (Cadence.Retain) instead of forgetting them.
+func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, error), retain bool) (CompactionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CompactionResult{}, err
 	}
@@ -211,6 +215,9 @@ func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, err
 	}()
 	if g.failed || g.closed {
 		return CompactionResult{}, ErrUnavailable
+	}
+	if !retain {
+		g.tail.reset()
 	}
 	if cut > g.applied || g.machine.Applied() < cut || g.application < uint64(snap.Manifest.Cursor.Index) {
 		return CompactionResult{}, ErrStale
@@ -251,6 +258,11 @@ func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, err
 		noteFailure("compact memory", err)
 		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
+	}
+	if retain && g.cadence.Retain > 0 {
+		g.retainLocked(cut)
+	} else {
+		g.tail.reset()
 	}
 	if err = g.memory.Compact(cut); err != nil && !errors.Is(err, raft.ErrCompacted) {
 		noteFailure("memory compact", err)

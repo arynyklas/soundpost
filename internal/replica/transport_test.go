@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -31,6 +32,8 @@ type gateMachine struct {
 	armed   bool
 	gate    chan struct{}
 	entered chan struct{}
+	// delay, when set before the machine is used, is how long every non-empty Apply takes (a slow disk behind the apply).
+	delay time.Duration
 }
 
 func newGateMachine() *gateMachine {
@@ -55,6 +58,9 @@ func (m *gateMachine) Apply(c CommittedEntry) error {
 		default:
 		}
 		<-m.gate
+	}
+	if c.Entry.Kind != Noop && m.delay > 0 {
+		time.Sleep(m.delay)
 	}
 	return m.testMachine.Apply(c)
 }
@@ -105,9 +111,20 @@ type mtlsCluster struct {
 	certs      []tls.Certificate // the three members' credentials
 	outsider   tls.Certificate   // issued by the same CA, but for a node that is not a member
 	requests   atomic.Int64      // every request any of the three servers received
+	raftBytes  atomic.Int64      // the declared body bytes of the requests to a group's raft route
 }
 
 func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
+	return newMTLSClusterWith(t, groupCount, nil)
+}
+
+// meshTestTick is the tick of the groups newMTLSClusterWith opens (a variable of the tests that load the cluster: a race build's
+// slow requests must not look like a dead leader).
+var meshTestTick = 20 * time.Millisecond
+
+// newMTLSClusterWith is newMTLSCluster with every node's raw listener passed through wrap (nil: as is), so a test can
+// stand a rate-limited link between the nodes.
+func newMTLSClusterWith(t *testing.T, groupCount int, wrap func(node int, l net.Listener) net.Listener) *mtlsCluster {
 	t.Helper()
 	roots, certificates := testPKI(t, 4)
 	listeners := make([]net.Listener, 3)
@@ -130,14 +147,24 @@ func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
 		if err != nil {
 			t.Fatal(err)
 		}
-		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { c.requests.Add(1); transport.ServeHTTP(w, r) }), TLSConfig: transport.ServerTLS(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
-		go func() { _ = server.Serve(tls.NewListener(listeners[i], server.TLSConfig)) }()
+		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c.requests.Add(1)
+			if strings.HasPrefix(r.URL.Path, raftPath) && r.ContentLength > 0 {
+				c.raftBytes.Add(r.ContentLength)
+			}
+			transport.ServeHTTP(w, r)
+		}), TLSConfig: transport.ServerTLS(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
+		served := net.Listener(listeners[i])
+		if wrap != nil {
+			served = wrap(i, served)
+		}
+		go func() { _ = server.Serve(tls.NewListener(served, server.TLSConfig)) }()
 		c.transports = append(c.transports, transport)
 		var groups []*Group
 		var machines []*gateMachine
 		for _, id := range ids {
 			machine := newGateMachine()
-			g, err := Open(Config{ID: uint64(i + 1), Group: id, Directory: t.TempDir(), Members: members, Machine: machine, Transport: transport, TickInterval: 20 * time.Millisecond})
+			g, err := Open(Config{ID: uint64(i + 1), Group: id, Directory: t.TempDir(), Members: members, Machine: machine, Transport: transport, TickInterval: meshTestTick})
 			if err != nil {
 				t.Fatal(err)
 			}

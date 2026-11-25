@@ -274,6 +274,24 @@ func installSlotCuts(t *testing.T, e *Engine, cuts []slotCut) {
 				}
 			}
 		}
+		// The sealed-window records are derived from the stored commands too, and the replay below
+		// puts back the commands as the sender had them: a record the post-erasure cut persisted
+		// over the redacted commands would describe commands that are gone, and the full pass of
+		// the next start (verified.go) fails the engine closed on it. An empty replica has none.
+		meta := tx.Bucket([]byte("replica_data"))
+		for _, c := range cuts {
+			prefix := metaKey(c.m.slot, "wrec:")
+			var keys [][]byte
+			cursor := meta.Cursor()
+			for k, _ := cursor.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = cursor.Next() {
+				keys = append(keys, bytes.Clone(k))
+			}
+			for _, k := range keys {
+				if err := meta.Delete(k); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

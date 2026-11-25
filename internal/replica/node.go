@@ -209,16 +209,17 @@ type Config struct {
 	// unaffected. The control machine uses it to withhold a snapshot of a state whose layout `to`
 	// cannot read (D70). A node the group does not list is never sent a snapshot.
 	SnapshotGuard func(ctx context.Context, to Member) error
+	// LeaderSpread makes the leader of the group hand leadership to the group's preferred member (balance.go) when that
+	// member is healthy; LeaderSeed picks it among the voters (the storage engine passes the slot, so the 64 groups are
+	// shared out evenly). Off: leadership stays wherever elections put it.
+	LeaderSpread bool
+	LeaderSeed   uint64
 }
 type proposalResult struct {
 	entry CommittedEntry
 	err   error
 }
-type readRequest struct {
-	index uint64
-	term  uint64
-	done  chan proposalResult
-}
+
 type Status struct {
 	Group                                        model.ID
 	ID, Leader, Term, Commit, Applied, LastIndex uint64
@@ -254,7 +255,8 @@ type Group struct {
 	completed      map[model.ID]CommittedEntry
 	known          map[model.ID]map[uint64]struct{}
 	pending        map[model.ID][]chan proposalResult
-	reads          map[string]*readRequest
+	reads          map[string]*readRequest // the ReadIndex round in flight (reads.go): at most one
+	readNext       *readRequest            // the round callers join; put to the leader when the one in flight is answered
 	changed        chan struct{}
 	failed         bool
 	closed         bool
@@ -304,6 +306,13 @@ type Group struct {
 	cadenceWake   chan struct{}
 	cadenceCuts   atomic.Uint64 // cuts the cadence loop completed
 	cadenceLong   atomic.Int64  // nanoseconds the longest of them took
+	// tail is the run of entries below the in-memory log that a cadence cut retained for a member that is behind
+	// (tail.go); raft reads it through snapshotSource, everything else in the group sees the log as compacted.
+	tail logTail
+	// spread and seed place the group's leader on its preferred member (balance.go); bal is the group's own record of it.
+	spread bool
+	seed   uint64
+	bal    balanceState
 	// phases are the cumulative times the group spent in the stages of its pipeline (phases.go).
 	phases phaseCounters
 	domain *FailDomain
@@ -416,6 +425,7 @@ func Open(c Config) (*Group, error) {
 		g.retryMax = DefaultRetryMax
 	}
 	g.cadence, g.cadenceWake = c.Cadence, make(chan struct{}, 1)
+	g.spread, g.seed = c.LeaderSpread, c.LeaderSeed
 	g.logCommands = map[model.ID]CommittedEntry{}
 	hard, conf, err := memory.InitialState()
 	if err != nil {
@@ -447,7 +457,7 @@ func Open(c Config) (*Group, error) {
 		return nil, err
 	}
 	g.loadProof(last)
-	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: electionTicks, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
+	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: electionTicks, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: maxAppBytes, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, MaxInflightBytes: maxInflightBytes, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
 	if err != nil {
 		disk.Close()
 		return nil, err
@@ -519,10 +529,7 @@ func (g *Group) fail() {
 		}
 		delete(g.pending, id)
 	}
-	for id, r := range g.reads {
-		r.done <- proposalResult{err: ErrUnavailable}
-		delete(g.reads, id)
-	}
+	g.failReadsLocked(ErrUnavailable)
 	g.notify()
 }
 func (g *Group) notify() { close(g.changed); g.changed = make(chan struct{}) }
@@ -533,6 +540,8 @@ func (g *Group) Tick() {
 		return
 	}
 	g.raw.Tick()
+	g.expireReadsLocked()
+	g.balanceLocked()
 	if g.processReady() != nil {
 		g.fail()
 	}
@@ -857,8 +866,15 @@ func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 		}
 		return *cursor, nil
 	}
+	return g.readThroughRound(ctx)
+}
+
+// readThroughRound is ReadIndex's waiting path: the caller joins the group's next ReadIndex round (reads.go) and is
+// answered by it, from whatever lead the group has.
+func (g *Group) readThroughRound(ctx context.Context) (model.Cursor, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	began := time.Now()
 	for {
 		if ctx.Err() != nil {
 			return model.Cursor{}, ErrStale
@@ -878,10 +894,7 @@ func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 				return model.Cursor{}, ErrStale
 			}
 		}
-		id := model.NewID().String()
-		request := &readRequest{term: g.raw.BasicStatus().HardState.GetTerm(), done: make(chan proposalResult, 1)}
-		g.reads[id] = request
-		g.raw.ReadIndex([]byte(id))
+		request := g.joinReadLocked()
 		err := g.processReady()
 		if err != nil {
 			g.fail()
@@ -891,19 +904,19 @@ func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 			return model.Cursor{}, err
 		}
 		select {
-		case result := <-request.done:
-			if result.err == ErrStale {
+		case <-request.done:
+			if request.result.err == ErrStale {
+				g.phases.readGaveUp.Add(1)
 				continue
 			}
-			if result.err != nil {
-				return model.Cursor{}, result.err
+			if request.result.err != nil {
+				return model.Cursor{}, request.result.err
 			}
-			return result.entry.ApplicationCursor, nil
+			sinceMax(&g.phases.readNS, &g.phases.readMaxNS, began)
+			g.phases.readN.Add(1)
+			return request.result.entry.ApplicationCursor, nil
 		case <-ctx.Done():
-			g.mu.Lock()
-			delete(g.reads, id)
-			g.mu.Unlock()
-			return model.Cursor{}, ErrStale
+			return model.Cursor{}, ErrStale // the round is shared and stays: other callers wait on it
 		}
 	}
 }
@@ -940,7 +953,14 @@ func (g *Group) ReadIndexAtLeast(ctx context.Context, min model.Cursor) (model.C
 	}
 }
 func (g *Group) readIndexAtLeast(ctx context.Context, min model.Cursor) (model.Cursor, error) {
-	cut, err := g.ReadIndex(ctx)
+	return g.cutAtLeast(ctx, min, g.ReadIndex)
+}
+
+// cutAtLeast takes a cut with read and holds it to min: a cut below min (a ReadIndex round that was shared with
+// callers that began before min was acknowledged, or one of a member behind) is never returned, the group is waited
+// for to apply min and the cut taken again by a round that is put after the wait.
+func (g *Group) cutAtLeast(ctx context.Context, min model.Cursor, read func(context.Context) (model.Cursor, error)) (model.Cursor, error) {
+	cut, err := read(ctx)
 	if err != nil || cut.Index >= min.Index {
 		return cut, err
 	}
@@ -949,7 +969,7 @@ func (g *Group) readIndexAtLeast(ctx context.Context, min model.Cursor) (model.C
 	}
 	// The fence is taken again after the wait: the cut of a read that began before the group applied min
 	// proves nothing about leadership now.
-	if cut, err = g.ReadIndex(ctx); err != nil {
+	if cut, err = read(ctx); err != nil {
 		return model.Cursor{}, err
 	}
 	if cut.Index < min.Index {

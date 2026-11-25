@@ -522,6 +522,7 @@ func (g *Group) processReady() error {
 		}
 		snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
 		if snapshotChanged {
+			g.tail.reset() // the log restarts at the snapshot: what was retained below it is no longer a prefix of it
 			if err := g.memory.ApplySnapshot(rd.Snapshot); err == raft.ErrSnapOutOfDate && g.sameIndexSnapshot(rd.Snapshot) {
 				// The journal head record and a later record can carry the same-index snapshot
 				// (a compaction rewrite copies the in-memory one); installRecord tolerates that at
@@ -568,6 +569,7 @@ func (g *Group) processReady() error {
 				out.Context = g.snapshotContext(out, out.GetContext())
 			}
 			if err := g.transport.Send(g.group, out); err != nil {
+				g.noteUnreachable(m.GetTo())
 				g.raw.ReportUnreachable(m.GetTo())
 				if m.GetType() == pb.MsgSnap {
 					g.raw.ReportSnapshot(m.GetTo(), raft.SnapshotFailure)
@@ -759,13 +761,14 @@ func (g *Group) completeReads() {
 	status := g.raw.BasicStatus()
 	for id, r := range g.reads {
 		if status.HardState.GetTerm() != r.term {
-			r.done <- proposalResult{err: ErrStale}
+			r.finish(proposalResult{err: ErrStale})
 			delete(g.reads, id)
 		} else if r.index > 0 && g.applied >= r.index {
-			r.done <- proposalResult{entry: CommittedEntry{Group: g.group, Term: r.term, Index: g.applied, ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}}}
+			r.finish(proposalResult{entry: CommittedEntry{Group: g.group, Term: r.term, Index: g.applied, ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}}})
 			delete(g.reads, id)
 		}
 	}
+	g.issueReadLocked() // the callers that arrived while the round was in flight
 }
 
 // snapshotEnvelope is what a Raft snapshot of a group carries. Retry names the format of the retry

@@ -438,7 +438,9 @@ func (e *Engine) InstallReplicationIdentity(identity model.ID) error {
 // restart (L2w20Admission7). A cut decodes the open window again (computeWindow), so the bound is a whole
 // window of 4096 commands: a tighter one costs more than it saves (1024 commands / 3 MiB took 42 % of the
 // server's CPU at the load, perf of the r2 run).
-var DefaultSlotCadence = replica.Cadence{Commands: 4096, Bytes: 16 << 20}
+// The entries a cut compacts are kept in memory for replica.DefaultRetain (at most 24 MiB a group): a node that was
+// down for the startup budget is sent them, not the state of every group (60 MB each, over a 100 Mbit/s card).
+var DefaultSlotCadence = replica.Cadence{Commands: 4096, Bytes: 16 << 20, Retain: replica.DefaultRetain, RetainBytes: 24 << 20}
 
 // slotStagger is the share of the cadence's bounds, in replica.StaggerBase ths, after which the data group of
 // slot cuts: half of them for slot 0 up to all but 1/128th for slot 63, so the 64 groups of a node, loaded alike,
@@ -518,6 +520,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 				cfg.Machine = machine
 				cfg.Validate = machine.Validate
 				cfg.Fault = e.trip
+				cfg.LeaderSpread, cfg.LeaderSeed = true, uint64(slot) // the 64 groups are led evenly by the voters (replica/balance.go)
 				if cfg.RetryMax <= 0 {
 					cfg.RetryMax = slotRetryMax
 				}

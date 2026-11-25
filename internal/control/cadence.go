@@ -24,4 +24,7 @@ import "github.com/arynyklas/soundpost/internal/replica"
 // (170 MB at 100,000 batches): the cadence amortizes, its bounds growing to half the size of the last
 // snapshot (replica.Cadence.Amortize), so a large state is cut when it has journaled an eighth to a
 // half of its size, not every 8 MiB (24 % of the server's CPU at the single-host load, L2w20Admission7).
-var DefaultJournalCadence = replica.Cadence{Commands: 4096, Bytes: 8 << 20, Amortize: true}
+//
+// The entries a cut compacts are kept in memory for replica.DefaultRetain (at most 16 MiB), so that a member that was
+// away for the startup budget is sent them instead of the whole state (replica.Cadence.Retain).
+var DefaultJournalCadence = replica.Cadence{Commands: 4096, Bytes: 8 << 20, Amortize: true, Retain: replica.DefaultRetain, RetainBytes: 16 << 20}

@@ -65,6 +65,22 @@ func procField(field string) string {
 	return "n/a"
 }
 
+// stormCommand commits command i through the leader: it rewrites 100 owners, about 3 KB of state.
+func stormCommand(t *testing.T, leader *control.Store, i int) {
+	t.Helper()
+	if err := leader.Update(context.Background(), func(st *control.State) error {
+		if st.CommandOwners == nil {
+			st.CommandOwners = map[string]string{}
+		}
+		for n := range 100 {
+			st.CommandOwners[fmt.Sprintf("storm:%03d", n)] = fmt.Sprintf("owner-%012d", i)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("command %d: %v", i, err)
+	}
+}
+
 // runVoterStorm commits `commands` control commands, each carrying a state of about 3 KB, through
 // the leader (voter 1) while voter 3 is cut off, waits for the leader's cadence to have cut at
 // least minCuts times, then reconnects voter 3 and waits for it to reach the leader's revision.
@@ -74,19 +90,7 @@ func runVoterStorm(t *testing.T, cadence replica.Cadence, commands int, minCuts 
 	leader := v.stores[1]
 	res := voterStorm{commands: commands, finalWAL: map[uint64]int64{}, peakWAL: map[uint64]int64{}}
 	res.headWAL = walSize(t, v.dirs[1])
-	commit := func(i int) {
-		if err := leader.Update(context.Background(), func(st *control.State) error {
-			if st.CommandOwners == nil {
-				st.CommandOwners = map[string]string{}
-			}
-			for n := range 100 {
-				st.CommandOwners[fmt.Sprintf("storm:%03d", n)] = fmt.Sprintf("owner-%012d", i)
-			}
-			return nil
-		}); err != nil {
-			t.Fatalf("command %d: %v", i, err)
-		}
-	}
+	commit := func(i int) { stormCommand(t, leader, i) }
 	commit(0)
 	commit(1)
 	g := leader.ReplicaGroup()
@@ -221,12 +225,26 @@ func (r voterStorm) requireBounded(t *testing.T, bytes int64) {
 // when it returns and holds the leader's state; no journal leaves what the cadence allows. The
 // numbers (RSS high-water, ready.wal, cuts, catch-up) are logged: run it with -v. VmHWM is per
 // process: run it alone for a measurement of the group (-run TestControlVotersStorm).
+//
+// The retention of compacted entries is explicit: the shipped window (replica.DefaultRetain, 75 s)
+// is longer than this storm under the race detector, and a voter that was away for less than the
+// window is caught up from the entries the leader kept, without a snapshot (see
+// TestControlVotersLaggingFollowerWithinTheRetainWindowCatchesUpWithoutASnapshot). Here the voter is
+// away for the whole storm, which has to be longer than the window, so what it needs is gone from
+// the leader's log by the time it returns and only a snapshot can bring it back. Every other part of the
+// cadence is the shipped one.
 func TestControlVotersStormBeyondTheCommandBoundWithALaggingFollower(t *testing.T) {
 	commands := 4400 // beyond DefaultJournalCadence.Commands
 	if raceEnabled {
 		commands = 1500 // the race detector makes a command several times slower; the byte bound still cuts
 	}
-	r := runVoterStorm(t, replica.Cadence{}, commands, 1)
+	const retain = 50 * time.Millisecond // far shorter than any storm of this many commands
+	cadence := control.DefaultJournalCadence
+	cadence.Retain = retain
+	r := runVoterStorm(t, cadence, commands, 1)
+	if r.stormTime <= retain {
+		t.Fatalf("fixture: the storm took %v, not longer than the %v the leader retains compacted entries for", r.stormTime, retain)
+	}
 	r.log(t, "defaults")
 	// Each cut accounts for DefaultJournalCadence.Bytes of entry data (measured per command, r.data);
 	// the cut in flight when the storm ends is not counted.
@@ -235,4 +253,61 @@ func TestControlVotersStormBeyondTheCommandBoundWithALaggingFollower(t *testing.
 		t.Errorf("the leader cut %d times, want at least %d for %d bytes of entry data at a cadence of %d bytes", r.cutsOnLeads, want, total, control.DefaultJournalCadence.Bytes)
 	}
 	r.requireBounded(t, control.DefaultJournalCadence.Bytes)
+}
+
+// A voter that is cut off for less than the retain window is not sent a snapshot: the leader cuts and
+// compacts its journal past everything the voter is missing (made, not waited for: the test reads the
+// journal ranges before it lets the voter back), but keeps the compacted entries in memory
+// (Cadence.Retain), and the voter is caught up from them, holding the leader's state.
+func TestControlVotersLaggingFollowerWithinTheRetainWindowCatchesUpWithoutASnapshot(t *testing.T) {
+	v := newControlVotersCadence(t, replica.Cadence{Commands: 16, Retain: replica.DefaultRetain})
+	leader := v.stores[1]
+	g := leader.ReplicaGroup()
+	const commands = 120
+	v.mesh.cut(stormVoter, true)
+	began := time.Now()
+	for i := range commands {
+		stormCommand(t, leader, i)
+	}
+	_, behind := v.stores[stormVoter].ReplicaGroup().JournalRange()
+	deadline := time.Now().Add(120 * time.Second)
+	for {
+		if first, _ := g.JournalRange(); first > behind+1 && g.CadenceCuts() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			first, last := g.JournalRange()
+			t.Fatalf("the leader's journal is [%d, %d] after %d cuts, want it compacted past the entry %d that voter %d is missing", first, last, g.CadenceCuts(), behind+1, stormVoter)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if away := time.Since(began); away >= replica.DefaultRetain {
+		t.Fatalf("fixture: voter %d was cut off for %v, not less than the %v the leader retains compacted entries for", stormVoter, away, replica.DefaultRetain)
+	}
+	v.mesh.mu.Lock()
+	handed := v.mesh.snaps[stormVoter]
+	v.mesh.mu.Unlock()
+	if handed != 0 {
+		t.Fatalf("voter %d was handed %d snapshots while it was cut off", stormVoter, handed)
+	}
+	rev := v.mustRevision(1)
+	v.mesh.cut(stormVoter, false)
+	v.await(stormVoter, rev)
+	v.mesh.mu.Lock()
+	handed = v.mesh.snaps[stormVoter]
+	v.mesh.mu.Unlock()
+	if handed != 0 {
+		t.Errorf("voter %d was handed %d snapshots although it was away for less than the retain window", stormVoter, handed)
+	}
+	want := fmt.Sprintf("owner-%012d", commands-1)
+	for id := uint64(1); id <= 3; id++ {
+		if err := v.stores[id].View(context.Background(), func(st control.State) error {
+			if got := st.CommandOwners["storm:099"]; got != want {
+				return fmt.Errorf("voter %d holds %q, want %q", id, got, want)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/diagstat"
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
@@ -138,6 +139,7 @@ func OpenDistributed(dir string, node NodeConfig) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	diagstat.Register("replication", transport.Stats)
 	listener, err := net.Listen("tcp", node.PeerListen)
 	if err != nil {
 		transport.Close()
@@ -207,6 +209,8 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	}
 	lifecycle.domain = replica.NewFailDomain()
 	lifecycle.dir = dir
+	// The control group is led by the member the 64 data groups' slots leave the fewest (replica/balance.go: seed 64).
+	cfg.LeaderSpread, cfg.LeaderSeed = true, 64
 	cfg.Domain = lifecycle.domain
 	a.replication = lifecycle
 	// The bounded-state rules of control (control.Store.BoundedRules) apply once every member of the

@@ -423,7 +423,14 @@ func TestAWithdrawalOwedAtShutdownIsProposedAfterARestart(t *testing.T) {
 	x := newCheckpointEnv(t)
 	x.v1declare(t)
 	e := x.e
-	x.appendMixed(eraseCanary, bothDeadlines)
+	// The erased batches fill a sealed window of their slot, whatever slot the organisation hashes
+	// them to: the full pass that a restart starts re-derives every sealed window record from the
+	// stored commands, and the install below puts the commands the erasure redacted back. A single
+	// batch seals a window only in the slot that also holds the protocol declarations (1 run in 64).
+	producer := model.NewID()
+	for range snapshotWindow {
+		x.appendMixedAs(producer, eraseCanary, bothDeadlines)
+	}
 	pred := x.rangePredicate(0, 10, model.Metric)
 	barrierAll(t, e, pred)
 	early := cutAllSlots(t, e)

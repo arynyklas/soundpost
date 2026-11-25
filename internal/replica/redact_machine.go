@@ -164,6 +164,10 @@ type journalInputs struct {
 }
 
 func (g *Group) journalInputsLocked() (*journalInputs, error) {
+	// A redaction pass rewrites what the group retains; the entries a cut kept below the log for a member that is
+	// behind (tail.go) are not part of what it reads or rewrites, so they are dropped. A cut that compacts after this
+	// point changes the journal, which makes the pass retry (currentLocked), and the retry drops them again.
+	g.tail.reset()
 	in := &journalInputs{applied: g.applied}
 	var err error
 	if in.log, err = g.memoryLogLocked(); err != nil {

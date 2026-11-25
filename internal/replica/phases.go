@@ -29,6 +29,9 @@ type phaseCounters struct {
 	cutRetryBytes       atomic.Uint64 // the retry-part bytes the newest cut serialized (0 when the table is inline in the envelope)
 	// The longest single waits and holds since they were last read (PhaseMaxima).
 	proposeWaitMax, cutLockMax, cutLock2Max, compactLockMax atomic.Uint64
+	// ReadIndex (reads.go): calls that were answered and the time they waited, the longest wait, the rounds put to the
+	// leader, and the rounds that were given up (term changed, no answer in time).
+	readN, readNS, readMaxNS, readRounds, readGaveUp atomic.Uint64
 }
 
 // Phases is a copy of a group's phase counters.

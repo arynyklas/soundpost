@@ -44,7 +44,7 @@ const partRequestTimeout = 15 * time.Second
 const transferIdle = 4 * partRequestTimeout
 
 // partBytes is how many bytes of a message one request carries.
-func partBytes() int { return max(1, maxReady()/16) }
+func partBytes() int { return min(max(1, maxReady()/16), 1<<20) }
 
 type transferKey struct {
 	group  model.ID
@@ -78,6 +78,11 @@ func (t *MTLS) sendParts(client *http.Client, target Member, group model.ID, raw
 	for seq := range total {
 		part := raw[seq*step : min((seq+1)*step, len(raw))]
 		if err := func() error {
+			release, ok := t.budget(target.ID).acquire(int64(len(part)), t.stop)
+			if !ok {
+				return ErrUnavailable
+			}
+			defer release()
 			ctx, cancel := context.WithTimeout(context.Background(), partRequestTimeout)
 			defer cancel()
 			request, err := http.NewRequestWithContext(ctx, "POST", partURL(target, group, id, seq, total, len(raw)), bytes.NewReader(part))
@@ -141,6 +146,7 @@ func (t *MTLS) stepMessage(w http.ResponseWriter, r *http.Request, g *Group, sen
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	t.recordReceived(message, len(raw))
 	if err := g.Step(r.Context(), message); err != nil {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		return

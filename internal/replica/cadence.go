@@ -43,6 +43,11 @@ type Cadence struct {
 	// acknowledgement queued behind (L2w20Admission19). Each group is given a different share, so the cuts of a node
 	// are spread over the time one bound takes instead of falling together.
 	Stagger uint16
+	// Retain keeps the entries a cut compacts, in memory, for this long, so that a member that was away for less than
+	// that is sent them instead of a snapshot of the whole state (tail.go); 0 keeps none. RetainBytes bounds the
+	// retained entries of the group (0: defaultRetainBytes); when it is exceeded the oldest go first.
+	Retain      time.Duration
+	RetainBytes int64
 }
 
 // StaggerBase is the denominator of Cadence.Stagger.
@@ -128,6 +133,7 @@ func (g *Group) countApplied(dataBytes int) {
 	g.sinceCommands++
 	g.sinceBytes += int64(dataBytes)
 	g.appliedData += uint64(dataBytes)
+	g.markApplied()
 	if g.cutDue() {
 		select {
 		case g.cadenceWake <- struct{}{}:
@@ -225,7 +231,7 @@ func (g *Group) cutAndCompact() error {
 	if g.snaps.wroteLast() {
 		verify = g.snaps.VerifyCut // the files the cut linked were hashed when they were written
 	}
-	if _, err := g.compactJournal(ctx, verify); err != nil {
+	if _, err := g.compactJournal(ctx, verify, true); err != nil {
 		return err
 	}
 	since(&g.phases.cutCompactNS, compactBegan)

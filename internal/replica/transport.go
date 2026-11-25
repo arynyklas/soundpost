@@ -29,6 +29,10 @@ type outbound struct {
 	// supersedable, when nonzero, marks the placeholder of a lane's heartbeat (1) or heartbeat response (2):
 	// the message to deliver is whatever newest one the lane holds when the placeholder is reached.
 	supersedable int
+	// apps is how many appends the message stands for (queued appends that continue each other are one message) and size the
+	// entry bytes it carries (transport_flow.go); zero for any other message.
+	apps int
+	size uint64
 }
 
 // A delivery lane is one ordered queue and one worker per (peer, group). A
@@ -52,10 +56,20 @@ const laneDepth = 128
 // laneDepth stale heartbeats ahead of every read-index, vote and append message of the group: a
 // read-index round took seconds and a read failed with a 504 on a two-vCPU host.
 type laneQueue struct {
-	queue chan outbound
-	mu    sync.Mutex
-	slot  [2]*pb.Message
-	held  [2]bool // a placeholder for the slot is in the queue
+	items    []outbound    // the queue, oldest first; mu guards it
+	wake     chan struct{} // the worker's wake-up (one pending signal is enough)
+	mu       sync.Mutex
+	slot     [2]*pb.Message
+	held     [2]bool // a placeholder for the slot is in the queue
+	highSent uint64  // the last log index a MsgApp of the lane carried (transport_stats.go)
+	// The appends the lane holds, queued or in flight (transport_flow.go): how many, the lowest index any of them
+	// continues from and the highest entry any carries.
+	apps             int
+	appsLow, appsEnd uint64
+	appsTerm         uint64
+	// What the lane's worker is doing: 0 idle, 1 waiting for the group lock, 2 sending (curType, since), 3 reporting the delivery.
+	phase, curType atomic.Int32
+	since          atomic.Int64
 }
 
 type MTLS struct {
@@ -81,6 +95,10 @@ type MTLS struct {
 	// transfers are the messages being received in parts (transport_parts.go), at most one per sending member and group.
 	partMu    sync.Mutex
 	transfers map[transferKey]*transfer
+	// counters are the replication counters of each peer (transport_stats.go).
+	counters sync.Map // peer id -> *peerCounters
+	// budgets bound the bytes of messages in flight to each peer (transport_flow.go).
+	budgets sync.Map // peer id -> *byteBudget
 }
 
 func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x509.CertPool, sourceIP string) (*MTLS, error) {
@@ -201,7 +219,7 @@ func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 			return ErrUnavailable
 		}
 		if lane = t.queues[key]; lane == nil {
-			lane = &laneQueue{queue: make(chan outbound, laneDepth)}
+			lane = newLane()
 			t.queues[key] = lane
 			t.workers.Add(1)
 			go t.deliver(lane)
@@ -220,20 +238,22 @@ func (t *MTLS) Send(group model.ID, m *pb.Message) error {
 			lane.slot[kind-1] = m
 			return nil
 		}
-		select {
-		case lane.queue <- outbound{group: group, supersedable: kind}:
-			lane.held[kind-1], lane.slot[kind-1] = true, m
-			return nil
-		default:
+		if !lane.pushLocked(outbound{group: group, supersedable: kind}) {
 			return ErrUnavailable
 		}
-	}
-	select {
-	case lane.queue <- outbound{group: group, message: m}:
+		lane.held[kind-1], lane.slot[kind-1] = true, m
 		return nil
-	default:
+	}
+	if m.GetType() == pb.MsgApp {
+		return t.enqueueApp(lane, group, m)
+	}
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	if !lane.pushLocked(outbound{group: group, message: m}) {
+		t.peerStats(m.GetTo()).queueFull.Add(1)
 		return ErrUnavailable
 	}
+	return nil
 }
 
 // supersedableKind is 1 for a heartbeat, 2 for a heartbeat response and 0 for every message that must be
@@ -250,32 +270,40 @@ func supersedableKind(t pb.MessageType) int {
 func (t *MTLS) deliver(lane *laneQueue) {
 	defer t.workers.Done()
 	for {
-		select {
-		case <-t.stop:
+		out, ok := lane.pop(t.stop)
+		if !ok {
 			return
-		case out := <-lane.queue:
-			if out.supersedable != 0 {
-				lane.mu.Lock()
-				out.message = lane.slot[out.supersedable-1]
-				lane.slot[out.supersedable-1], lane.held[out.supersedable-1] = nil, false
-				lane.mu.Unlock()
-			}
-			t.mu.RLock()
-			g := t.groups[out.group]
-			t.mu.RUnlock()
-			if g == nil || out.message == nil {
-				continue
-			}
-			members := g.transportMembers()
-			var target Member
-			for _, m := range members.Nodes {
-				if m.ID == out.message.GetTo() {
-					target = m
-				}
-			}
-			err := t.sendOne(out, target)
-			g.ReportDelivery(out.message.GetTo(), out.message.GetType() == pb.MsgSnap, err)
 		}
+		if out.supersedable != 0 {
+			lane.mu.Lock()
+			out.message = lane.slot[out.supersedable-1]
+			lane.slot[out.supersedable-1], lane.held[out.supersedable-1] = nil, false
+			lane.mu.Unlock()
+		}
+		t.mu.RLock()
+		g := t.groups[out.group]
+		t.mu.RUnlock()
+		if g == nil || out.message == nil {
+			lane.finishApps(out.apps)
+			continue
+		}
+		lane.phase.Store(1)
+		members := g.transportMembers()
+		var target Member
+		for _, m := range members.Nodes {
+			if m.ID == out.message.GetTo() {
+				target = m
+			}
+		}
+		lane.phase.Store(2)
+		lane.since.Store(time.Now().UnixNano())
+		lane.curType.Store(int32(out.message.GetType()))
+		err := t.sendOne(out, target)
+		// Before the report: the report may make raft resend, and that resend must not find this append still pending.
+		lane.finishApps(out.apps)
+		lane.phase.Store(3)
+		g.ReportDelivery(out.message.GetTo(), out.message.GetType() == pb.MsgSnap, err)
+		lane.phase.Store(0)
 	}
 }
 func (t *MTLS) sendOne(out outbound, target Member) error {
@@ -287,10 +315,26 @@ func (t *MTLS) sendOne(out outbound, target Member) error {
 	if err != nil {
 		return err
 	}
+	// A message larger than the whole budget (a snapshot) is not held to it, and one in parts pays for each part (sendParts).
+	if len(raw) >= flowThreshold && len(raw) <= peerBudgetBytes {
+		release, ok := t.budget(target.ID).acquire(int64(len(raw)), t.stop)
+		if !ok {
+			return ErrUnavailable
+		}
+		defer release()
+	}
+	began := time.Now()
+	err = t.sendEncoded(client, out, target, raw)
+	t.recordSent(out.message, len(raw), time.Since(began), err)
+	return err
+}
+func (t *MTLS) sendEncoded(client *http.Client, out outbound, target Member, raw []byte) error {
 	if len(raw) > maxReady() {
 		return t.sendParts(client, target, out.group, raw)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// A request is given 5 s and one more second for every 256 KiB it carries: a message that takes a slow link a while to
+	// carry is waited for, not sent again from the start when it nearly arrived.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(5+len(raw)>>18)*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, "POST", strings.TrimSuffix(target.Address, "/")+raftPath+out.group.String(), bytes.NewReader(raw))
 	if err != nil {
@@ -314,6 +358,7 @@ func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
 		return
 	}
 	if err != nil {
+		g.noteUnreachable(to)
 		g.raw.ReportUnreachable(to)
 	}
 	if snapshot {
@@ -334,6 +379,7 @@ func (t *MTLS) Close() error {
 	t.closing = true
 	t.mu.Unlock()
 	t.once.Do(func() { close(t.stop) })
+	t.budgets.Range(func(_, v any) bool { v.(*byteBudget).wake(); return true })
 	t.workers.Wait()
 	t.mu.Lock()
 	defer t.mu.Unlock()
