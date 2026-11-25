@@ -25,7 +25,7 @@ func (w forwardNode) ForwardPropose(ctx context.Context, _ model.ID, entry Entry
 	w.mu.Unlock()
 	leader := own.Status().Leader
 	if leader == 0 || leader == w.self || nodes[leader] == nil {
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader // as MTLS.ForwardPropose: no leader is known, or it is not another member
 	}
 	return nodes[leader].Propose(ctx, entry)
 }
@@ -127,8 +127,8 @@ func TestAFollowerThatNeverHearsALeaderRefusesWithinTheLeaderWait(t *testing.T) 
 	start := time.Now()
 	_, err := wire.nodes[2].Propose(ctx, Entry{ID: model.NewID(), Kind: Data, Payload: []byte("nobody leads here")})
 	elapsed := time.Since(start)
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("a follower that never hears a leader answered %v, want unavailable", err)
+	if !errors.Is(err, ErrNoLeader) {
+		t.Fatalf("a follower that never hears a leader answered %v, want unavailable for want of a leader (ErrNoLeader)", err)
 	}
 	wait := leaderWaitFor(0)
 	if elapsed < wait || elapsed > wait+time.Second {

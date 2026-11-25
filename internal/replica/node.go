@@ -5,6 +5,7 @@ package replica
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,6 +23,20 @@ var (
 	ErrConflict    = errors.New("replica conflict")
 	ErrInvalid     = errors.New("invalid replica command")
 	ErrStale       = errors.New("replica freshness fence not reached")
+	// ErrNoLeader is an ErrUnavailable that waiting outlasts: no leader took the command (an election, a leader
+	// transfer, a leader this member cannot reach, a quorum that is lost for the moment), so the same command
+	// asked again later is expected to commit. It is what separates that moment from the unavailable of a group
+	// that failed closed or was closed, which no retry on this member mends. errors.Is(ErrNoLeader,
+	// ErrUnavailable) holds, so every caller that treats unavailable as unavailable keeps doing so.
+	ErrNoLeader = fmt.Errorf("%w: no leader committed the command", ErrUnavailable)
+	// ErrNoQuorum is the ErrStale of a ReadIndex fence that waited and was not reached in time: no leader or no
+	// quorum answered within the bound (two of three voters down, an election that outlasts the wait). Nothing
+	// about the data moved, so the same request asked again later is expected to succeed. It is what separates
+	// that from every other ErrStale: a command that names an application index or revision that is no longer
+	// the current one, and a replica that did not reach the minimum position a caller named (the documented
+	// 409), which asked again unchanged are refused again. errors.Is(ErrNoQuorum, ErrStale) holds, so every
+	// caller that treats stale as stale keeps doing so.
+	ErrNoQuorum = fmt.Errorf("%w: no quorum confirmed the read in time", ErrStale)
 	// ErrJournalBehind: the journal holds less than this node acknowledged (its persisted commit
 	// or applied index is beyond the end of the journal, or a leader committed beyond it). The
 	// member must be removed and re-added; it never rejoins as a voter under this identity.
@@ -784,7 +799,7 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 			}
 			return committed, nil
 		}
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader // the leader this member knows is another member, and this transport cannot forward
 	}
 	if _, err := g.ReadIndex(ctx); err != nil {
 		return CommittedEntry{}, err
@@ -858,7 +873,7 @@ func (g *Group) advanceSoloRead() {
 func (g *Group) ReadIndex(ctx context.Context) (model.Cursor, error) {
 	if cursor := g.soloRead.Load(); cursor != nil {
 		if ctx.Err() != nil {
-			return model.Cursor{}, ErrStale // a caller that gave up gets what the waiting path gives it
+			return model.Cursor{}, ErrNoQuorum // a caller that gave up gets what the waiting path gives it
 		}
 		return *cursor, nil
 	}
@@ -873,7 +888,7 @@ func (g *Group) readThroughRound(ctx context.Context) (model.Cursor, error) {
 	began := time.Now()
 	for {
 		if ctx.Err() != nil {
-			return model.Cursor{}, ErrStale
+			return model.Cursor{}, ErrNoQuorum
 		}
 		g.mu.Lock()
 		if g.failed || g.closed {
@@ -887,7 +902,7 @@ func (g *Group) readThroughRound(ctx context.Context) (model.Cursor, error) {
 			case <-changed:
 				continue
 			case <-ctx.Done():
-				return model.Cursor{}, ErrStale
+				return model.Cursor{}, ErrNoQuorum
 			}
 		}
 		request := g.joinReadLocked()
@@ -909,7 +924,7 @@ func (g *Group) readThroughRound(ctx context.Context) (model.Cursor, error) {
 			g.phases.readN.Add(1)
 			return request.result.entry.ApplicationCursor, nil
 		case <-ctx.Done():
-			return model.Cursor{}, ErrStale // the round is shared and stays: other callers wait on it
+			return model.Cursor{}, ErrNoQuorum // the round is shared and stays: other callers wait on it
 		}
 	}
 }
@@ -942,7 +957,7 @@ func (g *Group) ReadIndexAtLeast(ctx context.Context, min model.Cursor) (model.C
 	case a := <-done:
 		return a.cut, a.err
 	case <-ctx.Done():
-		return model.Cursor{}, ErrStale
+		return model.Cursor{}, ErrStale // the replica did not reach the caller's minimum in time
 	}
 }
 func (g *Group) readIndexAtLeast(ctx context.Context, min model.Cursor) (model.Cursor, error) {
@@ -991,7 +1006,7 @@ func (g *Group) WaitApplied(ctx context.Context, c model.Cursor) error {
 		select {
 		case <-changed:
 		case <-ctx.Done():
-			return ErrStale
+			return ErrStale // the replica is behind the position the caller named: the documented 409, not a lost quorum
 		}
 	}
 }
@@ -1096,7 +1111,7 @@ func (g *Group) awaitProposal(ctx context.Context, id model.ID, req *proposal) (
 		g.mu.Lock()
 		g.removeWaiter(id, req.done)
 		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader // no commit before the caller's deadline: a quorum that is lost for the moment
 	}
 }
 func (g *Group) waitPhysical(ctx context.Context, index uint64) error {

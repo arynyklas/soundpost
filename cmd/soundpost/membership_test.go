@@ -37,11 +37,24 @@ func threeVoters() replica.Members {
 	}}
 }
 
+// socketDir is a data directory short enough for the membership socket on any TMPDIR: t.TempDir
+// adds the test name and a random number, which put the socket path past maxSocketPath for the
+// longer test names (the product refuses such a directory, rightly).
+func socketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "msk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 // A connection the peer check refuses is closed before anything is served: another user's process
 // gets no answer. (The directory and socket modes keep other users out first; this is the second
 // check, on the connection.)
 func TestMembershipSocketDropsAPeerThatIsNotTheOwner(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketDir(t)
 	group := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
 	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{group}, nil, func(net.Conn) bool { return false })
 	if err != nil {
@@ -84,7 +97,7 @@ func TestPeerIsOwnerAdmitsTheSameUser(t *testing.T) {
 // The operator command talks to the running node over its private socket: status shows every
 // group, a step changes the groups the node leads and the exit status tells whether all are done.
 func TestMembershipCommandStepsThroughThePrivateSocket(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketDir(t)
 	led := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
 	other := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 2, Revision: 1, Members: threeVoters()}}
 	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{led, other}, nil, peerIsOwner)
@@ -160,7 +173,7 @@ func (l socketLayout) Incompatible(context.Context) (model.ID, []string) {
 // After the contraction of the indexes the operator sees, through the private socket, which control member cannot read the
 // layout (status), and a step that would add one is refused naming it (exit 1, the group untouched).
 func TestMembershipCommandReportsAndRefusesMembersThatCannotReadTheContractedLayout(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketDir(t)
 	control := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
 	data := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
 	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{control, data}, socketLayout{control: control.status.Group}, peerIsOwner)

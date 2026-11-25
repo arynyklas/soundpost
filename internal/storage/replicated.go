@@ -106,12 +106,19 @@ func storageReplicaFault(err error) error {
 		return model.Fail(model.Conflict)
 	}
 	if errors.Is(err, replica.ErrStale) {
-		return model.Fail(model.Stale)
+		// A fence that was waited for and not reached (no quorum, no leader in time) is retryable as it is; the
+		// refusal of a command that names an old revision is not, and keeps the plain fault.
+		f := model.Fail(model.Stale)
+		f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+		return f
 	}
 	if errors.Is(err, replica.ErrInvalid) {
 		return model.Fail(model.Invalid)
 	}
-	return model.Fail(model.Unavailable)
+	// A moment without a leader is the retryable unavailable; a group that failed closed or was closed is not.
+	f := model.Fail(model.Unavailable)
+	f.Retryable = errors.Is(err, replica.ErrNoLeader)
+	return f
 }
 
 // replicaFaultUnder is storageReplicaFault for the error of a call made under ctx. Group.ReadIndex
@@ -124,7 +131,9 @@ func replicaFaultUnder(ctx context.Context, err error) error {
 	if errors.Is(err, replica.ErrStale) {
 		switch cerr := ctx.Err(); {
 		case errors.Is(cerr, context.DeadlineExceeded):
-			return model.Fail(model.Timeout)
+			f := model.Fail(model.Timeout) // waiting for a quorum that did not answer in time is retryable
+			f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+			return f
 		case cerr != nil:
 			return model.Fail(model.Cancelled)
 		}

@@ -20,7 +20,9 @@ func replicaFaultUnder(ctx context.Context, err error) error {
 	if errors.Is(err, replica.ErrStale) {
 		switch cerr := ctx.Err(); {
 		case errors.Is(cerr, context.DeadlineExceeded):
-			return model.Fail(model.Timeout)
+			f := model.Fail(model.Timeout) // waiting for a quorum that did not answer in time is retryable
+			f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+			return f
 		case cerr != nil:
 			return model.Fail(model.Cancelled)
 		}

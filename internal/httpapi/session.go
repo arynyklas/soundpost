@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
+	"math/rand/v2"
 	"mime"
 	"net"
 	"net/http"
@@ -17,6 +18,17 @@ import (
 	"strings"
 	"time"
 )
+
+// retryAfterSeconds is the Retry-After of a retryable 503: a whole number of seconds, 1 to 3, drawn at random.
+func retryAfterSeconds() string { return strconv.Itoa(1 + rand.IntN(3)) }
+
+// setRetryAfter gives a retryable 503 its Retry-After unless the route set one: a whole number of seconds from
+// 1 to 3, drawn at random so that the clients refused in one election do not come back together.
+func setRetryAfter(w http.ResponseWriter) {
+	if w.Header().Get("Retry-After") == "" {
+		w.Header().Set("Retry-After", retryAfterSeconds())
+	}
+}
 
 const sessionCookie = "__Host-soundpost"
 
@@ -92,16 +104,24 @@ func reply(w http.ResponseWriter, v any, e error) {
 			status = 404
 		case model.Conflict:
 			status = 409
-		case model.Unavailable:
-			// A moment without a leader (an election, a leader transfer) is the retryable 503 of
-			// docs/operations/upgrade.md: the caller asks again, with its command id where it has one.
+		case model.Unavailable, model.Corrupt:
 			status = 503
-			retryable := *f
-			retryable.Retryable = true
-			f = &retryable
-			w.Header().Set("Retry-After", "1")
-		case model.Corrupt:
-			status = 503
+			// Only a fault that says it is retryable (a moment without a leader: an election, a leader
+			// transfer; docs/operations/upgrade.md) invites the retry. A group or an engine that failed
+			// closed, a closing node and the like are unavailable until an operator acts, and an
+			// unconditional retry hint would have every client ask forever.
+			if f.Code == model.Unavailable && f.Retryable {
+				setRetryAfter(w)
+			}
+		case model.Stale, model.Timeout:
+			// A fence or a wait that no quorum answered in time (two voters down, an election that outlasts
+			// the bound) is the same moment, retryable as it is. The refusal of a command that names an old
+			// revision, and a deadline of the caller's own making, say nothing of the kind and keep the 400
+			// the contract documents for them.
+			if f.Retryable {
+				status = 503
+				setRetryAfter(w)
+			}
 		case model.Quota:
 			// A capacity that frees up (the concurrent-export cap) is retryable, like the
 			// ingest quota; a permanent quota stays a plain 400.

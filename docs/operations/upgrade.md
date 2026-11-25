@@ -15,7 +15,7 @@ A three-voter installation keeps acknowledging writes while **one** voter is dow
 
 ## Order
 
-Upgrade one member at a time, **followers first if you can tell the leader** (there is no operator command to move leadership in this release; a leader restart simply causes one election, during which writes through any member are retried with `503` with `retryable: true`, and then succeed). Keep at most one member down at a time so a quorum remains. Rolling a member onto a *different binary* has not been exercised by any test or drill (the cluster drills restart the same binary; Kubernetes was never run, see `distributed.md`), so the ordering above is a precaution, not a verified guarantee; check each member's `/readyz` before moving on.
+Upgrade one member at a time, **followers first if you can tell the leader** (there is no operator command to move leadership in this release; a leader restart simply causes one election, during which writes through any member are retried with `503` with `retryable: true` and a `Retry-After` of 1 to 3 seconds, and then succeed; a member whose storage failed closed answers `503` with `retryable: false`, see `bootstrap.md`). Keep at most one member down at a time so a quorum remains. Rolling a member onto a *different binary* has not been exercised by any test or drill (the cluster drills restart the same binary; Kubernetes was never run, see `distributed.md`), so the ordering above is a precaution, not a verified guarantee; check each member's `/readyz` before moving on.
 
 For each member in turn:
 

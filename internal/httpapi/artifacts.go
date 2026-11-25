@@ -174,7 +174,7 @@ func RegisterArtifactRoutes(mux *http.ServeMux, authorizer *auth.Service, servic
 // keeps the shared mapping.
 func artifactReply(w http.ResponseWriter, v any, e error) {
 	var f *model.Fault
-	if errors.As(e, &f) && (f.Code == model.Stale || f.Code == model.Quota && f.Retryable) {
+	if errors.As(e, &f) && (f.Code == model.Stale && !f.Retryable || f.Code == model.Quota && f.Retryable) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
 		copy := *f

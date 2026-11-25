@@ -84,7 +84,7 @@ func (t *MTLS) ForwardPropose(ctx context.Context, group model.ID, entry Entry) 
 		}
 	}
 	if target.ID == 0 || target.ID == t.id {
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader // this member knows no leader (an election), or is not the leader it names
 	}
 	client, err := t.peerClient(target)
 	if err != nil {
@@ -102,12 +102,12 @@ func (t *MTLS) ForwardPropose(ctx context.Context, group model.ID, entry Entry) 
 	request.Header.Set("X-Soundpost-Raft-Hop", "1")
 	response, err := client.Do(request)
 	if err != nil {
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader // the leader this member knows does not answer
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
 	if err != nil {
-		return CommittedEntry{}, ErrUnavailable
+		return CommittedEntry{}, ErrNoLeader
 	}
 	var result forwardedResult
 	if model.StrictJSON(body, &result) != nil {
@@ -125,6 +125,8 @@ func forwardedError(code model.Code) error {
 	switch code {
 	case model.Conflict:
 		return ErrConflict
+	case model.Timeout:
+		return ErrNoQuorum
 	case model.Stale:
 		return ErrStale
 	case model.Invalid:
@@ -132,12 +134,18 @@ func forwardedError(code model.Code) error {
 	case model.Forbidden, model.NotFound, model.Quota, model.Cancelled:
 		return model.Fail(code)
 	default:
-		return ErrUnavailable
+		// The leader could not commit it: it was deposed since this member learned it leads, or it failed
+		// closed and the other voters elect again. Either way the leader's trouble is a gap this member's
+		// caller outlasts, not a state of this member.
+		return ErrNoLeader
 	}
 }
 func forwardedCode(err error) model.Code {
 	var fault *model.Fault
 	if errors.As(err, &fault) {
+		if fault.Code == model.Stale && fault.Retryable {
+			return model.Timeout
+		}
 		switch fault.Code {
 		case model.Conflict, model.Stale, model.Invalid, model.Forbidden, model.NotFound, model.Quota, model.Cancelled:
 			return fault.Code
@@ -146,6 +154,11 @@ func forwardedCode(err error) model.Code {
 	switch {
 	case errors.Is(err, ErrConflict):
 		return model.Conflict
+	case errors.Is(err, ErrNoQuorum):
+		// A freshness fence the leader waited for and did not reach is not an optimistic refusal. It travels as a
+		// timeout, a code this wire already answered with a gap (an older forwarder maps it to unavailable), so
+		// the peer format is unchanged.
+		return model.Timeout
 	case errors.Is(err, ErrStale):
 		return model.Stale
 	case errors.Is(err, ErrInvalid):

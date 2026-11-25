@@ -59,12 +59,19 @@ func replicaFault(err error) error {
 		return model.Fail(model.Conflict)
 	}
 	if errors.Is(err, replica.ErrStale) {
-		return model.Fail(model.Stale)
+		// A fence that was waited for and not reached (no quorum, no leader in time) is retryable as it is; the
+		// refusal of a command that names an old revision is not, and keeps the plain fault.
+		f := model.Fail(model.Stale)
+		f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+		return f
 	}
 	if errors.Is(err, replica.ErrInvalid) {
 		return model.Fail(model.Invalid)
 	}
-	return model.Fail(model.Unavailable)
+	// A moment without a leader is the retryable unavailable; a group that failed closed or was closed is not.
+	f := model.Fail(model.Unavailable)
+	f.Retryable = errors.Is(err, replica.ErrNoLeader)
+	return f
 }
 
 // EnableReplication installs the same Store.Update/View path, not a second

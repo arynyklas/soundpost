@@ -5,6 +5,7 @@ package replica
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -134,7 +135,7 @@ func (g *Group) proposeOneLocked(p *proposal, status raft.BasicStatus, view *bat
 		return
 	}
 	if status.Lead != g.id || status.RaftState != raft.StateLeader {
-		refuse(ErrUnavailable)
+		refuse(ErrNoLeader) // deposed since the caller saw this member lead
 		return
 	}
 	if old, ok := g.completed[e.ID]; ok {
@@ -205,6 +206,10 @@ func (g *Group) proposeOneLocked(p *proposal, status raft.BasicStatus, view *bat
 	g.pending[e.ID] = append(g.pending[e.ID], p.done)
 	if err = g.raw.Propose(raw); err != nil {
 		g.removeWaiter(e.ID, p.done)
+		if errors.Is(err, raft.ErrProposalDropped) {
+			refuse(ErrNoLeader) // a leader transfer in flight, or a leader lost since the check above
+			return
+		}
 		refuse(ErrUnavailable)
 		return
 	}

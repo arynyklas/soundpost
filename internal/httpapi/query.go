@@ -236,7 +236,14 @@ func queryReply(w http.ResponseWriter, v any, e error) {
 			copied.RequestID = requestID
 			f = &copied
 		}
-		w.WriteHeader(statusOf(f.Code))
+		status := statusOf(f.Code)
+		if f.Code == model.Stale && f.Retryable {
+			// A read fence that no quorum answered in time (docs/operations/upgrade.md): retryable as it is.
+			// The 409 stays for a query that names state that has moved.
+			status = http.StatusServiceUnavailable
+			setRetryAfter(w)
+		}
+		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(f)
 		return
 	}

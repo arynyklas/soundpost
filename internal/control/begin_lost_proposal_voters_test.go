@@ -4,6 +4,7 @@ package control_test
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -92,10 +93,13 @@ func beginUnderSaturatingIntake(t *testing.T, patch bool) {
 			if err := f.store.View(f.ctx, func(st control.State) error { view = st.Revision; return nil }); err != nil {
 				t.Fatal(err)
 			}
+			began := time.Now()
 			if err := f.beginAt(view); err != nil {
 				var fault *model.Fault
 				if errors.As(err, &fault) {
-					refused[string(fault.Code)]++
+					// retryable says which stale it is: a fence no quorum answered in time (retryable), or a
+					// proposal that lost the application-index race 64 times in a row (not).
+					refused[fmt.Sprintf("%s retryable=%t after %s", fault.Code, fault.Retryable, time.Since(began).Round(100*time.Millisecond))]++
 				} else {
 					refused["other:"+err.Error()]++
 				}

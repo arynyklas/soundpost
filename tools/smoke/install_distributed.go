@@ -689,13 +689,13 @@ func converged(sites map[uint64]*installSite, limit time.Duration) (map[string]u
 }
 
 // postRetryStale is site.post that repeats a request answered with the typed retryable `stale`
-// fault (HTTP 400, code "stale"): a control write that lost the race for its index against another
-// node's write. Nothing was committed, so repeating the same request is the documented client
-// behaviour; any other answer is returned as is. Every repeat is counted in stale.
+// fault (HTTP 400 before the retryable-503 change, 503 since; code "stale"): a control write that lost the race for its
+// index against another node's write or met an election. Nothing was committed, so repeating the same request is the
+// client behaviour; any other answer is returned as is. Every repeat is counted in stale.
 func postRetryStale(site *installSite, path string, body any, csrf, bearer string, stale *int) (int, []byte, error) {
 	for attempt := 0; ; attempt++ {
 		status, raw, err := site.post(path, body, csrf, bearer)
-		if err != nil || status != 400 || !bytes.Contains(raw, []byte(`"stale"`)) || attempt >= 40 {
+		if err != nil || (status != 400 && status != 503) || !bytes.Contains(raw, []byte(`"stale"`)) || attempt >= 40 {
 			return status, raw, err
 		}
 		*stale++
