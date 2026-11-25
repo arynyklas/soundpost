@@ -92,12 +92,21 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	if e.afterSubscribeFence != nil {
 		e.afterSubscribeFence()
 	}
+	// The authority read after the fence waits on the control state: it is made before e.mu is taken and
+	// only its local half runs under the lock, which stays free for appends and other readers meanwhile.
+	control, err := e.readAuthority(ctx, scope, req.Projects, req.Signal)
+	if err != nil {
+		return nil, err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
 		return nil, model.Fail(model.Unavailable)
 	}
-	if err = e.authorizeRead(ctx, scope, req.Projects, req.Signal); err != nil {
+	if ctx.Err() != nil {
+		return nil, model.Fail(model.Cancelled)
+	}
+	if _, err = e.finishReadDeletions(scope.OrgID(), req.Projects, control); err != nil {
 		return nil, err
 	}
 	if e.storageStats.ActiveIterators >= 32 {
@@ -451,7 +460,7 @@ func (it *changeIterator) Close() error {
 func (it *changeIterator) Watermarks() []model.Cursor {
 	it.e.mu.Lock()
 	defer it.e.mu.Unlock()
-	if it.certifyLocked(it.ctx, it.marks) != nil {
+	if _, err := it.certifyLocked(it.ctx, it.marks); err != nil {
 		return nil
 	}
 	return append([]model.Cursor(nil), it.marks...)
@@ -538,27 +547,36 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			e.mu.Unlock()
 			return ChangePage{}, err
 		}
-		if err := e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
-			if !revocationError(err) {
-				it.terminal = err
-				it.closeLocked()
-				e.mu.Unlock()
-				return ChangePage{}, err
-			}
-			page := it.revokeLocked()
-			e.mu.Unlock()
-			return page, nil
-		}
 		if e.closed || e.failed {
 			it.terminal = model.Fail(model.Unavailable)
 			it.closeLocked()
 			e.mu.Unlock()
 			return ChangePage{}, it.terminal
 		}
+		// The authority read waits on the control state: e.mu is released for it, and what can move meanwhile
+		// is judged under the lock before the answer is used (authorizeLocked).
+		_, state, denied := it.authorizeLocked(ctx)
+		if state != nil {
+			// Cancelled, closed, or its engine closed or failed while the lock was released: the checks above
+			// answer on the next pass.
+			e.mu.Unlock()
+			continue
+		}
+		if denied != nil {
+			if !revocationError(denied) {
+				it.terminal = denied
+				it.closeLocked()
+				e.mu.Unlock()
+				return ChangePage{}, denied
+			}
+			page := it.revokeLocked()
+			e.mu.Unlock()
+			return page, nil
+		}
 		if it.gap != nil {
 			gap := it.gap
 			epoch := it.epoch
-			if err := it.certifyLocked(ctx, gap.Through); err != nil {
+			if _, err := it.certifyLocked(ctx, gap.Through); err != nil {
 				page, failure := it.failLocked(err)
 				e.mu.Unlock()
 				return page, failure
@@ -607,7 +625,15 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				return ChangePage{}, err
 			}
-			delPreds, derr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
+			// The deletions in force are read from the control state with e.mu released: the page above was read
+			// before, so a rewrite of the commit record while the lock was away (an expiry erasure is no deletion
+			// predicate, so the filters below cannot see it) means the page may hold erased rows: read the commit
+			// again. A deletion applied here meanwhile is among the tombstones read under the lock afterwards.
+			delPreds, state, derr := it.deletionsLocked(ctx)
+			if state != nil || it.pending != pending || it.epoch != epoch || pending.Rewrites != e.commitRewrites {
+				e.mu.Unlock()
+				continue
+			}
 			if derr != nil {
 				it.terminal = derr
 				it.closeLocked()
@@ -624,7 +650,11 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				continue
 			}
-			if err = it.certifyLocked(ctx, it.marks); err != nil {
+			// The release fence and the authority reads around it run with e.mu released; the deletions in force
+			// are those of the last of them, read after the fence: a deletion that began after the predicates above
+			// were fetched must also hide rows of this page.
+			latest, err := it.certifyLocked(ctx, it.marks)
+			if err != nil {
 				page, failure := it.failLocked(err)
 				e.mu.Unlock()
 				return page, failure
@@ -635,16 +665,8 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				continue
 			}
-			// A deletion that began after the predicates above were fetched (the
-			// release fence is many round trips) must also hide rows of this
-			// page: refilter the decoded page against the current set. A page
-			// emptied this way is skipped like any fully covered page.
-			latest, lerr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
-			if lerr != nil {
-				page, failure := it.failLocked(&scopeReadError{cause: lerr})
-				e.mu.Unlock()
-				return page, failure
-			}
+			// Refilter the decoded page against the current set. A page emptied this way is skipped like any
+			// fully covered page.
 			if deletionsChanged(delPreds, latest) {
 				selected = Page{}
 				for i := range p.IDs {
@@ -790,28 +812,94 @@ func revocationError(err error) bool {
 	}
 	return false
 }
-func (it *changeIterator) certifyLocked(ctx context.Context, marks []model.Cursor) error {
-	check := func() error {
-		if ctx.Err() != nil || it.ctx.Err() != nil {
-			return model.Fail(model.Cancelled)
-		}
-		if it.e.closed || it.e.failed {
-			return model.Fail(model.Unavailable)
-		}
-		if it.closed {
-			return it.terminal
-		}
-		if err := it.e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
-			return &scopeReadError{cause: err}
-		}
-		return nil
+
+// stateLocked is the in-memory judgement of whether the iterator can still be served: cancelled (its own context
+// or the request's), its engine closed or failed, or itself closed (by Close, a cancellation or the engine; its
+// terminal error is the answer). It is made under e.mu, and again whenever the lock was released.
+func (it *changeIterator) stateLocked(ctx context.Context) error {
+	if ctx.Err() != nil || it.ctx.Err() != nil {
+		return model.Fail(model.Cancelled)
 	}
-	if err := check(); err != nil {
-		return err
+	if it.e.closed || it.e.failed {
+		return model.Fail(model.Unavailable)
+	}
+	if it.closed {
+		return it.terminal
+	}
+	return nil
+}
+
+// authorizeLocked reads the authority of the iterator's scope and the deletions in force (readAuthority) with
+// e.mu released: the read waits on the control state (a ReadIndex round, seconds when the quorum is slow), and
+// the lock held across it stopped every append and every other reader of the node. See readLocked.
+func (it *changeIterator) authorizeLocked(ctx context.Context) (preds []model.DeletePredicate, state, denied error) {
+	e, scope, projects, signal := it.e, it.scope, it.req.Projects, it.req.Signal
+	return it.readLocked(ctx, func() ([]model.DeletePredicate, error) {
+		return e.readAuthority(ctx, scope, projects, signal)
+	})
+}
+
+// deletionsLocked is authorizeLocked for the deletions in force only, which a page is filtered by: the control
+// view's answer is read with e.mu released.
+func (it *changeIterator) deletionsLocked(ctx context.Context) (preds []model.DeletePredicate, state, denied error) {
+	e, org, projects := it.e, it.scope.OrgID(), it.req.Projects
+	return it.readLocked(ctx, func() ([]model.DeletePredicate, error) {
+		return e.controlDeletions(ctx, org, projects)
+	})
+}
+
+// readLocked makes read, a read of the control state that reads nothing of the engine's data, with e.mu released
+// and judges, back under the lock, what the answer may be used for. First the iterator's own state (stateLocked:
+// closed, cancelled, the engine closed or failed while the lock was away; state is that verdict and nothing of the
+// answer is used), then the authority's (denied: a revocation, a retired project, a raised restore gate, a fault of
+// the read), then the deletions in force: the control view's with the tombstones applied here, read under the lock
+// (finishReadDeletions), so an erasure applied while the lock was away is never missed.
+//
+// The caller re-validates what it holds across the call that the lock cannot keep still (a pending event, its
+// epoch, the rewrite counter of the commit records): rows are handed out only after the release barrier
+// (certifyLocked), whose authority read is the last word on the scope and on the deletions, exactly as when
+// the lock was held throughout.
+func (it *changeIterator) readLocked(ctx context.Context, read func() ([]model.DeletePredicate, error)) (preds []model.DeletePredicate, state, denied error) {
+	e := it.e
+	control, err := func() ([]model.DeletePredicate, error) {
+		e.mu.Unlock()
+		defer e.mu.Lock()
+		return read()
+	}()
+	if state = it.stateLocked(ctx); state != nil {
+		return nil, state, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	preds, denied = e.finishReadDeletions(it.scope.OrgID(), it.req.Projects, control)
+	return preds, nil, denied
+}
+
+// certifyLocked is the release barrier: the scope is validated, every group of marks is confirmed by a read
+// fence, and the scope is validated again after it; each of the three runs with e.mu released (the fence is the
+// replica's, the validations are authority reads) and the iterator is judged again when the lock is back. It
+// returns the deletions in force as the last authority read found them.
+func (it *changeIterator) certifyLocked(ctx context.Context, marks []model.Cursor) ([]model.DeletePredicate, error) {
+	check := func() ([]model.DeletePredicate, error) {
+		if err := it.stateLocked(ctx); err != nil {
+			return nil, err
+		}
+		preds, state, denied := it.authorizeLocked(ctx)
+		if state != nil {
+			return nil, state
+		}
+		if denied != nil {
+			return nil, &scopeReadError{cause: denied}
+		}
+		return preds, nil
+	}
+	if _, err := check(); err != nil {
+		return nil, err
 	}
 	snapshot := append([]model.Cursor(nil), marks...)
 	if err := it.e.replicaReleaseFenceLocked(ctx, snapshot); err != nil {
-		return err
+		return nil, err
 	}
 	return check()
 }

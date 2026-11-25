@@ -143,28 +143,47 @@ func (e *Engine) applyDeleteBarrier(tx *bolt.Tx, slot uint16, index uint64, entr
 	return bucket.Put(key, raw)
 }
 
+// controlDeletions is the control view's answer for the organization: the deletions in force for the
+// projects, each validated, none twice. It is the part of a deletion read that waits on the control state
+// (a ReadIndex round: seconds when the quorum is slow) and reads nothing the engine holds, so a reader
+// that holds e.mu makes it with the lock released and adds what the engine itself holds afterwards
+// (finishReadDeletions); the lock held across it stalled every append and every other reader of the node.
+func (e *Engine) controlDeletions(ctx context.Context, org model.ID, projects []model.ID) ([]model.DeletePredicate, error) {
+	holder := e.tomb.view.Load()
+	if holder == nil {
+		return nil, nil
+	}
+	preds, err := holder.view.ActiveDeletions(ctx, org, projects)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.DeletePredicate
+	seen := make(map[model.ID]bool, len(preds))
+	for _, p := range preds {
+		if p.Validate() != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		if p.Org == org && !seen[p.Operation] {
+			seen[p.Operation] = true
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 // deletionPredicates is the union of the bound control view and every locally
 // applied tombstone of the organization, fetched fresh on every call so a
 // deletion that begins mid-iteration takes effect at the next read.
 func (e *Engine) deletionPredicates(ctx context.Context, org model.ID, projects []model.ID) ([]model.DeletePredicate, error) {
-	var out []model.DeletePredicate
-	seen := map[model.ID]bool{}
-	if holder := e.tomb.view.Load(); holder != nil {
-		preds, err := holder.view.ActiveDeletions(ctx, org, projects)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range preds {
-			if p.Validate() != nil {
-				return nil, model.Fail(model.Corrupt)
-			}
-			if p.Org == org && !seen[p.Operation] {
-				seen[p.Operation] = true
-				out = append(out, p)
-			}
-		}
+	out, err := e.controlDeletions(ctx, org, projects)
+	if err != nil {
+		return nil, err
 	}
-	err := e.db.View(func(tx *bolt.Tx) error {
+	seen := make(map[model.ID]bool, len(out))
+	for _, p := range out {
+		seen[p.Operation] = true
+	}
+	err = e.db.View(func(tx *bolt.Tx) error {
 		barriers, err := tombstonesWithPrefix(tx, nil)
 		if err != nil {
 			return err

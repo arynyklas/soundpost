@@ -257,26 +257,7 @@ func (e *Engine) readAuthority(ctx context.Context, s auth.Scope, projects []mod
 	if e.tomb.gate.Load() {
 		return nil, model.Fail(model.Unavailable)
 	}
-	holder := e.tomb.view.Load()
-	if holder == nil {
-		return nil, nil
-	}
-	preds, err := holder.view.ActiveDeletions(ctx, s.OrgID(), projects)
-	if err != nil {
-		return nil, err
-	}
-	var out []model.DeletePredicate
-	clear(seen)
-	for _, p := range preds {
-		if p.Validate() != nil {
-			return nil, model.Fail(model.Corrupt)
-		}
-		if p.Org == s.OrgID() && !seen[p.Operation] {
-			seen[p.Operation] = true
-			out = append(out, p)
-		}
-	}
-	return out, nil
+	return e.controlDeletions(ctx, s.OrgID(), projects)
 }
 
 // finishReadDeletions completes readAuthority under e.mu with what the engine itself holds: the
