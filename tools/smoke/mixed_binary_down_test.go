@@ -117,15 +117,35 @@ func (m *mixedRun) runOldLearnerAddedWhileDown() error {
 	}
 
 	// ---- 3. the previous release is started on the learner ----
+	// The previous release cannot join: it opens its groups from the state the voters hold and exits at startup, within about a second,
+	// with reason=unavailable (its groups fail closed; it serves nothing and never becomes ready). The test therefore does not try to
+	// catch it while it listens: it waits for the exit, which is the outcome.
 	m.c.setBinary(id, m.oldBin)
 	m.release[id] = "old"
 	if err = m.c.start(id); err != nil {
 		return err
 	}
-	if err = m.peerListening(id, 60*time.Second); err != nil {
-		return err
+	exit, exited := m.waitExit(id, 90*time.Second)
+	logText := m.c.logs[id].String()
+	m.say("3 the previous-release learner: exited=%t exit=%v log tail %q", exited, exit, lastLines(logText, 4))
+	if !exited {
+		return m.violate("old_learner_still_running", "the previous-release learner did not exit within 90 s: "+lastLines(logText, 6))
 	}
-	m.say("3 the learner is now running the previous release (alive=%t)", m.alive(id))
+	if exit == nil || !strings.Contains(logText, "soundpost: startup or service failed (reason=unavailable)") {
+		return m.violate("old_learner_exit_unexpected", fmt.Sprintf("exit %v, log %q", exit, lastLines(logText, 6)))
+	}
+	// it received NO contracted snapshot
+	listing := dirListing(filepath.Join(m.c.data[id], "raft", "control"))
+	logSnap := grepLines(logText, "snapshot")
+	m.say("  learner control directory: %s", listing)
+	m.say("  learner log, snapshot lines: %q", logSnap)
+	if strings.Contains(strings.ToLower(listing), "snap") {
+		return m.violate("old_learner_got_a_snapshot", "snapshot file in the learner's control directory: "+listing)
+	}
+	if strings.Contains(strings.ToLower(logSnap), "install") {
+		return m.violate("old_learner_got_a_snapshot", "snapshot install in the learner log: "+logSnap)
+	}
+	// it is a member that does not answer the layout question, so every voter names it
 	for _, via := range []uint64{1, 2, 3} {
 		if err = m.waitReasons(via, []string{"layout_incompatible:" + learner.NodeIdentity}, 120*time.Second); err != nil {
 			return err
@@ -140,27 +160,25 @@ func (m *mixedRun) runOldLearnerAddedWhileDown() error {
 			return m.violate("old_learner_promoted", fmt.Sprintf("voter %d: err=%v output %q", via, perr, text))
 		}
 	}
-	// give the leaders time to (not) send a snapshot, then look at the learner
-	time.Sleep(30 * time.Second)
-	dir := filepath.Join(m.c.data[id], "raft", "control")
-	listing := dirListing(dir)
-	logSnap := grepLines(m.c.logs[id].String(), "snapshot")
-	m.say("  learner control directory: %s", listing)
-	m.say("  learner log, snapshot lines: %q", logSnap)
-	if strings.Contains(strings.ToLower(listing), "snap") {
-		return m.violate("old_learner_got_a_snapshot", "snapshot file in the learner's control directory: "+listing)
-	}
-	if strings.Contains(strings.ToLower(logSnap), "install") {
-		return m.violate("old_learner_got_a_snapshot", "snapshot install in the learner log: "+logSnap)
-	}
-	if !m.alive(id) {
-		m.say("  the previous-release learner exited (log %q)", lastLines(m.c.logs[id].String(), 6))
-	}
 	for _, via := range []uint64{1, 2} {
 		if err = waitNodeReady(m.sites[via], 60*time.Second); err != nil {
 			return m.violate("new_voter_not_ready", fmt.Sprintf("voter %d: %v", via, err))
 		}
 	}
-	m.say("3 RESULT: added while down, reported by status on every voter, promotion refused, no snapshot delivered")
+	m.say("3 RESULT: added while down; the previous release exits at startup (reason=unavailable), is named by status on every voter, promotion refused, no snapshot delivered")
 	return m.settle("3 final: voters agree")
+}
+
+// waitExit waits up to limit for the process of member id to exit and returns its exit error (nil: a clean exit).
+func (m *mixedRun) waitExit(id uint64, limit time.Duration) (error, bool) {
+	m.c.mu.Lock()
+	done := m.c.done[id]
+	m.c.mu.Unlock()
+	select {
+	case err := <-done:
+		done <- err
+		return err, true
+	case <-time.After(limit):
+		return nil, false
+	}
 }

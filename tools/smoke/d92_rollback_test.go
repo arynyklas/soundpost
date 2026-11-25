@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -394,22 +393,6 @@ func (d *d92Install) contracted() (orgMark, born bool) {
 	}
 	_, born = st.OIDC[model.IndexesContractedKey]
 	return orgMark, born
-}
-
-func differing(a, b map[string]string) []string {
-	var out []string
-	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
-			out = append(out, k)
-		}
-	}
-	for k := range b {
-		if _, ok := a[k]; !ok {
-			out = append(out, k)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 // perRun are the only values that differ between two answers of one unchanged state: the request ID an error body

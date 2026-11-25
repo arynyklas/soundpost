@@ -8,9 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -99,26 +102,6 @@ func (d *d92Install) requireRecords(t *testing.T, label string, issueRecords boo
 	}
 }
 
-// requireOnlyOwnerAndExternalDropped requires the stored issue records of after to be those of before without
-// their owner and external members, and nothing else changed.
-func requireOnlyOwnerAndExternalDropped(t *testing.T, before, after string) {
-	t.Helper()
-	var b, a map[string]map[string]any
-	if json.Unmarshal([]byte(before), &b) != nil || json.Unmarshal([]byte(after), &a) != nil || len(b) == 0 {
-		t.Fatal("the stored issue records do not decode")
-	}
-	for _, rec := range b {
-		if rec["owner"] == nil || rec["external"] == nil {
-			t.Fatal("the stored issue record did not hold the owner and the link before the previous release ran")
-		}
-		delete(rec, "owner")
-		delete(rec, "external")
-	}
-	if !reflect.DeepEqual(a, b) {
-		t.Errorf("the previous release changed the stored issue records by more than the owner and the external link:\n before %v\n after  %v", b, a)
-	}
-}
-
 // storedMarker is the control-state format marker in the stored state of the data directory.
 func (d *d92Install) storedMarker() uint8 {
 	d.t.Helper()
@@ -177,153 +160,70 @@ func (d *d92Install) writtenInstall(t *testing.T, requireMarker bool) []d92Named
 	return reads
 }
 
-// TestD92RollbackWithoutTheMarker records what the previous release does on D92 records when the format marker
-// is NOT up (the marker put back to the previous release's value on the stopped directory): the hazard the marker exists to
-// prevent. It starts, reads, and drops the records. Asserted exactly.
+// TestD92RollbackWithoutTheMarker is what stops the previous release on a contracted installation when the format marker is NOT
+// what stops it (the marker put back to the previous release's value by hand on the stopped directory). The one-way point of the
+// contraction is not only the marker: the data engine's file moves off the layout the previous release reads when the installation
+// is contracted (upgrade.md, "Layout of apply.db"), and the previous release refuses such a file in initStorage as `corrupt` and
+// exits. So on a contracted single-host data directory the previous release never reaches the records the marker protects: it
+// exits with reason=corrupt (waited for, asserted), serves nothing, and writes nothing; the candidate then resumes with every D92
+// record. The hazard the marker alone prevents (the previous release running on D92 records and dropping them) needs a previous-release
+// process whose own apply.db is in its layout, which a single-host data directory of a contracted installation never is.
 func TestD92RollbackWithoutTheMarker(t *testing.T) {
 	d92Releases(t)
 	d := newD92Install(t, gitlabtest.New(t))
 	reads := d.writtenInstall(t, false)
-	versionNew := mustJSON[httpapi.IncidentView](t, "incident reads", reads[0].ans).Version
 	if _, err := setSchemaMarker(d.oldHost.dir, model.FormatMarkerBase); err != nil {
 		t.Fatal(err)
 	}
-	stateNew := d.storedKeys(d.oldHost.dir)
+	layout := d.applyLayout()
+	d.report("apply_layout", layout)
+	if layout == 1 {
+		t.Fatal("the apply.db of a contracted installation is in the previous release's layout: the previous release would run on the D92 records with only the marker to stop it; this test no longer describes the product")
+	}
+	frozen := freezeD92Dir(t, d.oldHost.dir)
 
 	// ---- the previous release on that very directory ----
-	// It starts and is ready (no refusal), and a few worker passes later (before any request) it has already rewritten the stored issue records.
-	r, obs := d.observe(d.oldHost)
-	d.report("old_binary", obs)
-	if r == nil || obs.Exited || !obs.Ready {
-		t.Fatalf("the previous release did not start and become ready on the contracted data: %+v\n%s", obs, lastLines(obs.LogTail, 8))
-	}
-	time.Sleep(12 * time.Second) // two passes of the default 5 s worker interval
-	mid := d.storedKeys(d.oldHost.dir)
-	issuesRewrittenWithoutRequests := mid["GroupingIssues"] != stateNew["GroupingIssues"]
-	d.report("old_rewrites_issue_records_before_any_request", issuesRewrittenWithoutRequests)
-	if err := d.admin.login(d.site); err != nil {
-		t.Fatal(err)
-	}
-	oldReads := d.previousReads()
-	for _, x := range oldReads {
-		d.report("old_read_"+x.name, x.ans.Full())
-	}
-	// it answers the incident reads (the unknown members are ignored: no title, no note text, no link; the
-	// timeline entries are listed by type) and the issue read (no owner, no link) with 200s, never a typed refusal.
-	byName := map[string]d92Answer{}
-	for _, x := range oldReads {
-		byName[x.name] = x.ans
-	}
-	oldInc := mustJSON[httpapi.IncidentView](t, "old incident get", byName["incident_get"])
-	if oldInc.Version != versionNew || oldInc.Title != "" || len(oldInc.External) != 0 || !reflect.DeepEqual(timelineTypes(oldInc), []string{"open", "title", "note", "external_begin", "external_end"}) {
-		t.Errorf("old incident read: %s", byName["incident_get"])
-	}
-	for _, e := range oldInc.Timeline {
-		if e.Title != "" || e.Note != "" || e.External != nil {
-			t.Errorf("the previous release shows the text of a D92 timeline entry: %+v", e)
+	h := d.oldHost
+	logStart := len(h.logs.String())
+	r, obs := d.observe(h)
+	var exit error
+	switch {
+	case r != nil:
+		done := r.(*binaryRun).done
+		select {
+		case exit = <-done:
+		case <-time.After(60 * time.Second):
+			_ = r.kill()
+			t.Fatalf("the previous release is still running on a contracted data directory (marker %d, apply.db layout %d): %+v", model.FormatMarkerBase, layout, obs)
 		}
+	case obs.Exited:
+		exit = errors.New(obs.Exit)
+	default:
+		t.Fatalf("the previous release neither started nor exited: %+v", obs)
 	}
-	if byName["queue"].Status != 200 {
-		t.Errorf("old queue: %s", byName["queue"])
+	log := h.logs.String()[logStart:]
+	d.report("old_exit", fmt.Sprint(exit))
+	d.report("old_log", log)
+	var ee *exec.ExitError
+	if exit == nil || (errors.As(exit, &ee) && ee.ExitCode() == 0) {
+		t.Errorf("the previous release exited cleanly on a contracted data directory: %v\n%s", exit, lastLines(log, 8))
 	}
-	if oldIssue := mustJSON[httpapi.IssueView](t, "old issue evidence", byName["issue_evidence"]); oldIssue.Grouping == nil || oldIssue.Grouping.Owner != nil || len(oldIssue.Grouping.External) != 0 {
-		t.Errorf("old issue read shows an owner or a link: %s", byName["issue_evidence"])
+	if !strings.Contains(log, "soundpost: startup or service failed (reason=corrupt)") {
+		t.Errorf("the previous release's refusal is not reason=corrupt:\n%s", lastLines(log, 8))
 	}
-	if err := r.stop(); err != nil {
-		t.Fatal(err)
+	if strings.Contains(log, "schema_newer") {
+		t.Errorf("the previous release stopped on the format marker, which this test put back to %d:\n%s", model.FormatMarkerBase, lastLines(log, 8))
 	}
-	stateOld := d.storedKeys(d.oldHost.dir)
-	changed := differing(stateNew, stateOld)
-	d.report("old_changed_state", changed)
-	// Stored by the previous release: the incident records are byte for byte what the candidate wrote (their title, notes and link stay in
-	// the control state); the organizations, the settings (the GitLab connection and its sealed token) and every other member are untouched.
-	// The stored issue records are rewritten WITHOUT their owner and external link, the revision unchanged.
-	// The rest is ordinary activity of the previous release's workers and sessions (delivery books, command records, the revision).
-	for _, k := range changed {
-		switch k {
-		case "GroupingIssues", "Revision", "Sessions", "authority_revision", "Commands", "CommandOwners", "DeliveryBooks":
-		default:
-			t.Errorf("the previous release changed the stored control state member %s", k)
-		}
+	if got := d.applyLayout(); got != layout {
+		t.Errorf("the previous release changed meta/scan_index_version of apply.db: %d -> %d", layout, got)
 	}
-	if stateNew["IncidentBooks"] != stateOld["IncidentBooks"] || !strings.Contains(stateOld["IncidentBooks"], d92Title) || !strings.Contains(stateOld["IncidentBooks"], d92Note) {
-		t.Errorf("the incident records were changed by the previous release")
-	}
-	if !issuesRewrittenWithoutRequests {
-		t.Errorf("the previous release rewrote the issue records only when asked, not on its own")
-	}
-	requireOnlyOwnerAndExternalDropped(t, stateNew["GroupingIssues"], stateOld["GroupingIssues"])
-
-	// ---- an ordinary write of the previous release on a COPY: an incident ack with the title, note and link in place ----
-	probeDir := t.TempDir() + "/copy"
-	if err := copyDataDir(d.oldHost.dir, probeDir); err != nil {
-		t.Fatal(err)
-	}
-	probe := &binaryHost{path: d.oldHost.path, dir: probeDir, holdDir: d.oldHost.holdDir, logs: d.oldHost.logs, args: d.oldHost.args}
-	pr, pobs := d.observe(probe)
-	if pr == nil || !pobs.Ready {
-		t.Fatalf("the previous release on the copy: %+v", pobs)
-	}
-	if err := d.admin.login(d.site); err != nil {
-		t.Fatal(err)
-	}
-	ack := d.incidentAction(httpapi.ActionAck, httpapi.ActionPayload{})
-	d.report("old_ack_on_copy", ack.Full())
-	_ = pr.stop()
-	probed := d.storedKeys(probeDir)
-	// Measured, asserted exactly: the previous release answers the ack 400 incident_action_invalid, yet commits it (version 6, an ack) and
-	// stores the incident WITHOUT its title and external links and with the title, note and link transitions of its timeline stripped of their
-	// content: the title and the note text are gone from the control state. This is the one-way loss of rolling back after a D92 record.
-	if code, detail := ack.typed(); ack.Status != 400 || code != "invalid" || detail != "incident_action_invalid" {
-		t.Errorf("the previous release's ack on an incident with D92 records: want 400 invalid incident_action_invalid, got %s", ack)
-	}
-	var books map[string]struct {
-		Version string
-		State   map[string]any
-	}
-	if err := json.Unmarshal([]byte(probed["IncidentBooks"]), &books); err != nil || len(books) != 1 {
-		t.Fatalf("the stored incident books of the copy do not decode: %v", err)
-	}
-	for _, b := range books {
-		timeline, _ := b.State["timeline"].([]any)
-		if b.Version != "6" || b.State["ack"] == nil || b.State["title"] != nil || b.State["external"] != nil || len(timeline) != 6 {
-			t.Errorf("the incident the previous release stored: version %s ack %v title %v external %v timeline %d", b.Version, b.State["ack"], b.State["title"], b.State["external"], len(timeline))
-		}
-	}
-	if strings.Contains(probed["IncidentBooks"], d92Title) || strings.Contains(probed["IncidentBooks"], "Rolled the deploy back") || strings.Contains(probed["IncidentBooks"], "soundpost-ref-") {
-		t.Errorf("the title, the note or the link marker survived the previous release's write")
-	}
-	d.report("old_ack_incident_books", probed["IncidentBooks"])
+	frozen.requireUnchanged(t, d, "after the previous release exited")
 
 	// ---- the candidate again on the original directory ----
 	run := d.start(d.newHost)
 	defer run.stop()
-	after := d.candidateReads()
-	requireSameReads(t, "the incident records after the previous release ran", pick(reads, "incident_get", "queue", "incident_timeline_markdown", "gitlab_preview_incident", "gitlab_settings"),
-		pick(after, "incident_get", "queue", "incident_timeline_markdown", "gitlab_preview_incident", "gitlab_settings"))
-	// The issue records are what the previous release left: no owner and no link. The link is recovered from GitLab by its marker (recheck
-	// never creates), the owner by assigning again; the GitLab issue is not created a second time.
-	d.requireRecords(t, "after the previous release", false)
-	re := d.post("/api/v1/gitlab/issues", map[string]any{"op": httpapi.GitLabOpRecheck, "org": d.fx.org, "project_id": d.fx.project, "entity": map[string]any{"kind": "issue", "id": d.issue}})
-	requireLinked(t, "recheck of the issue", re, false, "2")
-	requireCommitted(t, "assign again", d.assignIssue())
-	if d.stub.Posts() != 2 {
-		t.Errorf("the stub GitLab received %d issue creations after the round trip, want still 2", d.stub.Posts())
-	}
-	d.requireRecords(t, "after recovery", true)
-}
-
-// pick selects reads by name.
-func pick(all []d92Named, names ...string) []d92Named {
-	var out []d92Named
-	for _, n := range names {
-		for _, r := range all {
-			if r.name == n {
-				out = append(out, r)
-			}
-		}
-	}
-	return out
+	requireSameReads(t, "the candidate after the previous release exited", reads, d.candidateReads())
+	d.requireRecords(t, "after the previous release exited", true)
 }
 
 func TestD92RollbackNotContracted(t *testing.T) {
@@ -441,15 +341,7 @@ func TestD92RollbackFailsClosed(t *testing.T) {
 	d92Releases(t)
 	d := newD92Install(t, gitlabtest.New(t))
 	reads := d.writtenInstall(t, true)
-	before := d92Tree(t, d.oldHost.dir)
-	controlPath := findDataFile(d.oldHost.dir, "control.db")
-	controlRel, _ := filepath.Rel(d.oldHost.dir, controlPath)
-	controlRel = filepath.ToSlash(controlRel)
-	rawBefore, err := os.ReadFile(controlPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dumpBefore := d92Dump(t, controlPath)
+	frozen := freezeD92Dir(t, d.oldHost.dir)
 
 	r, obs := d.observe(d.oldHost)
 	d.report("old_binary", obs)
@@ -470,31 +362,7 @@ func TestD92RollbackFailsClosed(t *testing.T) {
 	if err := r.stop(); err != nil {
 		t.Errorf("the previous release did not stop cleanly: %v", err)
 	}
-	// Nothing was written: every file is byte-identical but control.db, which bbolt opens read-write and commits an empty
-	// transaction into (the two meta pages, 0 and 1: transaction ID and checksum, and the freelist page it rewrites); every bucket,
-	// key and value of it is the same.
-	after := d92Tree(t, d.oldHost.dir)
-	rawAfter, err := os.ReadFile(controlPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pages := differingPages(rawBefore, rawAfter)
-	d.report("old_control_db_differing_pages", pages)
-	free := freelistPages(rawBefore)
-	for p := range freelistPages(rawAfter) {
-		free[p] = true
-	}
-	for _, p := range pages {
-		if p != 0 && p != 1 && !free[p] {
-			t.Errorf("the previous release changed page %d of control.db, which is neither a meta page nor a freelist page: %v (freelist %v)", p, pages, free)
-		}
-	}
-	if dumpAfter := d92Dump(t, controlPath); !reflect.DeepEqual(dumpBefore, dumpAfter) {
-		t.Errorf("the previous release changed the content of control.db")
-	}
-	delete(before, controlRel)
-	delete(after, controlRel)
-	requireSameTree(t, "after the previous release refused", before, after)
+	frozen.requireUnchanged(t, d, "after the previous release refused")
 
 	run := d.start(d.newHost)
 	defer run.stop()
@@ -503,6 +371,88 @@ func TestD92RollbackFailsClosed(t *testing.T) {
 	if ans := d.incidentAction(httpapi.ActionNote, httpapi.ActionPayload{Note: "after the refused rollback"}); ans.Status != 200 {
 		t.Errorf("a D92 write after the refused rollback: %s", ans)
 	}
+}
+
+// d92BoltFiles are the bbolt files of a data directory that a release opens read-write: opening one commits an empty transaction
+// (the two meta pages, 0 and 1: transaction ID and checksum, and the freelist page it rewrites) and changes nothing else.
+var d92BoltFiles = []string{"control.db", "apply.db"}
+
+// d92Frozen is a stopped data directory as it was at one moment: every file by content, and each bbolt file also bucket by bucket.
+type d92Frozen struct {
+	tree  map[string]string
+	bolts map[string]d92FrozenBolt
+}
+
+type d92FrozenBolt struct {
+	path, rel string
+	raw       []byte
+	dump      map[string]string
+}
+
+func freezeD92Dir(t *testing.T, dir string) d92Frozen {
+	t.Helper()
+	f := d92Frozen{tree: d92Tree(t, dir), bolts: map[string]d92FrozenBolt{}}
+	for _, name := range d92BoltFiles {
+		b := d92FrozenBolt{path: findDataFile(dir, name)}
+		rel, _ := filepath.Rel(dir, b.path)
+		b.rel = filepath.ToSlash(rel)
+		raw, err := os.ReadFile(b.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.raw, b.dump = raw, d92Dump(t, b.path)
+		f.bolts[name] = b
+	}
+	return f
+}
+
+// requireUnchanged requires that nothing was written since the freeze: every file is byte-identical but the bbolt files, whose
+// differing pages are meta or freelist pages only and whose every bucket, key and value is the same.
+func (f d92Frozen) requireUnchanged(t *testing.T, d *d92Install, what string) {
+	t.Helper()
+	before, after := maps.Clone(f.tree), d92Tree(t, d.oldHost.dir)
+	for name, b := range f.bolts {
+		rawAfter, err := os.ReadFile(b.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages := differingPages(b.raw, rawAfter)
+		d.report("old_"+name+"_differing_pages", pages)
+		free := freelistPages(b.raw)
+		for p := range freelistPages(rawAfter) {
+			free[p] = true
+		}
+		for _, p := range pages {
+			if p != 0 && p != 1 && !free[p] {
+				t.Errorf("the previous release changed page %d of %s, which is neither a meta page nor a freelist page: %v (freelist %v)", p, name, pages, free)
+			}
+		}
+		if dumpAfter := d92Dump(t, b.path); !reflect.DeepEqual(b.dump, dumpAfter) {
+			t.Errorf("the previous release changed the content of %s", name)
+		}
+		delete(before, b.rel)
+		delete(after, b.rel)
+	}
+	requireSameTree(t, what, before, after)
+}
+
+// applyLayout is meta/scan_index_version of the data engine's apply.db in the stopped data directory (1 is the layout the previous
+// release reads and writes; an installation moves off it when it is contracted, upgrade.md "Layout of apply.db").
+func (d *d92Install) applyLayout() byte {
+	d.t.Helper()
+	db, closeDB, err := copyForRead(findDataFile(d.oldHost.dir, "apply.db"))
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	defer closeDB()
+	var v []byte
+	if err = db.View(func(tx *bolt.Tx) error {
+		v = append(v, tx.Bucket([]byte("meta")).Get([]byte("scan_index_version"))...)
+		return nil
+	}); err != nil || len(v) != 1 {
+		d.t.Fatalf("meta/scan_index_version of apply.db: %v %v", v, err)
+	}
+	return v[0]
 }
 
 // d92Dump is every bucket, key and value (as a SHA-256) of a bbolt file, read from a private copy.
@@ -554,13 +504,21 @@ func differingPages(before, after []byte) []int {
 	return out
 }
 
-// freelistPages is the freelist page of each of the two meta pages of a bbolt file (meta: magic, version, page size, flags, root
-// bucket (pgid, sequence), freelist pgid, high-water pgid, transaction ID, checksum, after the 16-byte page header).
+// freelistPages is the pages of the freelist of each of the two meta pages of a bbolt file (meta: magic, version, page size, flags, root
+// bucket (pgid, sequence), freelist pgid, high-water pgid, transaction ID, checksum, after the 16-byte page header; a freelist that
+// does not fit one page continues in the pages after it, the overflow count of its page header).
 func freelistPages(raw []byte) map[int]bool {
 	pageSize := int(binary.LittleEndian.Uint32(raw[16+8:]))
 	out := map[int]bool{}
 	for p := range 2 {
-		out[int(binary.LittleEndian.Uint64(raw[p*pageSize+16+32:]))] = true
+		free := int(binary.LittleEndian.Uint64(raw[p*pageSize+16+32:]))
+		if free < 0 || (free+1)*pageSize > len(raw) { // bbolt's "no freelist stored" sentinel (all ones)
+			continue
+		}
+		out[free] = true
+		for o := 1; o <= int(binary.LittleEndian.Uint32(raw[free*pageSize+12:])); o++ {
+			out[free+o] = true
+		}
 	}
 	return out
 }

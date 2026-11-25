@@ -999,9 +999,22 @@ func (m *mixedRun) adminSave(id uint64, s auth.Session, kind string, p auth.Admi
 			return err
 		}
 		epoch := model.Uint64(view.Epoch)
-		status, raw, err := postRetryStale(m.sites[id], "/api/v1/admin/commands", auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedEpoch: &epoch, OrgID: m.fx.org, Kind: kind, Payload: payload}, s.CSRF, "", &m.stale)
-		if err != nil {
-			return err
+		cmd := auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedEpoch: &epoch, OrgID: m.fx.org, Kind: kind, Payload: payload}
+		var (
+			status int
+			raw    []byte
+		)
+		// A write that raced a leadership transfer (the balancer moves a group's leader in the first minute of a group) answers 503
+		// unavailable and may or may not have committed: it is asked again with the SAME command id, and the stored answer comes back
+		// if it did (a command id is applied once).
+		for attempt := 0; ; attempt++ {
+			if status, raw, err = postRetryStale(m.sites[id], "/api/v1/admin/commands", cmd, s.CSRF, "", &m.stale); err != nil {
+				return err
+			}
+			if status != 503 || attempt >= 40 {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
 		if status == 200 || status == 202 {
 			m.say("  admin %s on voter %d: %d at org epoch %d", kind, id, status, uint64(epoch))
@@ -1328,8 +1341,8 @@ func (m *mixedRun) writeLogs() {
 	if m.c == nil {
 		return
 	}
-	for _, id := range []uint64{1, 2, 3} {
-		_ = os.WriteFile(filepath.Join(m.evidence, fmt.Sprintf("node-%d.log", id)), []byte(m.c.logs[id].String()), 0o644)
+	for id, log := range m.c.logs {
+		_ = os.WriteFile(filepath.Join(m.evidence, fmt.Sprintf("node-%d.log", id)), []byte(log.String()), 0o644)
 	}
 }
 
