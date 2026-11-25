@@ -289,6 +289,21 @@ func decodeBatch(raw []byte) ([]batchEntry, bool) {
 
 var errNotAMember = errors.New("replica: the sender is not the member its message names")
 
+// senderIs reports whether the member whose credential carries identity is the member from, as the membership the
+// transport addresses lists it, without the group lock.
+func (g *Group) senderIs(identity string, from uint64) bool {
+	view := g.transportView.Load()
+	if view == nil {
+		return false
+	}
+	for _, member := range view.Nodes {
+		if member.NodeIdentity == identity && member.ID == from {
+			return true
+		}
+	}
+	return false
+}
+
 // stepFromLocked steps a batched message after proving that the member whose credential carried it is
 // the sender it names. g.mu is held.
 func (g *Group) stepFromLocked(identity string, m *pb.Message) error {
@@ -329,7 +344,6 @@ func (t *MTLS) stepLater(g *Group, kind int, identity string, m *pb.Message) {
 	t.dmu.Unlock()
 	go func() {
 		g.mu.Lock()
-		defer g.mu.Unlock()
 		t.dmu.Lock()
 		d := t.deferred[key]
 		delete(t.deferred, key)
@@ -337,6 +351,8 @@ func (t *MTLS) stepLater(g *Group, kind int, identity string, m *pb.Message) {
 		if d != nil {
 			_ = g.stepFromLocked(d.identity, d.message)
 		}
+		g.mu.Unlock()
+		_ = g.settle()
 	}()
 }
 
@@ -377,12 +393,17 @@ func (t *MTLS) serveBatch(w http.ResponseWriter, r *http.Request) {
 		if g == nil {
 			continue
 		}
+		if !g.senderIs(identity, e.message.GetFrom()) {
+			forbidden++ // proven from the published membership: a busy group does not decide what a batch may claim
+			continue
+		}
 		if !g.mu.TryLock() {
 			t.stepLater(g, kind, identity, e.message)
 			continue
 		}
 		err := g.stepFromLocked(identity, e.message)
 		g.mu.Unlock()
+		_ = g.settle()
 		if errors.Is(err, errNotAMember) {
 			forbidden++
 		}

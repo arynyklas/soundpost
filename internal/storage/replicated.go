@@ -520,7 +520,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 				cfg.Machine = machine
 				cfg.Validate = machine.Validate
 				cfg.Fault = e.trip
-				cfg.LeaderSpread, cfg.LeaderSeed = true, uint64(slot) // the 64 groups are led evenly by the voters (replica/balance.go)
+				cfg.LeaderSpread, cfg.LeaderSeed = !e.leadersPlaced, uint64(slot) // the 64 groups are led evenly by the voters (replica/balance.go)
 				if cfg.RetryMax <= 0 {
 					cfg.RetryMax = slotRetryMax
 				}

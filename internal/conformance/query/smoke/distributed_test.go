@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query"
@@ -92,6 +93,163 @@ func TestDistributedPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 	}
 	requirePersistedFamilies(t, res)
 	requireHistogramNormalization(t, res, Distributed)
+}
+
+// A host that starves the voters for an election timeout makes the leader of a group step down between two
+// stages (the full `go test ./internal/...` of an 8-vCPU VM did it: the control group's lead left voter 1 and
+// the log-based alert rule, which holds a leadership fence, answered `replica unavailable` at every later stage).
+// Every stage must absorb a lead that sits on another voter: the writes and reads are forwarded or fenced, and the
+// rule evaluation first waits for voter 1 to lead the control group again. Here the lead of every group moves to
+// voter 2 before the first flushed stage, on purpose.
+func TestDistributedPersistedPathAbsorbsALeadMovedBetweenStages(t *testing.T) {
+	moved := false
+	res, err := runPersisted(context.Background(), Distributed, t.TempDir(), caseFile("persisted-path.json"), func(env *Env, stage string) {
+		if stage != "flush" {
+			return
+		}
+		moved = true
+		moveEveryLead(t, env, 1, 2)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moved {
+		t.Fatal("the flush stage never ran")
+	}
+	for _, s := range res.Steps {
+		if lapsedUnderRace(s) {
+			t.Logf("NOT OBSERVED %s %s", s.Name, s.Detail)
+			continue
+		}
+		if !s.Passed {
+			t.Errorf("FAIL %s %s", s.Name, s.Detail)
+		}
+	}
+	for _, p := range res.Persistence {
+		if !p.Passed {
+			t.Errorf("persistence scenario %s failed", p.Name)
+		}
+	}
+}
+
+// The rule smoke takes its leadership fence of the control group when it wires rule evaluation, at the start and after
+// a restart. Only a leader grants a fence, so a window in which no voter leads (an election on a starved host) must be
+// waited out there like everywhere else. Here voters 2 and 3 are cut off from voter 1 for 15 s at the first wiring,
+// on purpose: nobody leads for longer than the product waits.
+func TestDistributedRuleSmokeWaitsOutAnElectionWindowAtItsFence(t *testing.T) {
+	cut := false
+	steps, err := runRules(context.Background(), Distributed, t.TempDir(), caseFile("rule-smoke.json"), func(env *Env) {
+		if cut {
+			return
+		}
+		cut = true
+		env.Cluster().Partition(2, true)
+		env.Cluster().Partition(3, true)
+		time.AfterFunc(15*time.Second, func() {
+			env.Cluster().Partition(2, false)
+			env.Cluster().Partition(3, false)
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cut {
+		t.Fatal("the rules were never wired")
+	}
+	for _, s := range steps {
+		if !s.Passed {
+			t.Errorf("FAIL %s %s", s.Name, s.Detail)
+		}
+	}
+}
+
+// The stage rows commit control writes (a deletion generation advance) through voter 1. A write that meets an
+// election window answers `unavailable` for as long as no voter leads, and the product waits at most 8 s for it
+// (the full-suite failure of faults/deletion-during-compute-is-stale-never-success/allow-partial=true on a starved
+// host was `unavailable: unavailable` out of the advance, not a wrong answer): the row waits the window out as
+// state. Here voters 2 and 3 are cut off from voter 1 for 15 s, on purpose: nobody leads for longer than the product waits.
+func TestDistributedDeleteGenerationAdvanceWaitsOutAnElectionWindow(t *testing.T) {
+	env, err := NewEnv(context.Background(), Distributed, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer env.Close()
+	env.AddProject("project-a")
+	env.Cluster().Partition(2, true)
+	env.Cluster().Partition(3, true)
+	time.AfterFunc(15*time.Second, func() {
+		env.Cluster().Partition(2, false)
+		env.Cluster().Partition(3, false)
+	})
+	var advanced error
+	func() {
+		defer recoverFailure(&advanced)
+		env.advanceDeleteGeneration()
+	}()
+	if advanced != nil {
+		t.Fatalf("the advance did not wait the election window out: %v", advanced)
+	}
+}
+
+// An ingest that meets an election window is refused with a retryable `unavailable` (503): the contract of the route
+// is that the client posts the very same batch again, and the batch id makes that idempotent (the full-suite
+// run under -race on a starved host failed with `ingest status 503: {"code":"unavailable","retryable":true}` out of
+// the harness's one-shot ingest). The harness acknowledges a batch the way a client does, and waits the window out.
+// Here voters 2 and 3 are cut off from voter 1 for 15 s, on purpose.
+func TestDistributedIngestRepostsTheSameBatchThroughAnElectionWindow(t *testing.T) {
+	env, err := NewEnv(context.Background(), Distributed, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer env.Close()
+	env.AddProject("project-a")
+	source := env.AddSource(SourceSpec{Name: "window", Project: "project-a", Kinds: []model.Kind{model.Metric}, Labels: map[string][]string{"job": {"api"}}})
+	env.Cluster().Partition(2, true)
+	env.Cluster().Partition(3, true)
+	time.AfterFunc(15*time.Second, func() {
+		env.Cluster().Partition(2, false)
+		env.Cluster().Partition(3, false)
+	})
+	var acked error
+	func() {
+		defer recoverFailure(&acked)
+		env.Ingest(source, env.MetricRecord(source, "window_metric", map[string]string{"job": "api"}, 1_000_000_000, FloatBitsOf(1.5), nil))
+	}()
+	if acked != nil {
+		t.Fatalf("the ingest did not wait the election window out: %v", acked)
+	}
+	if rows := distinct(env.scanMetrics("project-a")); len(rows) != 1 || rows[0].Name != "window_metric" {
+		t.Fatalf("the acknowledged sample is stored as %v, want exactly one window_metric", rows)
+	}
+}
+
+// moveEveryLead hands the lead of every group voter from leads to voter to and waits until voter from sees it.
+func moveEveryLead(t *testing.T, env *Env, from, to uint64) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		pending := 0
+		for _, s := range env.NodeApp(from).ReplicationStatus() {
+			if s.Leader != from {
+				continue
+			}
+			pending++
+			g, err := env.NodeApp(from).ReplicaNode().Group(s.Group)
+			if err != nil {
+				t.Fatalf("group %s: %v", s.Group, err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = g.TransferLeadership(ctx, to)
+			cancel()
+		}
+		if pending == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("voter %d still leads %d groups after the lead was handed to voter %d", from, pending, to)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestDistributedRuleSmokeRunsOnThreeVotersWithReplicatedControl(t *testing.T) {

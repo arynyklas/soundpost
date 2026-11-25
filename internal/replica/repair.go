@@ -207,11 +207,11 @@ func (g *Group) compactJournal(ctx context.Context, verify func() (Snapshot, err
 		}
 	}
 	cut := snap.Manifest.Index
-	g.mu.Lock()
+	g.lockAll()
 	lockedAt := time.Now()
 	defer func() {
 		sinceMax(&g.phases.compactLockNS, &g.phases.compactLockMax, lockedAt)
-		g.mu.Unlock()
+		g.unlockAll()
 	}()
 	if g.failed || g.closed {
 		return CompactionResult{}, ErrUnavailable

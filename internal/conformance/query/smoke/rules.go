@@ -123,7 +123,13 @@ func (o *crashingOutbox) Settle(ctx context.Context, scope auth.Scope, lease rep
 }
 
 // RunRules executes rule-smoke.json on a real installation with real control.
-func RunRules(ctx context.Context, layout Layout, dir, path string) (steps []StepResult, err error) {
+func RunRules(ctx context.Context, layout Layout, dir, path string) ([]StepResult, error) {
+	return runRules(ctx, layout, dir, path, nil)
+}
+
+// runRules is RunRules with a hook that runs before every wiring of rule evaluation (the start, and after a
+// restart), before its leadership fence is taken: a test uses it to disturb the cluster there.
+func runRules(ctx context.Context, layout Layout, dir, path string, atWire func(env *Env)) (steps []StepResult, err error) {
 	defer recoverFailure(&err)
 	var file ruleFile
 	check(readJSON(path, &file))
@@ -180,14 +186,14 @@ func RunRules(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 	readName, workerName := "rule-reader", "rule-worker"
 	// scopes derives the project-scoped read scope and the commit scope from the
 	// file's own principals (not the bootstrap owner).
-	scopes := func() (auth.Scope, auth.Scope) {
+	scopes := func() (read, admin auth.Scope, err error) {
 		reader := env.People[readName]
 		checkf(reader != nil && env.People[workerName] != nil, "rule principals missing")
-		read, err := env.app.Auth.Authorize(ctx, reader.Cred, env.org, []model.ID{project}, auth.Read)
-		check(err)
-		admin, err := env.app.Auth.Authorize(ctx, env.owner.Cred, env.org, []model.ID{project}, auth.OrgAdmin)
-		check(err)
-		return read, admin
+		if read, err = env.app.Auth.Authorize(ctx, reader.Cred, env.org, []model.ID{project}, auth.Read); err != nil {
+			return read, admin, err
+		}
+		admin, err = env.app.Auth.Authorize(ctx, env.owner.Cred, env.org, []model.ID{project}, auth.OrgAdmin)
+		return read, admin, err
 	}
 	clock := &clockAt{}
 	producer := rules.ProducerIdentity{Source: src.ID, Producer: model.ID{0xee}, PolicyRevision: 1, Resource: src.Resource}
@@ -200,13 +206,19 @@ func RunRules(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 		lease     replica.FenceToken
 	}
 	wire := func() wiring {
+		if atWire != nil {
+			atWire(env)
+		}
 		store := rules.NewStateStore(env.app.Control)
 		group := env.app.Control.ReplicaGroup()
 		evaluator := rules.NewEvaluator(env.engine, store, rules.WithClock(clock), rules.WithFencer(group), rules.WithEvidence(rules.GapEvidence{Gaps: env.app.Control}), rules.WithProducer(producer))
 		committer := rules.NewCommitter(env.app.Control, group)
-		read, admin := scopes()
-		lease, err := group.Fence(ctx)
-		check(err)
+		var read, admin auth.Scope
+		check(env.awaitControl("authorize the rule principals", func() (err error) {
+			read, admin, err = scopes()
+			return err
+		}))
+		lease := env.fenceControl()
 		return wiring{scheduler: rules.NewScheduler(evaluator, committer, store, rules.WithSchedulerClock(clock)), store: store, evaluator: evaluator, read: read, admin: admin, lease: lease}
 	}
 	w := wire()

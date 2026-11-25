@@ -17,11 +17,11 @@ import (
 
 // An acknowledged command is a promise: a read that begins after the acknowledgement, with the receipt's
 // cursor or without, never answers a cut below it. A lone voter answers reads without g.mu from a cursor
-// that is refreshed at the end of processReady, and applyCommitted answers the waiters of a command in
-// the middle of it: a waiter that is not the goroutine running processReady (a retried proposal, a proposal
+// that is refreshed at the end of every cycle, and applyEntry answers the waiters of a command in
+// the middle of one: a waiter that is not the goroutine running the cycle (a retried proposal, a proposal
 // forwarded to a leader) was handed its receipt while the cursor still read the state before the command.
 
-// holdAfterAck makes the group stop right after applyCommitted answered the waiters of the next command
+// holdAfterAck makes the group stop right after applyEntry answered the waiters of the next command
 // it applies, until release is called. It returns the channel that is closed when the group is held.
 func holdAfterAck(g *Group) (held <-chan struct{}, release func()) {
 	reached := make(chan struct{})

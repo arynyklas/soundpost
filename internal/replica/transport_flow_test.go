@@ -93,21 +93,6 @@ func TestSlowLinkCarriesAboutThePayloadItReplicates(t *testing.T) {
 	)
 	defer func(previous time.Duration) { meshTestTick = previous }(meshTestTick)
 	meshTestTick = 100 * time.Millisecond
-	if raceEnabled {
-		// The groups' election timeout must outlast the longest a group's tick waits for the group's lock. The 200 proposers
-		// of a group each persist their own proposal under that lock, and the tick (raft's clock, so the leader's heartbeats)
-		// queues behind all of them: at the start of the burst it waited up to 1.7 s (race build, 8 CPUs), against the 1 to
-		// 2 s election timeout of a 100 ms tick. A follower that heard nothing campaigned (two runs in three had a leader
-		// change; the runs that failed, ratio 1.6 to 1.9, had two or three), and the entries the old leader had in flight
-		// were on the wire again, from the new one, without being committed payload: the ratio measured an election, not a
-		// transport that resends. A 500 ms tick makes the election timeout 5 to 10 s (100 of 100 runs: no leader change,
-		// ratio 1.33 to 1.36). A product change that hands the tick to the first lock holder instead of the end of the queue
-		// was measured and did not shorten it: the holders' own critical sections (applying a full append under the group
-		// lock, 130 ms here) are the longest wait, 0.6 s plain and 1-2 s under the race detector with four hot groups. That
-		// wait is a known product defect (decision D103: persist/apply must leave the group lock so ticks never queue behind
-		// it); this race-only clock is removed together with that fix, whose own test asserts the tick delay directly.
-		meshTestTick = 500 * time.Millisecond
-	}
 	link := newNIC(linkRate)
 	c := newMTLSClusterWith(t, groups, func(node int, l net.Listener) net.Listener {
 		return throttledListener{Listener: l, link: link}
@@ -193,6 +178,12 @@ func TestSlowLinkCarriesAboutThePayloadItReplicates(t *testing.T) {
 			if raw, err := json.Marshal(s.Stats()); err == nil {
 				t.Logf("node %d transport: %s", node+1, raw)
 			}
+		}
+	}
+	for node := range 3 {
+		for i, g := range c.groups[node] {
+			p := g.Phases()
+			t.Logf("node %d group %d: persist %d x %v, apply %d x %v, longest cycle %v, tick at most %v late, term %d", node+1, i, p.PersistN, time.Duration(p.PersistNS/max(p.PersistN, 1)), p.ApplyN, time.Duration(p.ApplyNS/max(p.ApplyN, 1)), g.CycleMax(), g.TickLagMax(), g.Status().Term)
 		}
 	}
 	wire := link.received.Load() - base

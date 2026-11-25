@@ -173,11 +173,11 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 // locked, the lock is held throughout and nothing can change: the last attempt, so a group that
 // never stops committing still gets its redaction.
 func (g *Group) redactCompletedOnce(wanted map[uint64][]byte, locked bool) (RedactResult, error) {
-	g.mu.Lock()
+	g.lockAll()
 	held := true
 	defer func() {
 		if held {
-			g.mu.Unlock()
+			g.unlockAll()
 		}
 	}()
 	if g.failed || g.closed {
@@ -230,7 +230,7 @@ func (g *Group) redactCompletedOnce(wanted map[uint64][]byte, locked bool) (Reda
 	}
 	defer in.close()
 	if !locked {
-		g.mu.Unlock()
+		g.unlockAll()
 		held = false
 	}
 
@@ -259,7 +259,7 @@ func (g *Group) redactCompletedOnce(wanted map[uint64][]byte, locked bool) (Reda
 		if locked {
 			return nil
 		}
-		g.mu.Lock()
+		g.lockAll()
 		held = true
 		var err error
 		if g.failed || g.closed {

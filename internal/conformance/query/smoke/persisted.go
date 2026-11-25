@@ -153,7 +153,14 @@ type PersistedResult struct {
 // hot, after a flush, with several segments, after a compaction, after a
 // restart and after a restart following compaction; admission receipts and
 // the stored distinct samples must reconcile with what was sent at each stage.
-func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res PersistedResult, err error) {
+func RunPersisted(ctx context.Context, layout Layout, dir, path string) (PersistedResult, error) {
+	return runPersisted(ctx, layout, dir, path, nil)
+}
+
+// runPersisted is RunPersisted with a hook that runs at the start of every stage check, before the
+// stage's queries: a test uses it to disturb the installation between stages the way a loaded host does
+// (a leader that steps down), which the stage checks must absorb.
+func runPersisted(ctx context.Context, layout Layout, dir, path string, atStage func(env *Env, stage string)) (res PersistedResult, err error) {
 	defer recoverFailure(&err)
 	var file persistedFile
 	check(readJSON(path, &file))
@@ -236,6 +243,9 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		res.Steps = append(res.Steps, StepResult{Name: name, Passed: passed, Detail: detail})
 	}
 	stageCheck := func(stage string) {
+		if atStage != nil {
+			atStage(env, stage)
+		}
 		failures := 0
 		for _, profileID := range file.Runner.Profiles {
 			for _, qr := range file.Queries {

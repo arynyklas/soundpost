@@ -139,7 +139,7 @@ func TestAReceiptReadOnAnotherVoterIsDirtyFromTheNoticeOfASnapshotToAnAcknowledg
 	// Slot 0 needs no snapshot, so the notice reaches node 3 through the log; wait for it rather
 	// than rely on how long the erasures below take.
 	if !eventually(30*time.Second, func() bool { return replicatedNotice(t, f.v.engines[3], 3) > 0 }) {
-		t.Fatal("node 3 never applied the notice that names it")
+		t.Fatalf("node 3 never applied the notice that names it\n%s\n%s", f.v.slotView(int(eraseAckSlot)), f.v.divergence(nil))
 	}
 	if f.v.engines[3].Incarnation() == "" {
 		t.Fatal("no incarnation")

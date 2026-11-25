@@ -410,11 +410,16 @@ func faultRows(env *Env, c cacheSection) []StepResult {
 // until the generation the engine reads has stopped moving, so the next row
 // starts from a settled state.
 func (e *Env) advanceDeleteGeneration() {
-	_, err := e.app.Control.AdvanceDeleteGeneration(e.ctx, e.org)
-	check(err)
+	check(e.awaitControl("advance the delete generation", func() error {
+		_, err := e.app.Control.AdvanceDeleteGeneration(e.ctx, e.org)
+		return err
+	}))
 	read := func() uint64 {
-		g, err := e.app.Retention.DeleteGeneration(e.ctx, e.org, []model.ID{e.Projects["project-a"]})
-		check(err)
+		var g uint64
+		check(e.awaitControl("read the delete generation", func() (err error) {
+			g, err = e.app.Retention.DeleteGeneration(e.ctx, e.org, []model.ID{e.Projects["project-a"]})
+			return err
+		}))
 		return g
 	}
 	last, since := read(), time.Now()

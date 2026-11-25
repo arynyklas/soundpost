@@ -19,19 +19,6 @@ func spreadConfig(_, group int, cfg *Config) {
 	cfg.LeaderSpread, cfg.LeaderSeed = true, uint64(group)
 }
 
-func leaderCounts(c *asyncCluster, groups int) (counts [4]int, all bool) {
-	all = true
-	for i := range groups {
-		l := c.leader(i)
-		if l == 0 {
-			all = false
-			continue
-		}
-		counts[l]++
-	}
-	return counts, all
-}
-
 func termSum(c *asyncCluster, groups int) (sum uint64) {
 	for i := range groups {
 		for n := range 3 {
@@ -49,6 +36,21 @@ func termSum(c *asyncCluster, groups int) (sum uint64) {
 // appends were for two followers. With the placement every group ends up led by its preferred member (the seed
 // modulo the voters: nine groups over three members is three each), by a handful of transfers and no more.
 func TestLeadershipIsSharedOutEvenlyAndStaysPut(t *testing.T) {
+	shareOut(t, 0)
+}
+
+// The same on a machine that is busy: the campaigns take longer than balance.settled plus the stagger, so the first
+// groups are being handed over, and the members that hear no leader of the last groups elect one themselves, while
+// the campaigns are still going on. "Every group led by member 1 at one moment" is not a state this ever reaches, and
+// the placement does not depend on where the groups started.
+func TestLeadershipIsSharedOutEvenlyWhenTheCampaignsAreSlow(t *testing.T) {
+	shareOut(t, 100*time.Millisecond)
+}
+
+// shareOut starts nine groups with member 1 campaigning for each, pause apart, and holds the placement to the
+// preferred members, exactly, and to as many term changes as the moves need.
+func shareOut(t *testing.T, pause time.Duration) {
+	t.Helper()
 	quickBalance(t)
 	const groups = 9
 	c := newAsyncCluster(t, groups, spreadConfig)
@@ -56,22 +58,39 @@ func TestLeadershipIsSharedOutEvenlyAndStaysPut(t *testing.T) {
 		if err := c.groups[0][i].Campaign(); err != nil {
 			t.Fatal(err)
 		}
+		time.Sleep(pause)
 	}
-	await(t, 10*time.Second, "every group led by member 1", func() bool {
-		counts, all := leaderCounts(c, groups)
-		return all && counts[1] == groups
-	})
-	before := termSum(c, groups)
-	await(t, 30*time.Second, "three groups led by each member", func() bool {
-		counts, all := leaderCounts(c, groups)
-		return all && counts[1] == 3 && counts[2] == 3 && counts[3] == 3
-	})
-	for i := range groups {
-		want := uint64(i%3 + 1)
-		if got := c.leader(i); got != want {
-			t.Fatalf("group %d is led by member %d, its preferred leader is %d", i, got, want)
+	// Every group is led once; the term it was first seen led in is where its moves count from (a group may already
+	// be on its way to its preferred member, so no state that holds for all groups at one moment is waited for).
+	first := make([]uint64, groups)
+	await(t, 10*time.Second, "every group has a leader", func() bool {
+		led := true
+		for i := range groups {
+			if first[i] != 0 {
+				continue
+			}
+			if s := c.groups[0][i].Status(); s.Leader != 0 {
+				first[i] = s.Term
+			} else {
+				led = false
+			}
 		}
+		return led
+	})
+	var before uint64
+	for _, term := range first {
+		before += term
 	}
+	// Every group led by its preferred member: nine groups over three members is three each. A count of three
+	// per member is not enough, it is also reached on the way, with the wrong groups.
+	await(t, 30*time.Second, "every group led by its preferred member", func() bool {
+		for i := range groups {
+			if c.leader(i) != uint64(i%3+1) {
+				return false
+			}
+		}
+		return true
+	})
 	// Placed: nothing moves any more. A transfer that was repeated, or a leader that gave leadership to a member that
 	// then gave it back, would show as a new term.
 	terms := termSum(c, groups)

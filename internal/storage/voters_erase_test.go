@@ -97,6 +97,7 @@ func openVotersWith(t *testing.T, service *auth.Service, authority ReplicatedAut
 		if err != nil {
 			t.Fatal(err)
 		}
+		engine.leadersPlaced = true // voters.lead assigns the leaders; the balancer would take them back after 10 s
 		t.Cleanup(func() { engine.Close() })
 		if node == 1 {
 			if seed, err = engine.ReplicationSeed(); err != nil {

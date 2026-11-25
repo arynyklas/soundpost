@@ -72,8 +72,10 @@ func confCovers(snapshot, current *pb.ConfState) bool {
 // membershipSnapshotLocked cuts the sendable snapshot at the applied index with
 // the current configuration, reusing the previous one while it is still current
 // and not older than the stored snapshot the retained journal is anchored on.
-// The machine state and the applied index are consistent because both change
-// only under g.mu. A failure is reported as temporarily unavailable so raft
+// The machine state and the applied index are consistent only while no cycle
+// of the ready stage is applying (ioMu): when one is, raft is told the snapshot
+// is temporarily unavailable and the next cycle cuts it (wantSendSnapshot), so
+// that raft's retry finds it. A failure is reported the same way so raft
 // retries on its next round instead of panicking.
 func (g *Group) membershipSnapshotLocked(stored *pb.Snapshot) (*pb.Snapshot, error) {
 	if cached := g.sendSnap; cached != nil && cached.GetMetadata().GetIndex() >= stored.GetMetadata().GetIndex() && confCovers(cached.GetMetadata().GetConfState(), g.conf) {
@@ -82,6 +84,40 @@ func (g *Group) membershipSnapshotLocked(stored *pb.Snapshot) (*pb.Snapshot, err
 	if g.failed || g.closed || g.applied == 0 || g.applied < stored.GetMetadata().GetIndex() {
 		return nil, raft.ErrSnapshotTemporarilyUnavailable
 	}
+	if !g.ioMu.TryLock() { // never blocks: mu is held, and ioMu is taken before mu
+		g.wantSendSnapshot()
+		return nil, raft.ErrSnapshotTemporarilyUnavailable
+	}
+	defer g.ioMu.Unlock()
+	return g.cutSendSnapshotLocked()
+}
+
+// wantSendSnapshot asks the next cycle to cut the snapshot membershipSnapshotLocked could not. g.mu is held.
+func (g *Group) wantSendSnapshot() {
+	g.snapWanted = true
+	if g.wake != nil {
+		select {
+		case g.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// cutWantedSendSnapshotLocked cuts the snapshot membershipSnapshotLocked asked the cycle for; mu and ioMu are held.
+func (g *Group) cutWantedSendSnapshotLocked() {
+	g.snapWanted = false
+	stored, err := g.memory.Snapshot()
+	if err != nil || g.failed || g.closed || g.applied == 0 || g.applied < stored.GetMetadata().GetIndex() {
+		return
+	}
+	if cached := g.sendSnap; cached != nil && cached.GetMetadata().GetIndex() >= stored.GetMetadata().GetIndex() && confCovers(cached.GetMetadata().GetConfState(), g.conf) {
+		return
+	}
+	_, _ = g.cutSendSnapshotLocked()
+}
+
+// cutSendSnapshotLocked is the cut itself; mu and ioMu are held.
+func (g *Group) cutSendSnapshotLocked() (*pb.Snapshot, error) {
 	index := g.applied
 	term, err := g.memory.Term(index)
 	if err != nil {

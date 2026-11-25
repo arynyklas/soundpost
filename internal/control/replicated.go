@@ -445,6 +445,15 @@ func (m *replicatedControl) Applied() uint64 {
 	})
 	return value
 }
+
+// The kinds of a control command, the index of Store.decodedByKind.
+const (
+	kindReplacement = iota
+	kindPatch
+	kindDelta
+	kindScoped
+)
+
 func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 	// The command is decoded once for the whole of the apply (a patch of a full round is 770 KiB of JSON).
 	var decoded controlCommand
@@ -795,6 +804,16 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				m.store.rawApplies.Add(1)
 			} else {
 				m.store.decodedApplies.Add(1)
+				switch {
+				case cmd.scoped != nil:
+					m.store.decodedByKind[kindScoped].Add(1)
+				case cmd.delta != nil:
+					m.store.decodedByKind[kindDelta].Add(1)
+				case cmd.patch != nil:
+					m.store.decodedByKind[kindPatch].Add(1)
+				default:
+					m.store.decodedByKind[kindReplacement].Add(1)
+				}
 			}
 			if owe {
 				if e := oweLocalScrub(b); e != nil {

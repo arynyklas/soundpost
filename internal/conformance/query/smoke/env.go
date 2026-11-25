@@ -570,9 +570,23 @@ func (e *Env) Ingest(s *Source, records ...model.Record) model.Receipt {
 }
 
 // IngestAt admits one batch through the ingest route of node (0 is the primary
-// node) and requires an acknowledgement.
+// node) and requires an acknowledgement. A refusal with 503 is the route's
+// retryable `unavailable` (an election window, a lead that moved): the client
+// posts the very same batch again, which the batch id makes idempotent, and
+// the wait is bounded by controlWait.
 func (e *Env) IngestAt(node uint64, s *Source, records ...model.Record) model.Receipt {
-	code, body, batch := e.SendBatch(node, s, records...)
+	batch, raw := e.batchOf(s, records)
+	var code int
+	var body []byte
+	for deadline := time.Now().Add(controlWait); ; time.Sleep(100 * time.Millisecond) {
+		code, body = e.postBatch(node, s, raw)
+		if code != http.StatusServiceUnavailable || time.Now().After(deadline) {
+			break
+		}
+	}
+	if code == http.StatusServiceUnavailable {
+		check(fmt.Errorf("ingest status %d: %s (still refused after %s; %s)", code, trim(body), controlWait, e.controlState()))
+	}
 	checkf(code == 200, "ingest status %d: %s", code, trim(body))
 	var receipt model.Receipt
 	check(json.Unmarshal(body, &receipt))
@@ -580,14 +594,25 @@ func (e *Env) IngestAt(node uint64, s *Source, records ...model.Record) model.Re
 	return receipt
 }
 
-// SendBatch posts one batch to node's ingest route and returns the raw answer.
+// SendBatch posts one batch to node's ingest route once and returns the raw answer.
 func (e *Env) SendBatch(node uint64, s *Source, records ...model.Record) (int, []byte, model.Batch) {
+	batch, raw := e.batchOf(s, records)
+	code, body := e.postBatch(node, s, raw)
+	return code, body, batch
+}
+
+// batchOf is the one batch of records, with its own identity, and its wire form.
+func (e *Env) batchOf(s *Source, records []model.Record) (model.Batch, []byte) {
 	project := e.Projects[s.Project]
 	batch := model.Batch{Version: 1, Project: project, Source: s.ID, Producer: model.NewID(), ID: model.NewID(), PolicyRevision: 1, Records: records}
 	var err error
 	batch.RouteSlot, err = model.OwnerSlot(e.org, project, s.ID, batch.Producer, records[0])
 	check(err)
 	raw, _ := json.Marshal(batch)
+	return batch, raw
+}
+
+func (e *Env) postBatch(node uint64, s *Source, raw []byte) (int, []byte) {
 	base, client := e.endpoint(node)
 	req, _ := http.NewRequest("POST", base+"/ingest/v1/batches", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+s.Credential)
@@ -596,7 +621,7 @@ func (e *Env) SendBatch(node uint64, s *Source, records ...model.Record) (int, [
 	check(err)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, body, batch
+	return resp.StatusCode, body
 }
 
 // MetricRecord builds one float metric record at time ns with exact value bits.

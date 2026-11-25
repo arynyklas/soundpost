@@ -246,11 +246,11 @@ func (in *machineInputs) currentLocked(g *Group) (bool, error) {
 }
 
 func (g *Group) redactMachineOnce(ruleSet uint64, redact MachineRedaction, locked bool) (MachineRedactResult, error) {
-	g.mu.Lock()
+	g.lockAll()
 	held := true
 	defer func() {
 		if held {
-			g.mu.Unlock()
+			g.unlockAll()
 		}
 	}()
 	if g.failed || g.closed {
@@ -263,7 +263,7 @@ func (g *Group) redactMachineOnce(ruleSet uint64, redact MachineRedaction, locke
 	defer in.close()
 	locked = locked || len(g.pins) > 0
 	if !locked {
-		g.mu.Unlock()
+		g.unlockAll()
 		held = false
 	}
 	// relock takes the group lock back before anything is installed and reports errRedactRaced when
@@ -272,7 +272,7 @@ func (g *Group) redactMachineOnce(ruleSet uint64, redact MachineRedaction, locke
 		if locked {
 			return nil
 		}
-		g.mu.Lock()
+		g.lockAll()
 		held = true
 		var err error
 		if g.failed || g.closed {

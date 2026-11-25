@@ -127,11 +127,31 @@ func (d *patchVoters) sameBytes() []byte {
 	return first
 }
 
+// applyStats reads the counters of the three voters once every voter has applied what the group
+// committed: a follower applies a commit after the leader acknowledged it (the replica applies outside
+// its lock), so a command of the fixture's own set-up (the login that opens it, a whole-state
+// replacement because the patch gate is not open yet) that a follower applies late would otherwise
+// fall between the baseline and the end of the workload and be counted as a decode of it.
 func (d *patchVoters) applyStats() (spliced, decoded [4]uint64) {
+	d.t.Helper()
+	d.converge()
 	for id := uint64(1); id <= 3; id++ {
 		spliced[id], decoded[id] = d.stores[id].ApplyPathStatsForTest()
 	}
 	return spliced, decoded
+}
+
+// requireNoDecodedPatches requires that no voter applied a patch, a delta or a scoped delta through the
+// decoded (whole-state) path since it opened, whenever it applied it: only whole-state replacements
+// (the fixture's set-up, before the patch gate opens) may decode.
+func (d *patchVoters) requireNoDecodedPatches() {
+	d.t.Helper()
+	for id := uint64(1); id <= 3; id++ {
+		_, patch, delta, scoped := d.stores[id].DecodedAppliesByKindForTest()
+		if patch != 0 || delta != 0 || scoped != 0 {
+			d.t.Fatalf("voter %d applied through the decoded path %d patches, %d deltas, %d scoped deltas", id, patch, delta, scoped)
+		}
+	}
 }
 
 // Three voters, commands proposed by each of them (a follower's forwarded to the leader), and a
@@ -165,6 +185,36 @@ func TestPatchedStateBytesAreIdenticalOnEveryVoter(t *testing.T) {
 			t.Fatalf("voter %d decoded the whole state for %d commands of a workload that is all patches and deltas", id, n)
 		}
 	}
+	d.requireNoDecodedPatches()
+	d.agree()
+}
+
+// A follower that lags in apply (it is handed the log only after the group committed the whole
+// workload without it) applies every command of that workload to the bytes of its state, in one run, as
+// the voters that applied them as they committed did: which path a command takes does not depend on when
+// the voter applies it.
+func TestPatchedStateBytesOfALaggingFollowerAreIdentical(t *testing.T) {
+	d := newPatchVoters(t, replica.Cadence{}, true)
+	for _, s := range d.stores {
+		s.SetAuditDeltaGate(d.open.Load)
+	}
+	baseSpliced, baseDecoded := d.applyStats()
+	d.mesh.gateAppends(stormVoter, true)
+	for round := range 4 {
+		d.rawWork(1, round)
+	}
+	d.mesh.gateAppends(stormVoter, false)
+	d.sameBytes()
+	spliced, decoded := d.applyStats()
+	for id := uint64(1); id <= 3; id++ {
+		if n := spliced[id] - baseSpliced[id]; n < 28 { // 7 commands in each of 4 rounds
+			t.Fatalf("voter %d applied only %d commands to the bytes of its state", id, n)
+		}
+		if n := decoded[id] - baseDecoded[id]; n != 0 {
+			t.Fatalf("voter %d decoded the whole state for %d commands of a workload that is all patches and deltas", id, n)
+		}
+	}
+	d.requireNoDecodedPatches()
 	d.agree()
 }
 

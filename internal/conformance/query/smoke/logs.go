@@ -219,15 +219,20 @@ func (h *logsEnvelope) check(stage string) []StepResult {
 	return steps
 }
 
+// ruleStageAttempts bounds how often the rule stage starts again because the control group's lead moved away
+// from the node it drives while it evaluated: a lead that never stays long enough to take a fence is a failure.
+const ruleStageAttempts = 5
+
 // ruleStage evaluates a fresh alert rule over the logs and compares the firing
-// series with the authored ones.
+// series with the authored ones. The evaluation holds a leadership fence of the
+// control group, which only its leader grants, and the lead can have left the
+// node it drives since the previous stage (an election timeout on a loaded
+// host): the stage waits for the lead to come back as state, and starts again
+// with a fresh rule when it leaves between the fence and the commit.
 func (h *logsEnvelope) ruleStage() string {
 	env, spec := h.env, h.sec.Rule
 	project := env.Projects[h.project]
 	src := env.Sources[h.sec.Feeds[0].Source]
-	rule := rules.Rule{ID: model.NewID(), Project: project, Version: 1, Kind: rules.KindAlert, Profile: lokiProfile, FeatureSet: env.Features[lokiProfile],
-		Expression: spec.Expression, Interval: time.Minute, Severity: "warning", MissingData: rules.MissingData("unknown")}
-	check(rule.Check(env.registry))
 	reader := env.People["reader"]
 	read, err := env.app.Auth.Authorize(env.ctx, reader.Cred, env.org, []model.ID{project}, auth.Read)
 	check(err)
@@ -241,11 +246,23 @@ func (h *logsEnvelope) ruleStage() string {
 	producer := rules.ProducerIdentity{Source: src.ID, Producer: model.ID{0xee}, PolicyRevision: 1, Resource: src.Resource}
 	evaluator := rules.NewEvaluator(env.engine, store, rules.WithClock(clock), rules.WithFencer(group), rules.WithEvidence(rules.GapEvidence{Gaps: env.app.Control}), rules.WithProducer(producer))
 	committer := rules.NewCommitter(env.app.Control, group)
-	lease, err := group.Fence(env.ctx)
-	check(err)
 	scheduler := rules.NewScheduler(evaluator, committer, store, rules.WithSchedulerClock(clock))
-	report, err := scheduler.RunOnce(env.ctx, read, admin, rule, lease)
-	check(err)
+	var rule rules.Rule
+	var report rules.RunReport
+	for attempt := 1; ; attempt++ {
+		check(env.leadControl())
+		rule = rules.Rule{ID: model.NewID(), Project: project, Version: 1, Kind: rules.KindAlert, Profile: lokiProfile, FeatureSet: env.Features[lokiProfile],
+			Expression: spec.Expression, Interval: time.Minute, Severity: "warning", MissingData: rules.MissingData("unknown")}
+		check(rule.Check(env.registry))
+		lease, err := group.Fence(env.ctx)
+		if err == nil {
+			report, err = scheduler.RunOnce(env.ctx, read, admin, rule, lease)
+		}
+		if err == nil {
+			break
+		}
+		checkf(leadMoved(err) && attempt < ruleStageAttempts, "rule evaluation: %v after %d attempts (%s)", err, attempt, env.controlState())
+	}
 	if len(report.Committed) != 1 {
 		return fmt.Sprintf("%d evaluations committed, want 1", len(report.Committed))
 	}

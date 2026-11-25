@@ -29,8 +29,9 @@ func (g *Group) TransferLeadership(ctx context.Context, to uint64) error {
 		return ErrInvalid
 	}
 	g.raw.TransferLeader(to)
-	err := g.processReady()
+	g.wakeLocked()
 	g.mu.Unlock()
+	err := g.settle()
 	if err != nil {
 		return err
 	}

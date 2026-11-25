@@ -288,19 +288,19 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	lockBegan := time.Now()
-	g.mu.Lock()
+	g.lockAll()
 	if g.failed || g.closed || g.applied == 0 {
-		g.mu.Unlock()
+		g.unlockAll()
 		return Snapshot{}, ErrUnavailable
 	}
 	if g.application < uint64(at.Index) {
-		g.mu.Unlock()
+		g.unlockAll()
 		return Snapshot{}, ErrStale
 	}
 	index := g.applied
 	term, err := g.memory.Term(index)
 	if err != nil {
-		g.mu.Unlock()
+		g.unlockAll()
 		return Snapshot{}, err
 	}
 	var state []byte
@@ -310,23 +310,23 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 		state, err = g.machine.Snapshot()
 	}
 	if err != nil {
-		g.mu.Unlock()
+		g.unlockAll()
 		return Snapshot{}, err
 	}
 	ledger, err := ledgerMachine.DeletionLedger()
 	if err != nil {
-		g.mu.Unlock()
+		g.unlockAll()
 		return Snapshot{}, err
 	}
 	var pinned []PinnedFile
 	release := func() {}
 	if files, ok := g.machine.(FileMachine); ok {
 		if err = g.trip("snapshot_pin"); err != nil {
-			g.mu.Unlock()
+			g.unlockAll()
 			return Snapshot{}, err
 		}
 		if pinned, release, err = files.PinFiles(); err != nil {
-			g.mu.Unlock()
+			g.unlockAll()
 			return Snapshot{}, err
 		}
 	}
@@ -346,7 +346,7 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 	completed := len(g.completed)
 	conf := g.conf
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
-	g.mu.Unlock()
+	g.unlockAll()
 	sinceMax(&g.phases.cutLockNS, &g.phases.cutLockMax, lockBegan)
 	envelopeBegan := time.Now()
 	if ledger.Version != 1 || ledger.Group != g.group || ledger.Entries == nil {

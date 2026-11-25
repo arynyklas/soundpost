@@ -4,12 +4,16 @@ package smoke
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	"github.com/arynyklas/soundpost/internal/smokecluster"
 )
 
@@ -150,11 +154,90 @@ func (e *Env) requireThreeVoters() error {
 // fence (rule evaluation) need the leader they drive, so leadership is moved
 // there through the replica API and awaited as state, not assumed.
 func (e *Env) leadNode(id uint64) error {
+	return e.leadGroups(id, func(model.ID) bool { return true })
+}
+
+// leadControl makes node 1 (the node the flows drive) the leader of the control group again. The lead
+// can leave a node at any time (a host that starves the voters for an election timeout makes the leader
+// step down and another voter win), and nothing brings it back by itself; a flow that holds a leadership
+// fence (the rule evaluation) waits for it as state. It is nothing on the single layout.
+func (e *Env) leadControl() error {
+	if e.layout != Distributed {
+		return nil
+	}
+	control := e.NodeApp(1).Control.ReplicaGroup().Status().Group
+	return e.leadGroups(1, func(g model.ID) bool { return g == control })
+}
+
+// controlState reports who leads the control group on every running voter, for a failure message.
+func (e *Env) controlState() string {
+	if e.layout != Distributed {
+		return "single node"
+	}
+	var parts []string
+	for _, id := range e.cluster.Running() {
+		st := e.NodeApp(id).Control.ReplicaGroup().Status()
+		parts = append(parts, fmt.Sprintf("voter %d sees leader %d term %d", id, st.Leader, st.Term))
+	}
+	return "control group: " + strings.Join(parts, ", ")
+}
+
+// controlWait is how long the harness waits for the cluster to answer again after a refusal that says no voter leads
+// (awaitControl, IngestAt): longer than the product's own bounded wait for a forwarded write (8 s), so an election
+// window (or a run of failed elections on a host that starves the voters) is waited out and only a cluster that
+// stays without a lead is a failure.
+const controlWait = 45 * time.Second
+
+// awaitControl runs op until it stops saying that the control group has no usable lead (leadMoved), and reports
+// what the cluster looked like when the wait ran out.
+func (e *Env) awaitControl(what string, op func() error) error {
+	deadline := time.Now().Add(controlWait)
+	for attempt := 1; ; attempt++ {
+		err := op()
+		if err == nil || !leadMoved(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s: %w after %d attempts over %s (%s)", what, err, attempt, controlWait, e.controlState())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// fenceControl takes a leadership fence of the control group on the node the flows drive. Only the leader
+// grants one, so it first waits for node 1 to lead again (leadControl) and then waits out a window in which
+// no voter leads (awaitControl).
+func (e *Env) fenceControl() replica.FenceToken {
+	var lease replica.FenceToken
+	check(e.awaitControl("take the control group's leadership fence", func() error {
+		if err := e.leadControl(); err != nil {
+			return err
+		}
+		var err error
+		lease, err = e.app.Control.ReplicaGroup().Fence(e.ctx)
+		return err
+	}))
+	return lease
+}
+
+// leadMoved reports whether err is what a write or a fence answers while the control group has no usable lead,
+// or a lead newer than the one a lease was taken under: replica unavailable, an unavailable fault, or a stale one
+// (a lost proposal, a stale lease). Only operations that start again on a fresh read, or that are harmless to
+// repeat, wait on it; every other error is the operation's own.
+func leadMoved(err error) bool {
+	var fault *model.Fault
+	if errors.As(err, &fault) {
+		return fault.Code == model.Unavailable || fault.Code == model.Stale
+	}
+	return errors.Is(err, replica.ErrUnavailable) || errors.Is(err, replica.ErrStale)
+}
+
+func (e *Env) leadGroups(id uint64, wanted func(group model.ID) bool) error {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		pending := 0
 		for _, s := range e.NodeApp(id).ReplicationStatus() {
-			if s.Leader == id {
+			if s.Leader == id || !wanted(s.Group) {
 				continue
 			}
 			pending++

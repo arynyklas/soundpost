@@ -32,6 +32,11 @@ type phaseCounters struct {
 	// ReadIndex (reads.go): calls that were answered and the time they waited, the longest wait, the rounds put to the
 	// leader, and the rounds that were given up (term changed, no answer in time).
 	readN, readNS, readMaxNS, readRounds, readGaveUp atomic.Uint64
+	// tickLagMax is the longest a tick of the group's ticker waited, since it was last read, between the moment it was due
+	// and the moment Raft's clock was advanced (TickLagMax). It is raised under the group lock.
+	tickLagMax atomic.Int64
+	// cycleMax is the longest a cycle of the ready stage took from its Ready to its Advance since it was last read (CycleMax).
+	cycleMax atomic.Int64
 }
 
 // Phases is a copy of a group's phase counters.
@@ -71,3 +76,13 @@ func sinceMax(c, max *atomic.Uint64, began time.Time) {
 	for old := max.Load(); d > old && !max.CompareAndSwap(old, d); old = max.Load() {
 	}
 }
+
+// TickLagMax is the longest a tick of the group's ticker was late (due, to Raft's clock advanced) since the previous
+// call, which resets it. A group whose tick waits for its lock or its disk is one whose followers campaign against a
+// healthy leader: it must stay far below the election timeout (electionTicks ticks).
+func (g *Group) TickLagMax() time.Duration { return time.Duration(g.phases.tickLagMax.Swap(0)) }
+
+// CycleMax is the longest one cycle of the group's ready stage (persist, send, apply, Advance of one Ready) took since the
+// previous call, which resets it. The messages Tick and Step produce leave with the next Ready, so this is the longest a
+// heartbeat can wait for the stage.
+func (g *Group) CycleMax() time.Duration { return time.Duration(g.phases.cycleMax.Swap(0)) }

@@ -5,7 +5,9 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,12 +33,19 @@ type testMesh struct {
 	holdSnap map[uint64]chan struct{}
 	// snaps counts the snapshot messages delivered to each node.
 	snaps map[uint64]int
-	stop  chan struct{}
-	wg    sync.WaitGroup
-	once  sync.Once
+	// inflight counts, per sender and group, the messages Send accepted whose delivery (Step and ReportDelivery, or the drop
+	// of a cut node's message) has not finished: what a node has answered but the receiver has not yet heard.
+	inflight map[meshSource]int
+	stop     chan struct{}
+	wg       sync.WaitGroup
+	once     sync.Once
 }
 type meshQueueKey struct {
 	to    uint64
+	group model.ID
+}
+type meshSource struct {
+	from  uint64
 	group model.ID
 }
 type meshMessage struct {
@@ -49,7 +58,7 @@ type meshTransport struct {
 }
 
 func newTestMesh() *testMesh {
-	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, snaps: map[uint64]int{}, stop: make(chan struct{})}
+	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, snaps: map[uint64]int{}, inflight: map[meshSource]int{}, stop: make(chan struct{})}
 }
 func (m *testMesh) register(node uint64, groups []*replica.Group) {
 	// Status takes the group mutex, which a ticking group holds while it calls
@@ -106,15 +115,32 @@ func (t meshTransport) Send(group model.ID, message *pb.Message) error {
 		t.mesh.wg.Add(1)
 		go t.mesh.deliver(key, queue)
 	}
+	t.mesh.inflight[meshSource{from: t.node, group: group}]++
 	t.mesh.mu.Unlock()
 	select {
 	case <-t.mesh.stop:
+		t.mesh.finished(t.node, group)
 		return replica.ErrUnavailable
 	case queue <- meshMessage{from: t.node, m: message}:
 		return nil
 	default:
+		t.mesh.finished(t.node, group)
 		return replica.ErrUnavailable
 	}
+}
+
+// finished records that a message of node in group is no longer in flight.
+func (m *testMesh) finished(node uint64, group model.ID) {
+	m.mu.Lock()
+	m.inflight[meshSource{from: node, group: group}]--
+	m.mu.Unlock()
+}
+
+// settled reports whether every message node sent in group has been delivered (or dropped).
+func (m *testMesh) settled(node uint64, group model.ID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.inflight[meshSource{from: node, group: group}] == 0
 }
 func (m *testMesh) deliver(key meshQueueKey, queue <-chan meshMessage) {
 	defer m.wg.Done()
@@ -154,6 +180,7 @@ func (m *testMesh) deliver(key meshQueueKey, queue <-chan meshMessage) {
 			if source != nil {
 				source.ReportDelivery(key.to, in.m.GetType() == pb.MsgSnap, err)
 			}
+			m.finished(in.from, key.group)
 		}
 	}
 }
@@ -181,6 +208,7 @@ func openVoters(t *testing.T, service *auth.Service, store *control.Store) *vote
 		if err != nil {
 			t.Fatal(err)
 		}
+		engine.leadersPlaced = true // voters.lead assigns the leaders; the balancer would take them back after 10 s
 		t.Cleanup(func() { engine.Close() })
 		if node == 1 {
 			if seed, err = engine.ReplicationSeed(); err != nil {
@@ -233,25 +261,46 @@ func (v *voters) lead(t *testing.T, assign func(slot int) uint64) {
 	v.settleSlot(t, 0, assign(0), deadline)
 }
 
-// settleSlot waits until every voter that is not partitioned has committed the last entry of leader, the leader of slot.
+// settleSlot waits until the leader of slot has committed an entry of its own term and every voter that is not partitioned
+// has applied the last entry of the leader and the mesh has delivered everything that voter sent in the group.
+//
+// Two things the ready stage publishes later than the code before it did (Step ran the whole Ready under the group lock
+// and returned after the acknowledgement had left) are waited for explicitly:
+//   - a new leader's first entry of its term is in Raft's log at once but in the group's journal (Status.LastIndex) only
+//     after the Ready that persists it, so a settle that read LastIndex at that moment settled on the entry before it and
+//     the partition that followed left a voter without the term's first entry (a read index is answered only once the
+//     leader committed an entry of its term, which is after that entry is persisted);
+//   - a follower's acknowledgement leaves with the Ready that persisted the entry, after its commit index is visible,
+//     and the mesh delivers it after that: a cut that follows too early drops the one answer that tells the leader the
+//     entry is on that voter, which then sends a snapshot of what the voter holds once its journal is compacted.
 func (v *voters) settleSlot(t *testing.T, slot int, leader uint64, deadline time.Time) {
 	t.Helper()
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
 	for {
-		last := v.groups[leader][slot].Status().LastIndex
 		settled := true
-		for node := range v.groups {
-			v.mesh.mu.Lock()
-			down := v.mesh.blocked[node]
-			v.mesh.mu.Unlock()
-			if !down && v.groups[node][slot].Status().Commit < last {
-				settled = false
+		if _, err := v.groups[leader][slot].ReadIndex(ctx); err != nil {
+			settled = false
+		} else {
+			last := v.groups[leader][slot].Status().LastIndex
+			for node := range v.groups {
+				v.mesh.mu.Lock()
+				down := v.mesh.blocked[node]
+				v.mesh.mu.Unlock()
+				if down {
+					continue
+				}
+				status := v.groups[node][slot].Status()
+				if status.Applied < last || !v.mesh.settled(node, status.Group) {
+					settled = false
+				}
 			}
 		}
 		if settled {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("slot %d: the voters never committed the last entry of its leader", slot)
+			t.Fatalf("slot %d: the voters never applied the last entry of its leader and answered it", slot)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -339,10 +388,49 @@ func (v *voters) converge(t *testing.T, want map[uint16]uint64) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("voters never converged on the same applied prefix")
+			t.Fatalf("voters never converged on the same applied prefix:\n%s", v.divergence(want))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// divergence describes every slot whose applied index differs between the voters, or is below want, with each
+// voter's view of the group, for the failure of converge.
+func (v *voters) divergence(want map[uint16]uint64) string {
+	var out strings.Builder
+	indexes := map[uint64][64]uint64{}
+	for node := uint64(1); node <= 3; node++ {
+		e := v.engines[node]
+		e.mu.Lock()
+		indexes[node] = e.indexes
+		e.mu.Unlock()
+	}
+	for slot := range 64 {
+		if indexes[1][slot] == indexes[2][slot] && indexes[1][slot] == indexes[3][slot] && indexes[1][slot] >= want[uint16(slot)] {
+			continue
+		}
+		fmt.Fprintf(&out, "slot %d (want %d):", slot, want[uint16(slot)])
+		for node := uint64(1); node <= 3; node++ {
+			s := v.groups[node][slot].Status()
+			fmt.Fprintf(&out, " node%d{applied-index %d leader %d term %d commit %d applied %d last %d}", node, indexes[node][slot], s.Leader, s.Term, s.Commit, s.Applied, s.LastIndex)
+		}
+		out.WriteString("\n")
+	}
+	v.mesh.mu.Lock()
+	fmt.Fprintf(&out, "snapshots delivered per node: %v", v.mesh.snaps)
+	v.mesh.mu.Unlock()
+	return out.String()
+}
+
+// slotView describes slot as each voter's group sees it: leader, term, commit, applied and last index.
+func (v *voters) slotView(slot int) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "slot %d:", slot)
+	for node := uint64(1); node <= 3; node++ {
+		s := v.groups[node][slot].Status()
+		fmt.Fprintf(&out, " node%d{leader %d term %d commit %d applied %d last %d}", node, s.Leader, s.Term, s.Commit, s.Applied, s.LastIndex)
+	}
+	return out.String()
 }
 
 func (v *voters) manifest(node uint64) Manifest {

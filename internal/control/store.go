@@ -80,6 +80,10 @@ type Store struct {
 	// rawApplies and decodedApplies count the committed commands this store applied to the bytes of
 	// its state (stateRoot, patchRaw) and the ones it had to decode the state for (Apply).
 	rawApplies, decodedApplies atomic.Uint64
+	// decodedByKind splits decodedApplies by the kind of the command (kindReplacement, kindPatch,
+	// kindDelta, kindScoped): statistics only, read by tests.
+	decodedByKind [4]atomic.Uint64
+
 	// updateHolds and updateHeldNS count the times updateMu was taken by a writer and how long it was held
 	// (lockUpdates): what the writers cost the others that wait for it.
 	updateHolds, updateHeldNS atomic.Uint64

@@ -102,9 +102,12 @@ func (g *Group) ChangeMembers(ctx context.Context, expected model.Revision, next
 		}
 		err := g.raw.ProposeConfChange(&pb.ConfChangeV2{})
 		if err == nil {
-			err = g.processReady()
+			g.wakeLocked()
 		}
 		g.mu.Unlock()
+		if err == nil {
+			err = g.settle()
+		}
 		if err != nil {
 			return err
 		}
@@ -194,9 +197,12 @@ func (g *Group) ChangeMembers(ctx context.Context, expected model.Revision, next
 	}
 	err = g.raw.ProposeConfChange(&pb.ConfChangeV2{Transition: pb.ConfChangeTransitionJointExplicit.Enum(), Changes: changes, Context: raw})
 	if err == nil {
-		err = g.processReady()
+		g.wakeLocked()
 	}
 	g.mu.Unlock()
+	if err == nil {
+		err = g.settle()
+	}
 	if err != nil {
 		return err
 	}
@@ -210,9 +216,12 @@ func (g *Group) ChangeMembers(ctx context.Context, expected model.Revision, next
 	}
 	err = g.raw.ProposeConfChange(&pb.ConfChangeV2{})
 	if err == nil {
-		err = g.processReady()
+		g.wakeLocked()
 	}
 	g.mu.Unlock()
+	if err == nil {
+		err = g.settle()
+	}
 	if err != nil {
 		return err
 	}

@@ -25,3 +25,9 @@ func (s *Store) StateBytesForTest() ([]byte, error) {
 func (s *Store) ApplyPathStatsForTest() (spliced, decoded uint64) {
 	return s.rawApplies.Load(), s.decodedApplies.Load()
 }
+
+// DecodedAppliesByKindForTest is how many commands of each kind this store applied through the decoded
+// (whole-state) path since it opened: replacements, patches, deltas, scoped deltas.
+func (s *Store) DecodedAppliesByKindForTest() (replacement, patch, delta, scoped uint64) {
+	return s.decodedByKind[kindReplacement].Load(), s.decodedByKind[kindPatch].Load(), s.decodedByKind[kindDelta].Load(), s.decodedByKind[kindScoped].Load()
+}

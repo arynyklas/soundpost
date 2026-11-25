@@ -353,8 +353,8 @@ func (t *MTLS) sendEncoded(client *http.Client, out outbound, target Member, raw
 }
 func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.failed || g.closed {
+		g.mu.Unlock()
 		return
 	}
 	if err != nil {
@@ -370,9 +370,9 @@ func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
 		}
 		g.raw.ReportSnapshot(to, status)
 	}
-	if g.processReady() != nil {
-		g.fail()
-	}
+	g.wakeLocked()
+	g.mu.Unlock()
+	_ = g.settle() // a failure has failed the group
 }
 func (t *MTLS) Close() error {
 	t.mu.Lock()

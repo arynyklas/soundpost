@@ -496,103 +496,227 @@ func installRecord(memory *raft.MemoryStorage, r readyRecord) error {
 	return nil
 }
 
-// processReady is the only RawNode.Ready consumer. All changed persistent state,
-// including commit-only HardState and snapshots, is fsynced before messages or
-// Advance. A message-only Ready relies on that already-durable prefix.
-func (g *Group) processReady() error {
-	for g.raw.HasReady() {
-		rd := g.raw.Ready()
-		priorLast, _ := g.memory.LastIndex()
-		if !raft.IsEmptySnap(rd.Snapshot) {
-			// A snapshot from the leader is about to become the journal head: the durable proof
-			// goes first, so a crash between the persist and the restore cannot leave it standing.
-			if err := g.dropProof(); err != nil {
-				g.failStop(FailJournal)
-				return ErrUnavailable
-			}
+// drive runs ready cycles until Raft has nothing left to hand out and no proposal is waiting. It is the only
+// RawNode.Ready consumer: the stage goroutine of a group that ticks by itself, or whoever changed the state of a
+// group its owner ticks (Open, and the tests that tick by hand), so that group is quiet when the call returns.
+func (g *Group) drive() error {
+	for {
+		again, err := g.cycle()
+		if err != nil || !again {
+			return err
 		}
-		if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
-			persistBegan := time.Now()
-			if err := g.disk.persist(rd); err != nil {
-				g.failStop(FailJournal)
-				return ErrUnavailable
-			}
-			since(&g.phases.persistNS, persistBegan)
-			g.phases.persistN.Add(1)
+	}
+}
+
+// cycle handles one Ready, and reports whether there may be another. The order is Raft's contract: every changed
+// persistent state (entries, hard state including a commit-only one, a snapshot) is fsynced before a message is sent
+// or Advance is called, entries are applied in order, and Advance comes last. The cycle holds ioMu throughout and mu
+// only for the memory work between the journal write, the machine's Apply and the sends: a Tick or a Step that
+// arrives meanwhile is not held up by any of them, and their effects (heartbeats, votes, responses) leave with the
+// next Ready.
+func (g *Group) cycle() (bool, error) {
+	g.ioMu.Lock()
+	defer g.ioMu.Unlock()
+	g.busy.Store(true)
+	defer g.busy.Store(false)
+	g.mu.Lock()
+	if g.failed || g.closed {
+		g.mu.Unlock()
+		return false, ErrUnavailable
+	}
+	if g.snapWanted {
+		g.cutWantedSendSnapshotLocked()
+	}
+	g.mu.Unlock()
+	g.intake() // the proposals that queued meanwhile become one append
+	g.mu.Lock()
+	if g.failed || g.closed {
+		g.mu.Unlock()
+		return false, ErrUnavailable
+	}
+	if !g.raw.HasReady() {
+		g.refreshSoloRead()
+		g.mu.Unlock()
+		return false, nil
+	}
+	rd := g.raw.Ready()
+	priorLast, _ := g.memory.LastIndex()
+	g.mu.Unlock()
+	began := time.Now()
+	if err := g.stage(rd, priorLast); err != nil {
+		return false, err
+	}
+	if d := int64(time.Since(began)); d > g.phases.cycleMax.Load() {
+		g.phases.cycleMax.Store(d) // ioMu is held: the only writer
+	}
+	return true, nil
+}
+
+// stageFailed fails the group closed because its storage or its machine failed (unless it already failed) and
+// returns err.
+func (g *Group) stageFailed(reason FailReason, err error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.failed {
+		g.failStop(reason)
+	}
+	return err
+}
+
+// stage persists rd, installs it in the memory state, sends its messages, applies its committed entries and
+// advances Raft. ioMu is held, mu is not.
+func (g *Group) stage(rd raft.Ready, priorLast uint64) error {
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		// A snapshot from the leader is about to become the journal head: the durable proof
+		// goes first, so a crash between the persist and the restore cannot leave it standing.
+		if err := g.removeProofFile(); err != nil {
+			return g.stageFailed(FailJournal, ErrUnavailable)
 		}
-		snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
-		if snapshotChanged {
-			g.tail.reset() // the log restarts at the snapshot: what was retained below it is no longer a prefix of it
-			if err := g.memory.ApplySnapshot(rd.Snapshot); err == raft.ErrSnapOutOfDate && g.sameIndexSnapshot(rd.Snapshot) {
-				// The journal head record and a later record can carry the same-index snapshot
-				// (a compaction rewrite copies the in-memory one); installRecord tolerates that at
-				// open, so the running group does too. Its state is already in place.
-				snapshotChanged = false
-			} else if err != nil {
-				g.failStop(FailState)
-				return err
-			} else if err := g.restoreSnapshot(rd.Snapshot); err != nil {
-				g.failStop(FailState)
-				return err
-			}
+		g.mu.Lock()
+		g.machineRules = 0
+		g.mu.Unlock()
+	}
+	if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
+		persistBegan := time.Now()
+		if err := g.disk.persist(rd); err != nil {
+			return g.stageFailed(FailJournal, ErrUnavailable)
 		}
-		if err := g.memory.Append(rd.Entries); err != nil {
+		since(&g.phases.persistNS, persistBegan)
+		g.phases.persistN.Add(1)
+	}
+	if err := g.install(rd, priorLast); err != nil {
+		return err
+	}
+	g.send(rd.Messages)
+	for _, ent := range rd.CommittedEntries {
+		if err := g.applyEntry(ent); err != nil {
+			return g.stageFailed(FailApply, err)
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	for _, r := range rd.ReadStates {
+		if req := g.reads[string(r.RequestCtx)]; req != nil {
+			req.index = r.Index
+		}
+	}
+	g.completeReads()
+	g.raw.Advance(rd)
+	g.notify()
+	g.refreshSoloRead()
+	return nil
+}
+
+// install makes what the journal now holds the state of the group in memory: the snapshot (and the machine it
+// restores), the log, the hard state, and the tables of the commands in the log.
+func (g *Group) install(rd raft.Ready, priorLast uint64) error {
+	defer func() { clear(g.fresh) }() // what this cycle proposed is in the log now
+	// The entries that extend the log are decoded before mu is taken (a Ready of the proposers' batch holds hundreds of
+	// them); a Ready that replaces a snapshot or truncates the log rebuilds the tables under mu instead.
+	var decoded []Entry
+	extends := raft.IsEmptySnap(rd.Snapshot) && (len(rd.Entries) == 0 || rd.Entries[0].GetIndex() > priorLast)
+	if extends {
+		decoded = make([]Entry, len(rd.Entries))
+		for i, ent := range rd.Entries {
+			if ent.GetType() != pb.EntryNormal || len(ent.GetData()) == 0 {
+				continue
+			}
+			e, err := g.decodeEntry(ent.GetData())
+			if err != nil {
+				return g.stageFailed(FailState, err)
+			}
+			decoded[i] = e
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
+	if snapshotChanged {
+		g.tail.reset() // the log restarts at the snapshot: what was retained below it is no longer a prefix of it
+		if err := g.memory.ApplySnapshot(rd.Snapshot); err == raft.ErrSnapOutOfDate && g.sameIndexSnapshot(rd.Snapshot) {
+			// The journal head record and a later record can carry the same-index snapshot
+			// (a compaction rewrite copies the in-memory one); installRecord tolerates that at
+			// open, so the running group does too. Its state is already in place.
+			snapshotChanged = false
+		} else if err != nil {
+			g.failStop(FailState)
+			return err
+		} else if err := g.restoreSnapshot(rd.Snapshot); err != nil {
 			g.failStop(FailState)
 			return err
 		}
-		if !raft.IsEmptyHardState(rd.HardState) {
-			if err := g.memory.SetHardState(rd.HardState); err != nil {
-				g.failStop(FailState)
-				return err
-			}
-		}
-		if snapshotChanged || len(rd.Entries) > 0 && rd.Entries[0].GetIndex() <= priorLast {
-			if err := g.rebuildKnown(); err != nil {
-				g.failStop(FailState)
-				return err
-			}
-		} else {
-			for _, entry := range rd.Entries {
-				if err := g.remember(entry, 0); err != nil {
-					g.failStop(FailState)
-					return err
-				}
-			}
-		}
-		for _, m := range rd.Messages {
-			if (g.gate != nil || g.guard != nil) && m.GetType() == pb.MsgSnap {
-				g.sendGatedSnapshot(cloneMessage(m))
-				continue
-			}
-			out := cloneMessage(m)
-			if m.GetType() == pb.MsgSnap {
-				out.Context = g.snapshotContext(out, out.GetContext())
-			}
-			if err := g.transport.Send(g.group, out); err != nil {
-				g.noteUnreachable(m.GetTo())
-				g.raw.ReportUnreachable(m.GetTo())
-				if m.GetType() == pb.MsgSnap {
-					g.raw.ReportSnapshot(m.GetTo(), raft.SnapshotFailure)
-				}
-			}
-		}
-		for _, ent := range rd.CommittedEntries {
-			if err := g.applyCommitted(ent); err != nil {
-				g.failStop(FailApply)
-				return err
-			}
-		}
-		for _, r := range rd.ReadStates {
-			if req := g.reads[string(r.RequestCtx)]; req != nil {
-				req.index = r.Index
-			}
-		}
-		g.completeReads()
-		g.raw.Advance(rd)
-		g.notify()
 	}
-	g.refreshSoloRead()
+	if err := g.memory.Append(rd.Entries); err != nil {
+		g.failStop(FailState)
+		return err
+	}
+	if !raft.IsEmptyHardState(rd.HardState) {
+		if err := g.memory.SetHardState(rd.HardState); err != nil {
+			g.failStop(FailState)
+			return err
+		}
+	}
+	if snapshotChanged || len(rd.Entries) > 0 && rd.Entries[0].GetIndex() <= priorLast {
+		if err := g.rebuildKnown(); err != nil {
+			g.failStop(FailState)
+			return err
+		}
+	} else if decoded == nil {
+		for _, entry := range rd.Entries {
+			if err := g.remember(entry, 0); err != nil {
+				g.failStop(FailState)
+				return err
+			}
+		}
+	} else {
+		for i, entry := range rd.Entries {
+			if entry.GetType() == pb.EntryNormal && len(entry.GetData()) > 0 {
+				g.noteEntry(entry, decoded[i])
+			}
+		}
+	}
 	return nil
+}
+
+// send hands the messages of a persisted Ready to the transport. The members it reads (a snapshot's recipient) are
+// only changed by a cycle, and the caller is one.
+func (g *Group) send(messages []*pb.Message) {
+	type failure struct {
+		to       uint64
+		snapshot bool
+	}
+	var failed []failure
+	for _, m := range messages {
+		if (g.gate != nil || g.guard != nil) && m.GetType() == pb.MsgSnap {
+			g.sendGatedSnapshot(cloneMessage(m))
+			continue
+		}
+		out := cloneMessage(m)
+		if m.GetType() == pb.MsgSnap {
+			out.Context = g.snapshotContext(out, out.GetContext())
+		}
+		if err := g.transport.Send(g.group, out); err != nil {
+			g.noteUnreachable(m.GetTo())
+			failed = append(failed, failure{m.GetTo(), m.GetType() == pb.MsgSnap})
+		}
+	}
+	if len(failed) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, f := range failed {
+		g.raw.ReportUnreachable(f.to)
+		if f.snapshot {
+			g.raw.ReportSnapshot(f.to, raft.SnapshotFailure)
+		}
+	}
 }
 
 // sameIndexSnapshot reports whether snap sits at exactly the index of the snapshot the in-memory
@@ -603,6 +727,7 @@ func (g *Group) sameIndexSnapshot(snap *pb.Snapshot) bool {
 }
 func (g *Group) rebuildKnown() error {
 	g.known = map[model.ID]map[uint64]struct{}{}
+	g.replay = map[uint64]replayedEntry{}
 	g.logCommands = map[model.ID]CommittedEntry{}
 	g.logApplication = g.application
 	for id, c := range g.completed {
@@ -633,7 +758,11 @@ func (g *Group) rebuildKnown() error {
 	}
 	return nil
 }
-func (g *Group) applyCommitted(ent *pb.Entry) error {
+
+// applyEntry applies one committed entry. The caller is the cycle: it holds ioMu and not mu, so the machine's Apply
+// (and the proof files around it) run without the group lock; what the entry changes in the group (applied, the
+// tables, the waiters) is committed under mu in one short section, in the order the entries come.
+func (g *Group) applyEntry(ent *pb.Entry) error {
 	if ent.GetIndex() <= g.applied {
 		return nil
 	}
@@ -649,32 +778,37 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			c.ApplicationCursor.Index = model.Uint64(c.Entry.ApplicationIndex)
 		}
 	case pb.EntryConfChange:
-		g.soloRead.Store(nil)
 		change := &pb.ConfChange{}
 		if proto.Unmarshal(ent.GetData(), change) != nil {
 			return ErrInvalid
 		}
-		g.conf = g.raw.ApplyConfChange(change)
-	case pb.EntryConfChangeV2:
+		g.mu.Lock()
 		g.soloRead.Store(nil)
+		g.conf = g.raw.ApplyConfChange(change)
+		g.mu.Unlock()
+	case pb.EntryConfChangeV2:
 		change := &pb.ConfChangeV2{}
 		if proto.Unmarshal(ent.GetData(), change) != nil {
 			return ErrInvalid
 		}
+		var next Members
+		changesMembers := len(change.GetContext()) > 0
+		if changesMembers && (model.StrictJSON(change.GetContext(), &next) != nil || ValidateMembers(next) != nil) {
+			return ErrInvalid
+		}
+		g.mu.Lock()
+		g.soloRead.Store(nil)
 		g.conf = g.raw.ApplyConfChange(change)
-		if len(change.GetContext()) > 0 {
-			var next Members
-			if model.StrictJSON(change.GetContext(), &next) != nil || ValidateMembers(next) != nil {
-				return ErrInvalid
-			}
+		if changesMembers {
 			g.retiring = append([]Member(nil), g.members.Nodes...)
 			g.members = next
 			g.disk.members = cloneMembers(next)
-			g.publishMembers()
 		}
 		if len(g.conf.GetVotersOutgoing()) == 0 {
 			g.retiring = nil
 		}
+		g.publishMembers()
+		g.mu.Unlock()
 	default:
 		return ErrInvalid
 	}
@@ -697,6 +831,11 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 		if err := g.resumeProof(); err != nil {
 			return err
 		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
 	}
 	if result == ErrConflict && c.Entry.ReservationID != nil {
 		delete(g.known[*c.Entry.ReservationID], c.Index)
@@ -813,8 +952,8 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 	g.applied = index
 	g.application = envelope.Application
 	g.members = cloneMembers(envelope.Members)
-	g.publishMembers()
 	g.retiring = append([]Member(nil), envelope.Retiring...)
+	g.publishMembers()
 	g.conf = snap.GetMetadata().GetConfState()
 	g.resetRetryPartsLocked()
 	for _, c := range envelope.Completed {
@@ -838,8 +977,8 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 // Snapshot never truncates the durable journal. It transfers every authoritative
 // byte supplied by Machine, together with receipts, membership and cursor cuts.
 func (g *Group) Snapshot() error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.lockAll()
+	defer g.unlockAll()
 	if g.failed || g.closed || g.applied == 0 {
 		return ErrUnavailable
 	}

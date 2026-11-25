@@ -93,5 +93,6 @@ func Group(g *replica.Group) map[string]any {
 		"cut_drop_ns": p.CutDropNS, "cut_compact_ns": p.CutCompactNS, "compact_verify_ns": p.CompactVerifyNS, "compact_lock_ns": p.CompactLockNS,
 		"cut_envelope_bytes": p.CutEnvelopeBytes, "cut_completed": p.CutCompleted, "cut_retry_bytes": p.CutRetryBytes,
 		"max_propose_wait_ns": waitMax, "max_cut_lock_ns": lockMax, "max_cut_lock2_ns": lock2Max, "max_compact_lock_ns": compactMax,
+		"tick_lag_max_ns": g.TickLagMax().Nanoseconds(), "cycle_max_ns": g.CycleMax().Nanoseconds(), "term": g.Status().Term,
 	}
 }

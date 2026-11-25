@@ -229,14 +229,31 @@ type Status struct {
 	Members                                      Members
 }
 type Group struct {
+	// ioMu is the ready stage (proposals.go): a cycle of persist, send, apply and Advance holds it, and so does every
+	// piece of work that must not run beside one. Taken before mu, never while holding it.
+	ioMu sync.Mutex
+	// The queue of proposals, filled by the proposers and emptied by the cycle that proposes them. propMu is taken last.
+	propMu     sync.Mutex
+	propQ      []*proposal
+	propClosed bool
+	// wake and stageDone belong to the stage goroutine of a group that ticks by itself (Config.TickInterval > 0); a group
+	// its owner ticks has neither and is driven by its callers.
+	wake      chan struct{}
+	stageDone chan struct{}
+	// busy is true while a cycle runs (Tick uses it: heartbeatNowLocked).
+	busy atomic.Bool
+
 	mu      sync.Mutex
 	decoded struct {
 		data  []byte
 		entry Entry
 	}
-	// replay holds the entries rebuildKnown decoded at Open that processReady is going to apply, so the
-	// first apply of each does not validate and decode the same bytes again; it is nil once Open is done.
-	replay         map[uint64]replayedEntry
+	// replay holds, for every entry of the log that is not applied yet, the command that was decoded when the entry was
+	// remembered (persisted), so the apply of each does not validate and decode the same bytes again.
+	replay map[uint64]replayedEntry
+	// fresh holds the commands this member proposed in the cycle in flight, by the first byte of their encoding (the
+	// slice Raft holds as the entry's data), so remembering them does not decode what was just encoded. Owned by the cycle.
+	fresh          map[*byte]Entry
 	id             uint64
 	group          model.ID
 	raw            *raft.RawNode
@@ -267,6 +284,7 @@ type Group struct {
 	snaps          *SnapshotStore
 	pins           map[model.ID]*JournalPin
 	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
+	snapWanted     bool         // the next cycle is to cut sendSnap (membershipSnapshotLocked found a cycle applying)
 	cutMu          sync.Mutex   // one CreateSnapshot at a time: the incremental cut reuses the selected snapshot's files
 	redactMu       sync.Mutex   // one journal redaction at a time (RedactMachineCommands builds its rewrite before it takes g.mu); taken before g.mu, never while holding it
 	// machineRules and machineFloor are the proof RedactMachineCommands leaves: the rule set
@@ -318,17 +336,19 @@ type Group struct {
 	domain *FailDomain
 	// soloRead is the cursor a read of this group answers while the group is a single voter that
 	// leads: such a leader has nobody to confirm its leadership with, and every command it
-	// acknowledged is applied, so a read needs neither g.mu (held across the journal fsync and
-	// the state machine's commit of the command in flight) nor a Raft round. nil in every other
-	// case; refreshSoloRead keeps it current at the end of processReady.
+	// acknowledged is applied, so a read needs neither g.mu nor a Raft round. nil in every other
+	// case; refreshSoloRead keeps it current at the end of every cycle.
 	soloRead atomic.Pointer[model.Cursor]
-	// afterAck is a test seam: called by applyCommitted (g.mu held) once it has answered the waiters of
+	// afterAck is a test seam: called by applyEntry (g.mu held) once it has answered the waiters of
 	// a command, so a test can hold the group exactly there and read from another goroutine. Nil in
 	// production.
 	afterAck func()
 	// membersView is the committed configuration, published whenever g.members changes, for the readers
 	// that must not wait for g.mu (CommittedMembers).
 	membersView atomic.Pointer[Members]
+	// transportView is the membership the transport addresses (members and those being retired), published with membersView,
+	// so that a batch of heartbeats can prove its sender without the group lock.
+	transportView atomic.Pointer[Members]
 }
 
 func Open(c Config) (*Group, error) {
@@ -396,6 +416,9 @@ func Open(c Config) (*Group, error) {
 		g.pinTTL = DefaultPinTTL
 	}
 	g.publishMembers()
+	if c.TickInterval > 0 {
+		g.wake, g.stageDone = make(chan struct{}, 1), make(chan struct{})
+	}
 	if g.now == nil {
 		g.now = time.Now
 	}
@@ -457,16 +480,15 @@ func Open(c Config) (*Group, error) {
 		return nil, err
 	}
 	g.loadProof(last)
-	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: electionTicks, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: maxAppBytes, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, MaxInflightBytes: maxInflightBytes, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
+	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: electionTicks, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: maxAppBytes, MaxCommittedSizePerReady: maxCommittedPerReady, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, MaxInflightBytes: maxInflightBytes, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
 	if err != nil {
 		disk.Close()
 		return nil, err
 	}
-	if err = g.processReady(); err != nil {
+	if err = g.drive(); err != nil {
 		disk.Close()
 		return nil, err
 	}
-	g.replay = nil
 	if c.Domain != nil {
 		if err = c.Domain.add(g); err != nil {
 			disk.Close()
@@ -475,6 +497,7 @@ func Open(c Config) (*Group, error) {
 		g.domain = c.Domain
 	}
 	if c.TickInterval > 0 {
+		go g.stageLoop()
 		go g.run(c.TickInterval)
 	}
 	if g.cadence.Enabled() {
@@ -486,13 +509,16 @@ func Open(c Config) (*Group, error) {
 	}
 	return g, nil
 }
+
+// run ticks the group. The tick takes mu for the Raft clock and nothing else: no journal write, apply or proposal
+// runs under it, so it is on time while the stage works (Phases: TickLagMax).
 func (g *Group) run(interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
-		case <-t.C:
-			g.Tick()
+		case due := <-t.C:
+			g.tick(due)
 		case <-g.stop:
 			return
 		}
@@ -507,12 +533,15 @@ func (g *Group) Close() error {
 	// the stopped group) before the disk closes, or it writes after Close returned.
 	g.cadenceWG.Wait()
 	err := g.closeLocked()
+	if g.stageDone != nil {
+		<-g.stageDone // the stage runs no cycle once the group is closed
+	}
 	g.gateWG.Wait() // the senders report through g.mu, which closeLocked has released
 	return err
 }
 func (g *Group) closeLocked() error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.lockAll() // a cycle in flight finishes before the journal closes
+	defer g.unlockAll()
 	if g.closed {
 		return nil
 	}
@@ -529,41 +558,63 @@ func (g *Group) fail() {
 		}
 		delete(g.pending, id)
 	}
+	g.closeProposals()
 	g.failReadsLocked(ErrUnavailable)
 	g.notify()
 }
 func (g *Group) notify() { close(g.changed); g.changed = make(chan struct{}) }
 func (g *Group) Tick() {
+	g.tick(time.Time{})
+}
+
+// tick is Tick for the ticker goroutine, which passes the time the tick was due: how late Raft's clock runs is what
+// decides whether a follower campaigns against a healthy leader.
+func (g *Group) tick(due time.Time) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	if !due.IsZero() {
+		if lag := int64(time.Since(due)); lag > g.phases.tickLagMax.Load() {
+			g.phases.tickLagMax.Store(lag)
+		}
+	}
 	if g.failed || g.closed {
+		g.mu.Unlock()
 		return
 	}
 	g.raw.Tick()
 	g.expireReadsLocked()
 	g.balanceLocked()
-	if g.processReady() != nil {
-		g.fail()
+	if g.busy.Load() {
+		g.heartbeatNowLocked()
 	}
+	g.wakeLocked()
+	g.mu.Unlock()
+	_ = g.settle() // a failure has failed the group
 }
 func (g *Group) Campaign() error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.failed || g.closed {
+		g.mu.Unlock()
 		return ErrUnavailable
 	}
 	if err := g.raw.Campaign(); err != nil {
+		g.mu.Unlock()
 		return err
 	}
-	return g.processReady()
+	g.wakeLocked()
+	g.mu.Unlock()
+	return g.settle()
 }
 func (g *Group) Step(ctx context.Context, m *pb.Message) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.stepLocked(m)
+	err := g.stepLocked(m)
+	g.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return g.settle()
 }
 
 // stepLocked is Step with g.mu held.
@@ -592,10 +643,15 @@ func (g *Group) stepLocked(m *pb.Message) (err error) {
 			defer release()
 		}
 	}
+	answer := g.busy.Load() && m.GetType() == pb.MsgHeartbeat && g.heartbeatFromLeaderLocked(m)
 	if err := g.raw.Step(m); err != nil {
 		return err
 	}
-	return g.processReady()
+	if answer {
+		g.answerHeartbeatNow(m)
+	}
+	g.wakeLocked()
+	return nil
 }
 func (g *Group) Status() Status {
 	g.mu.Lock()
@@ -610,6 +666,8 @@ func (g *Group) Status() Status {
 func (g *Group) publishMembers() {
 	m := cloneMembers(g.members)
 	g.membersView.Store(&m)
+	t := g.transportMembersLocked()
+	g.transportView.Store(&t)
 }
 
 // CommittedMembers is the committed configuration of the group as of the last change this voter applied. It
@@ -648,6 +706,12 @@ type proposalForwarder interface {
 // is between electionTicks and twice that many ticks.
 const electionTicks = 10
 
+// maxCommittedPerReady is raft's MaxCommittedSizePerReady: the committed entry bytes one Ready (so one cycle of the ready
+// stage) applies, at least one entry. The messages Tick and Step produce, heartbeats first, leave with the next Ready, so
+// what one cycle applies bounds how long a heartbeat waits for the stage: a full append (maxAppBytes) is applied in
+// ~130 ms, a Ready of the 32 MiB this was before in seconds, against an election timeout of electionTicks ticks.
+const maxCommittedPerReady = maxAppBytes
+
 // leaderWaitFor is how long a follower that does not know the leader waits for one before it
 // refuses a proposal: two election timeouts' worth of ticks, the longest a leaderless window of a
 // healthy group lasts. A group that is ticked by its owner (tick 0) assumes the 20 ms tick of the
@@ -677,10 +741,7 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 	var wait <-chan time.Time
 	var leader uint64
 	for done := false; !done; {
-		lockWait := time.Now()
 		g.mu.Lock()
-		g.phases.proposeN.Add(1)
-		sinceMax(&g.phases.proposeWaitNS, &g.phases.proposeWaitMax, lockWait)
 		if g.failed || g.closed {
 			g.mu.Unlock()
 			return CommittedEntry{}, ErrUnavailable
@@ -733,86 +794,16 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 			return CommittedEntry{}, err
 		}
 	}
-	g.mu.Lock()
-	if g.failed || g.closed {
-		g.mu.Unlock()
+	// The checks that need the leader's view of the log and the tables, and the Raft proposal itself, are made by the
+	// cycle that takes the command from the queue (proposeOneLocked), together with every command that queued meanwhile.
+	req := &proposal{ctx: ctx, entry: e, done: make(chan proposalResult, 1)}
+	if !g.enqueue(req) {
 		return CommittedEntry{}, ErrUnavailable
 	}
-	s := g.raw.BasicStatus()
-	if s.Lead != g.id || s.RaftState != raft.StateLeader {
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
-	}
-	if old, ok := g.completed[e.ID]; ok {
-		if !sameProposal(old.Entry, e) {
-			g.mu.Unlock()
-			return CommittedEntry{}, ErrConflict
-		}
-		g.mu.Unlock()
-		if old.Outcome == "conflict" {
-			return old, ErrConflict
-		}
-		return old, nil
-	}
-	if old, ok := g.logCommands[e.ID]; ok && old.Index > g.applied {
-		if !sameProposal(old.Entry, e) {
-			g.mu.Unlock()
-			return CommittedEntry{}, ErrConflict
-		}
-		done := make(chan proposalResult, 1)
-		g.pending[e.ID] = append(g.pending[e.ID], done)
-		g.mu.Unlock()
-		return g.awaitProposal(ctx, e.ID, done)
-	}
-	if e.Kind == Cancellation && e.ReservationID != nil && len(g.known[*e.ReservationID]) != 0 {
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrConflict
-	}
-	last, err := g.memory.LastIndex()
-	if err != nil || last == ^uint64(0) {
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
-	}
-	application := g.logApplication
-	if application == ^uint64(0) {
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
-	}
-	if e.ApplicationIndex != 0 && e.ApplicationIndex != application+1 {
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrStale
-	}
-	if g.digestKind(e.Kind) {
-		e.At = g.now().UnixNano()
-	} else {
-		e.At = 0
-	}
-	e.ApplicationIndex = application + 1
-	if e.Kind == Cancellation {
-		if e.ReservationID == nil {
-			g.mu.Unlock()
-			return CommittedEntry{}, ErrInvalid
-		}
-		e.CommitSet = &CommitSetWatermark{Group: g.group, Term: s.HardState.GetTerm(), PhysicalCommit: s.HardState.GetCommit(), PhysicalLast: last, ApplicationApplied: g.application, Reservation: *e.ReservationID}
-	}
-	raw, err := encodeEntry(e)
-	if err != nil {
-		g.mu.Unlock()
+	if err := g.kick(); err != nil {
 		return CommittedEntry{}, err
 	}
-	done := make(chan proposalResult, 1)
-	g.pending[e.ID] = append(g.pending[e.ID], done)
-	if err = g.raw.Propose(raw); err != nil {
-		g.removeWaiter(e.ID, done)
-		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
-	}
-	err = g.processReady()
-	g.mu.Unlock()
-	if err != nil {
-		return CommittedEntry{}, err
-	}
-	return g.awaitProposal(ctx, e.ID, done)
+	return g.awaitProposal(ctx, e.ID, req)
 }
 func equalPayload(a, b []byte) bool {
 	if len(a) != len(b) {
@@ -827,7 +818,9 @@ func equalPayload(a, b []byte) bool {
 }
 
 // refreshSoloRead publishes the cursor of a read served without g.mu when this group is a single
-// voter that leads and has applied everything committed (g.mu held).
+// voter that leads and has applied everything committed (g.mu held). Once published, the cursor stays while the
+// group leads alone: what commits after that is the leader's own proposals, answered only once applied
+// (advanceSoloRead), so a read at the cursor misses nothing acknowledged.
 func (g *Group) refreshSoloRead() {
 	if g.failed || g.closed || g.conf == nil {
 		g.soloRead.Store(nil)
@@ -835,9 +828,12 @@ func (g *Group) refreshSoloRead() {
 	}
 	s := g.raw.BasicStatus()
 	voters := g.conf.GetVoters()
-	if s.RaftState != raft.StateLeader || s.Lead != g.id || len(voters) != 1 || voters[0] != g.id || len(g.conf.GetVotersOutgoing()) != 0 || len(g.conf.GetLearnersNext()) != 0 || s.HardState.GetCommit() > g.applied {
+	if s.RaftState != raft.StateLeader || s.Lead != g.id || len(voters) != 1 || voters[0] != g.id || len(g.conf.GetVotersOutgoing()) != 0 || len(g.conf.GetLearnersNext()) != 0 {
 		g.soloRead.Store(nil)
 		return
+	}
+	if s.HardState.GetCommit() > g.applied {
+		return // published or not: the commands being applied now are decided by advanceSoloRead, never by this
 	}
 	if old := g.soloRead.Load(); old != nil && old.Index == model.Uint64(g.application) {
 		return
@@ -846,10 +842,10 @@ func (g *Group) refreshSoloRead() {
 	g.soloRead.Store(&cursor)
 }
 
-// advanceSoloRead moves the cursor of the lock-free reads of a lone voter up to the command applyCommitted
-// has just applied (g.mu held). refreshSoloRead runs once processReady has drained the Ready, and the waiters
-// of a command are answered before that: a waiter that is not the goroutine running processReady would be
-// handed a receipt while the reads still answered the cut before the command. A group that does not
+// advanceSoloRead moves the cursor of the lock-free reads of a lone voter up to the command applyEntry
+// has just applied (g.mu held). The waiters of a command are answered right after this, and a waiter
+// that is not the goroutine running the cycle (a retried proposal, a proposal that joined an in-flight one)
+// would be handed a receipt while the reads still answered the cut before the command. A group that does not
 // serve lock-free reads (soloRead is nil: not a lone leader, a configuration change, or entries committed
 // but not yet applied since the group opened) is left to refreshSoloRead, which decides that.
 func (g *Group) advanceSoloRead() {
@@ -895,12 +891,9 @@ func (g *Group) readThroughRound(ctx context.Context) (model.Cursor, error) {
 			}
 		}
 		request := g.joinReadLocked()
-		err := g.processReady()
-		if err != nil {
-			g.fail()
-		}
+		g.wakeLocked()
 		g.mu.Unlock()
-		if err != nil {
+		if err := g.settle(); err != nil {
 			return model.Cursor{}, err
 		}
 		select {
@@ -1011,6 +1004,11 @@ func (g *Group) decodeEntry(data []byte) (Entry, error) {
 	if len(data) > 0 && len(data) == len(g.decoded.data) && &data[0] == &g.decoded.data[0] {
 		return g.decoded.entry, nil
 	}
+	if len(data) > 0 {
+		if fresh, ok := g.fresh[&data[0]]; ok {
+			return fresh, nil // proposed by this member in this cycle: the command is known, not to be read back from its bytes
+		}
+	}
 	e, err := decodeEntry(data)
 	if err != nil || !e.valid() {
 		return Entry{}, ErrInvalid
@@ -1045,7 +1043,15 @@ func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 	if err != nil {
 		return err
 	}
-	if g.replay != nil && ent.GetIndex() > g.applied {
+	g.noteEntry(ent, e)
+	return nil
+}
+
+// noteEntry records the command e of entry ent in the tables of the commands in the log. It does no decoding: the cycle
+// decodes the entries of a Ready before it takes mu (a batch of hundreds of entries of tens of KiB is the longest thing
+// the group would otherwise do under it).
+func (g *Group) noteEntry(ent *pb.Entry, e Entry) {
+	if ent.GetIndex() > g.applied {
 		g.replay[ent.GetIndex()] = replayedEntry{data: ent.GetData(), entry: e}
 	}
 	if e.ApplicationIndex > g.logApplication {
@@ -1057,7 +1063,7 @@ func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 		g.logCommands[e.ID] = CommittedEntry{Group: g.group, Term: ent.GetTerm(), Index: ent.GetIndex(), ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(e.ApplicationIndex)}, Entry: e}
 	}
 	if old, ok := g.completed[e.ID]; ok && old.Outcome == "conflict" {
-		return nil
+		return
 	}
 	if e.ReservationID != nil && e.Kind != Cancellation {
 		if g.known[*e.ReservationID] == nil {
@@ -1065,7 +1071,6 @@ func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 		}
 		g.known[*e.ReservationID][ent.GetIndex()] = struct{}{}
 	}
-	return nil
 }
 func cloneMessage(m *pb.Message) *pb.Message { return proto.Clone(m).(*pb.Message) }
 func (g *Group) removeWaiter(id model.ID, done chan proposalResult) {
@@ -1082,13 +1087,14 @@ func (g *Group) removeWaiter(id model.ID, done chan proposalResult) {
 		g.pending[id] = waiters
 	}
 }
-func (g *Group) awaitProposal(ctx context.Context, id model.ID, done chan proposalResult) (CommittedEntry, error) {
+func (g *Group) awaitProposal(ctx context.Context, id model.ID, req *proposal) (CommittedEntry, error) {
 	select {
-	case result := <-done:
+	case result := <-req.done:
 		return result.entry, result.err
 	case <-ctx.Done():
+		req.gone.Store(true)
 		g.mu.Lock()
-		g.removeWaiter(id, done)
+		g.removeWaiter(id, req.done)
 		g.mu.Unlock()
 		return CommittedEntry{}, ErrUnavailable
 	}
