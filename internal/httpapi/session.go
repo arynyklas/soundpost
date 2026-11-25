@@ -92,7 +92,15 @@ func reply(w http.ResponseWriter, v any, e error) {
 			status = 404
 		case model.Conflict:
 			status = 409
-		case model.Unavailable, model.Corrupt:
+		case model.Unavailable:
+			// A moment without a leader (an election, a leader transfer) is the retryable 503 of
+			// docs/operations/upgrade.md: the caller asks again, with its command id where it has one.
+			status = 503
+			retryable := *f
+			retryable.Retryable = true
+			f = &retryable
+			w.Header().Set("Retry-After", "1")
+		case model.Corrupt:
 			status = 503
 		case model.Quota:
 			// A capacity that frees up (the concurrent-export cap) is retryable, like the
