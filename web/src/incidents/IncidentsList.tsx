@@ -108,10 +108,11 @@ function columns(env: RowEnv): Column<IncidentView>[] {
       <strong className={cx('small', n.delivery.attention === 'failed' && 'tone-crit', n.delivery.attention === 'uncertain' && 'tone-high')} data-cell="delivery" data-attention={n.delivery.attention ?? n.delivery.state}>{deliveryHeadline(n.delivery)}</strong>
       {entries.length > 0 && <ul className="xsmall t2 inc-entries" data-cell="delivery-entries">{entries.map((d) => <li key={d.id} data-status={d.status}>{deliveryEntryText(d, fmt)}</li>)}</ul>}
       {n.delivery.truncated && <span className="xsmall t3">Older deliveries are not listed.</span>}
-      {/* Urgency, digest and digest coverage are the same sentence on most rows; they stay in the row, folded. */}
+      {n.urgency.state === 'ready' && <span className="xsmall t2" data-cell="urgency">{urgencyText(n.urgency)}</span>}
+      {/* A not-ready urgency, digest and digest coverage are the same sentence on most rows; they stay in the row, folded. */}
       <details className="inc-policy">
        <summary>Policy and digest</summary>
-       <span className="xsmall t2" data-cell="urgency">{urgencyText(n.urgency)}</span>
+       {n.urgency.state !== 'ready' && <span className="xsmall t2" data-cell="urgency">{urgencyText(n.urgency)}</span>}
        <span className="xsmall t2" data-cell="digest">{digestText(n.digest, fmt)}</span>
        <span className="xsmall t2" data-cell="unread">{unreadText(n.unread_change)}</span>
        <span className="xsmall t3">{n.worse_impact_eligible ? 'Worse impact eligible' : 'Worse impact not eligible'}</span>

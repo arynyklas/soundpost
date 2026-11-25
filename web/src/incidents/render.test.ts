@@ -101,6 +101,14 @@ describe('notifications never soften a failed or uncertain delivery', () => {
   expect(none).toContain('No delivery has been created');
   expect(none).not.toContain('data-testid="delivery-entries"');
  });
+ test('an evaluated urgency leads the card; only a not-ready one is folded under the policy', () => {
+  expect(html.indexOf('data-testid="urgency"')).toBeGreaterThan(-1);
+  expect(html.indexOf('data-testid="urgency"')).toBeLessThan(html.indexOf('<details'));
+  expect(html.slice(html.indexOf('<details'))).not.toContain('data-testid="urgency"');
+  const none = renderToStaticMarkup(React.createElement(NotificationsCard, { view: view(), tz: 'UTC', routesHref: '#routing' }));
+  expect(none.indexOf('data-testid="urgency"')).toBeGreaterThan(none.indexOf('<details'));
+  expect(none.match(/data-testid="urgency"/g)).toHaveLength(1);
+ });
 });
 
 describe('the incident list', () => {

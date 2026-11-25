@@ -26,6 +26,7 @@ export function NotificationsCard(props: { view: IncidentView; tz: string; route
     <ul className="inc-notes">
      <li data-testid="reminders">{n.reminders_paused ? `Reminders are paused by ${n.paused_by === 'ack+snooze' ? 'the acknowledgement and the snooze' : n.paused_by === 'snooze' ? 'the snooze' : 'the acknowledgement'}.` : 'Reminders are not paused.'}</li>
      <li data-testid="worse-impact">{n.worse_impact_eligible ? 'A worse impact is eligible to notify: acknowledging or snoozing does not suppress it.' : `A worse impact is not eligible to notify: ${n.suppressed_by === 'maintenance' ? 'an active maintenance window suppresses new notifications' : 'the incident is resolved, so a worse impact proposes a new linked incident'}.`}</li>
+     {n.urgency.state === 'ready' && <li data-testid="urgency">{urgencyText(n.urgency)}</li>}
      <li>
       <span data-testid="delivery" data-attention={n.delivery.attention ?? n.delivery.state} className={n.delivery.attention === 'failed' ? 'inc-bad' : n.delivery.attention === 'uncertain' ? 'inc-unsure' : undefined}>{deliveryHeadline(n.delivery)}</span>
       {entries.length > 0 && (
@@ -36,11 +37,11 @@ export function NotificationsCard(props: { view: IncidentView; tz: string; route
       {n.delivery.truncated && <p className="xsmall t3">Older deliveries are not listed.</p>}
      </li>
     </ul>
-    {/* Urgency, digest and digest coverage repeat the same policy sentence on most incidents; they stay here, folded. */}
+    {/* An evaluated urgency is the card's lead line, above. A not-ready urgency, the digest and digest coverage repeat the same policy sentence on most incidents; they stay here, folded. */}
     <details className="inc-policy">
      <summary>Policy and digest</summary>
      <ul className="inc-notes">
-      <li data-testid="urgency">{urgencyText(n.urgency)}</li>
+      {n.urgency.state !== 'ready' && <li data-testid="urgency">{urgencyText(n.urgency)}</li>}
       <li data-testid="digest">{digestText(n.digest, fmt)}</li>
       <li data-testid="unread">{unreadText(n.unread_change)}</li>
      </ul>
