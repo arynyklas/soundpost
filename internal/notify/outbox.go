@@ -16,6 +16,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // This file is the scoped, durable, fenced outbox: C08's Claim and Complete,
@@ -240,6 +241,7 @@ func (o *Outbox) transact(ctx context.Context, scope auth.Scope, kind control.Co
 		}
 		var fault *model.Fault
 		if errors.As(err, &fault) && fault.Code == model.Conflict && fault.SafeDetail == string(model.Conflict) {
+			staleretry.Note(staleretry.Outbox)
 			continue // the revision moved; the command did not conflict with anything
 		}
 		return control.Result{}, err

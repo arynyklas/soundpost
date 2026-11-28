@@ -17,10 +17,32 @@ func Label(ls model.Labels, name string) string {
 	}
 	return ""
 }
+
+// CloneLabels copies the labels so that nothing of them aliases the original: the labels slice and one buffer
+// that holds every name and value (two allocations however many labels there are, where a clone of each
+// string made 1+2n).
 func CloneLabels(ls model.Labels) model.Labels {
 	out := make(model.Labels, len(ls))
+	n := 0
+	for _, l := range ls {
+		n += len(l.Name) + len(l.Value)
+	}
+	if n == 0 {
+		return out
+	}
+	var b strings.Builder
+	b.Grow(n)
+	for _, l := range ls {
+		b.WriteString(l.Name)
+		b.WriteString(l.Value)
+	}
+	all := b.String()
+	at := 0
 	for i, l := range ls {
-		out[i] = model.Label{Name: strings.Clone(l.Name), Value: strings.Clone(l.Value)}
+		name := all[at : at+len(l.Name)]
+		at += len(l.Name)
+		out[i] = model.Label{Name: name, Value: all[at : at+len(l.Value)]}
+		at += len(l.Value)
 	}
 	return out
 }

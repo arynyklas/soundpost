@@ -477,8 +477,10 @@ type sharedBooks struct {
 	s      *Store
 	tx     *bolt.Tx
 	ledger model.BookSource // nil: the file keeps its books in the blob
-	held   map[model.Book]map[string]json.RawMessage
-	err    error
+	// rules says that the file keeps the rule books and the rule outbox in the ledger too (ledgerTx.rules, D108).
+	rules bool
+	held  map[model.Book]map[string]json.RawMessage
+	err   error
 }
 
 // ledgerBook reports a book that a file of the ledger layout keeps in its ledger.
@@ -486,10 +488,18 @@ func ledgerBook(book model.Book) bool {
 	return book == model.BookIssues || book == model.BookJobs || book == model.BookGroupingIssues || book == model.BookJobPositions
 }
 
+// ledgerServes reports whether the book is a record table of this file's ledger.
+func (b *sharedBooks) ledgerServes(book model.Book) bool {
+	return b.ledger != nil && (ledgerBook(book) || b.rules && (book == model.BookRuleBooks || book == model.BookRuleOutputs))
+}
+
+// RuleLedger reports that the rule books and the rule outbox are records of the ledger (model.readOnlyControl.RuleLedger).
+func (b *sharedBooks) RuleLedger() bool { return b.ledger != nil && b.rules }
+
 // Serves reports the books sharedBooks answers for: the ledger's, and the books of opaque records the blob holds.
 // The job books are not among them: a core reader sees none (coreMembers).
 func (b *sharedBooks) Serves(book model.Book) bool {
-	if b.ledger != nil && ledgerBook(book) {
+	if b.ledgerServes(book) {
 		return true
 	}
 	i, ok := coreByName[string(book)]
@@ -497,7 +507,7 @@ func (b *sharedBooks) Serves(book model.Book) bool {
 }
 
 func (b *sharedBooks) BookKeys(book model.Book, prefix string) []string {
-	if b.ledger != nil && ledgerBook(book) {
+	if b.ledgerServes(book) {
 		return b.ledger.BookKeys(book, prefix)
 	}
 	var out []string
@@ -510,7 +520,7 @@ func (b *sharedBooks) BookKeys(book model.Book, prefix string) []string {
 }
 
 func (b *sharedBooks) BookRecord(book model.Book, key string) ([]byte, bool) {
-	if b.ledger != nil && ledgerBook(book) {
+	if b.ledgerServes(book) {
 		return b.ledger.BookRecord(book, key)
 	}
 	raw, ok := b.member(book)[key]

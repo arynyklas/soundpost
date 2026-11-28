@@ -20,6 +20,33 @@ func (s *Store) StatePatchStatsForTest() (commands, payloadBytes uint64) {
 	return s.statePatches.Load(), s.statePatchBytes.Load()
 }
 
+// SettleRoundStatsForTest is how many proposals carried a settlement command and how many settlement commands they carried.
+func (s *Store) SettleRoundStatsForTest() (rounds, commands uint64) {
+	return s.admissionStats.settleRounds.Load(), s.admissionStats.settleCommands.Load()
+}
+
+// SetMaxSettleCommandsPerRoundForTest changes the bound of settlement commands a round carries and returns the old one: the red run of
+// the test of the bound lifts it.
+func SetMaxSettleCommandsPerRoundForTest(n int) int {
+	old := maxSettleCommandsPerRound
+	maxSettleCommandsPerRound = n
+	return old
+}
+
+// HoldUpdatesForTest takes the update lock every control writer shares and returns what releases it.
+func (s *Store) HoldUpdatesForTest() (release func()) { return s.lockUpdates() }
+
+// SubmittedAdmissionsForTest is how many transitions were submitted to the queue so far: the ones that wait in it plus the ones a
+// round took (admissionStats.queueN counts a transition when the round that took it starts). Both are read under the queue's lock,
+// so a transition is never counted twice, and one the runner took and has not yet counted shows up a moment later. It is exact
+// only until a round builds: a round that defers a transition puts it back into the queue, where it is counted again.
+func (s *Store) SubmittedAdmissionsForTest() uint64 {
+	q := &s.admissions
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return uint64(len(q.pending)) + s.admissionStats.queueN.Load()
+}
+
 // patchEntry is a committed state patch for the machine of f at the next replica index, from the
 // current state to the state build makes of it, expecting revision expected.
 func (f *installFx) patchEntry(expected, cursor model.Revision, build func(*State)) replica.CommittedEntry {

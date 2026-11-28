@@ -44,8 +44,9 @@ type moved struct {
 // transaction that stores the new values starts, and a value that changed in between is left as it is (its record is owed a
 // zeroing). next is the key to continue from, done is true at the end of the bucket.
 func (e *Engine) moveChunk(name []byte, resume []byte, convert func(old []byte) ([]byte, error)) (next []byte, did int, done bool, err error) {
-	// A chunk reads a value, logs its bytes and replaces the value: an erasure that rewrote the value in between would leave a record
-	// holding the erased bytes after its scrub has run. Erasure holds cutMu exclusively, so a chunk is never concurrent with one.
+	// A migration chunk reads a value, logs its bytes and replaces the value: an erasure that rewrote the value in between would leave a record
+	// holding the erased bytes after its scrub has run. Erasure holds cutMu exclusively, so a migration chunk is never concurrent with one.
+	// (This is the chunk of moveChunk only: the chunk a scan builds, read_build.go, takes no cutMu and is guarded by its snapshot and barrier.)
 	e.cutMu.RLock()
 	defer e.cutMu.RUnlock()
 	var items []moved

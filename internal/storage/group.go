@@ -42,14 +42,20 @@ type Engine struct {
 	// which orders itself per slot (slotMu): appends of different slots overlap their round trips
 	// and fsyncs, appends of one slot take their application indexes one at a time.
 	proposalMu sync.RWMutex
-	slotMu     [64]sync.Mutex
-	repl       *replicatedEngine
-	db         *trackedDB
-	dir        string
-	// cutMu is held shared by a snapshot cut deriving the windows of its slot without mu (windowTableForCut,
-	// DeletionLedger, PinFiles) and exclusively by erasure, the writer that rewrites stored commands. Lock order:
-	// cutMu, then mu (the cut takes mu only for a moment, to read the slot's index and the engine's flags).
+	slotMu     [64]slotLock
+	// scopes makes the scope of a claim and remoteDownUntil is when a member whose call to a slot's leader failed makes its own
+	// appends until (UnixNano): append_remote.go.
+	scopes          atomic.Pointer[claimScopes]
+	remoteDownUntil atomic.Int64
+	repl            *replicatedEngine
+	db              *trackedDB
+	dir             string
+	// cutMu is held shared by a snapshot cut deriving the windows of its slot without mu (windowTableAt, pinnedSlotCut) and
+	// exclusively by erasure, the writer that rewrites stored commands. Lock order: cutMu, then mu (the cut takes mu only for
+	// a moment, to read the engine's flags and the files it pins).
 	cutMu sync.RWMutex
+	// cutGate bounds the window derivations and window-file writes that snapshot cuts and settlement passes run at once (cut_gate.go).
+	cutGate cutGate
 	// cutEpoch is bumped, with cutMu held exclusively, before stored commands are rewritten; windows are the derivations of the open
 	// window of each slot (windowCache), valid while the epoch they were built under is the current one.
 	cutEpoch atomic.Uint64
@@ -426,15 +432,32 @@ func batchKey(org, project, source, producer model.ID, slot uint16, batch model.
 	return []byte(fmt.Sprintf("%s:%s:%s:%s:%02d:%s", org, project, source, producer, slot, batch))
 }
 func slotKey(slot uint16) []byte { var b [2]byte; binary.BigEndian.PutUint16(b[:], slot); return b[:] }
+
+// Append stores the batch: at the leader of its slot when this member does not lead it and the leader serves the call
+// (append_remote.go), otherwise here.
 func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
+	if b.RouteSlot >= 64 {
+		return model.Receipt{}, model.Fail(model.Invalid)
+	}
+	if r, handled, err := e.appendAtLeader(ctx, scope, b); handled {
+		return r, err
+	}
+	return e.appendOwn(ctx, scope, b)
+}
+
+// appendOwn is Append made by this member: it reads, checks and proposes the batch itself.
+func (e *Engine) appendOwn(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
 	if b.RouteSlot >= 64 {
 		return model.Receipt{}, model.Fail(model.Invalid)
 	}
 	e.proposalMu.RLock()
 	defer e.proposalMu.RUnlock()
+	appendFrom := time.Now()
 	if err := e.replicaBeforeWrite(ctx, b.RouteSlot); err != nil {
 		return model.Receipt{}, err
 	}
+	readDone := time.Now()
+	appendTimes.readNS.Add(uint64(readDone.Sub(appendFrom)))
 	// e.mu is held only to read the engine's state, never across a control read, an fsync or the
 	// replication round trip. Every check that asks the control group runs before the slot lock, so
 	// the appends of one slot overlap those waits with the round trip of the one in front of them;
@@ -491,11 +514,49 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 	if err = e.writeDeletions(ctx, b); err != nil {
 		return model.Receipt{}, err
 	}
-	e.slotMu[b.RouteSlot].Lock()
-	defer e.slotMu[b.RouteSlot].Unlock()
+	checksDone := time.Now()
+	appendTimes.checksNS.Add(uint64(checksDone.Sub(readDone)))
+	lock := &e.slotMu[b.RouteSlot]
+	if err = lock.acquire(ctx); err != nil {
+		return model.Receipt{}, err
+	}
+	slotTaken := time.Now()
+	waited := uint64(slotTaken.Sub(checksDone))
+	appendTimes.slotNS.Add(waited)
+	addMax(&appendTimes.slotWaitMaxNS, waited)
+	slotHeld := true
+	leaveSlot := func() {
+		if !slotHeld {
+			return
+		}
+		slotHeld = false
+		held := uint64(time.Since(slotTaken))
+		appendTimes.slotHeldNS.Add(held)
+		addMax(&appendTimes.slotHeldMaxNS, held)
+		lock.release()
+	}
+	defer leaveSlot()
+	repl := e.repl
+	if repl == nil {
+		return model.Receipt{}, model.Fail(model.Unavailable)
+	}
+	group := repl.groups[b.RouteSlot]
+	// The appends of a slot that its leader makes are queued in order under the slot lock and committed together (append_queue.go);
+	// an append that a member makes without leading the slot is a forwarded proposal, which holds the lock for its commit and
+	// starts when the queued ones have been applied.
+	_, leads := group.Leader()
+	flightKey := string(batchKey(b.Org, b.Project, b.Source, b.Producer, b.RouteSlot, b.ID))
+	if !leads {
+		if err = lock.flight.waitIdle(ctx); err != nil {
+			return model.Receipt{}, err
+		}
+	} else if first := lock.flight.find(flightKey); first != nil {
+		leaveSlot()
+		return first.wait(ctx, b.Hash)
+	}
 	// The append in front of this one in the slot may have stored this very batch (a retry that
-	// raced it) or moved the series the ordering rules look at: ask again, now that nothing can
-	// change either until this append has proposed.
+	// raced it) or moved the series the ordering rules look at: ask again, now that nothing that
+	// is applied can change either until this append has been queued.
 	if old, found, err = e.storedReceipt(b); err != nil {
 		return model.Receipt{}, err
 	} else if found {
@@ -509,10 +570,18 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		e.mu.Unlock()
 		return model.Receipt{}, model.Fail(model.Unavailable)
 	}
-	index := e.indexes[b.RouteSlot] + 1
+	applied := e.indexes[b.RouteSlot]
 	e.mu.Unlock()
+	index := applied + 1
+	var flight *flightAppend
+	if leads {
+		if index, flight, err = lock.flight.begin(flightKey, b.Hash, applied); err != nil {
+			return model.Receipt{}, err
+		}
+	}
 	r := model.Receipt{Version: 1, BatchID: b.ID, Hash: b.Hash, Cursor: model.Cursor{Group: e.group(b.RouteSlot), Index: model.Uint64(index)}, SignalDeadlines: append([]model.SignalDeadline(nil), b.Deadlines...), DedupUntil: b.AdmissionAt + model.UnixNano(7*24*time.Hour)}
 	if len(r.SignalDeadlines) == 0 {
+		lock.flight.abandon(flightKey, flight)
 		return model.Receipt{}, model.Fail(model.Invalid)
 	}
 	r.RetainUntil = r.SignalDeadlines[0].RetainUntil
@@ -522,11 +591,45 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		}
 	}
 	entry := walEntry{Type: "batch", Batch: &b, Receipt: &r}
-	group, command, err := e.slotCommand(b.RouteSlot, index, entry)
+	_, command, err := e.slotCommand(b.RouteSlot, index, entry)
 	if err != nil {
+		lock.flight.abandon(flightKey, flight)
 		return model.Receipt{}, err
 	}
-	if err = proposeSlotCommand(group, command); err != nil {
+	proposeFrom := time.Now()
+	if leads {
+		var pending *replica.Pending
+		if pending, err = group.ProposeQueued(ctx, command); err != nil {
+			lock.flight.abandon(flightKey, flight)
+			return model.Receipt{}, storageReplicaFault(err)
+		}
+		leaveSlot()
+		_, err = pending.Wait(ctx)
+		if err != nil && ctx.Err() != nil {
+			// The caller has gone; the append stays queued and its place in the slot is held until it is decided.
+			go func() {
+				_, decided := pending.Wait(context.Background())
+				lock.flight.finish(flightKey, flight, r, storageReplicaFault(decided))
+			}()
+			return model.Receipt{}, model.Fail(model.Cancelled)
+		}
+		err = storageReplicaFault(err)
+		lock.flight.finish(flightKey, flight, r, err)
+	} else {
+		err = proposeSlotCommand(group, command)
+	}
+	proposed := uint64(time.Since(proposeFrom))
+	appendTimes.appends.Add(1)
+	appendTimes.proposeNS.Add(proposed)
+	addMax(&appendTimes.proposeMaxNS, proposed)
+	if leads {
+		appendTimes.ledN.Add(1)
+		appendTimes.ledNS.Add(proposed)
+	} else {
+		appendTimes.fwdN.Add(1)
+		appendTimes.fwdNS.Add(proposed)
+	}
+	if err != nil {
 		return model.Receipt{}, err
 	}
 	return r, nil

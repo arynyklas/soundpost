@@ -112,6 +112,7 @@ type mtlsCluster struct {
 	outsider   tls.Certificate   // issued by the same CA, but for a node that is not a member
 	requests   atomic.Int64      // every request any of the three servers received
 	raftBytes  atomic.Int64      // the declared body bytes of the requests to a group's raft route
+	connKinds  sync.Map          // remote address of a connection -> the set of route kinds its requests went to ("batch", "raft")
 }
 
 func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
@@ -149,6 +150,12 @@ func newMTLSClusterWith(t *testing.T, groupCount int, wrap func(node int, l net.
 		}
 		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c.requests.Add(1)
+			kind := "raft"
+			if r.URL.Path == batchPath {
+				kind = "batch"
+			}
+			set, _ := c.connKinds.LoadOrStore(r.RemoteAddr, &sync.Map{})
+			set.(*sync.Map).Store(kind, true)
 			if strings.HasPrefix(r.URL.Path, raftPath) && r.ContentLength > 0 {
 				c.raftBytes.Add(r.ContentLength)
 			}

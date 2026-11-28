@@ -37,11 +37,13 @@ type Cadence struct {
 	// machine whose cut writes the whole state, so that the cost of the cut stays proportional to the
 	// journal it replaces. A machine that cuts incrementally (the data groups) leaves it off.
 	Amortize bool
-	// Stagger is the share of its bounds, in StaggerBase ths, after which this group cuts (0: all of them). The 64
-	// data groups of a node are loaded alike, so with the same bounds they all reach them at the same instant, and
-	// their cuts together held the engine lock they share for seconds at the single-host load, with every
-	// acknowledgement queued behind (L2w20Admission19). Each group is given a different share, so the cuts of a node
-	// are spread over the time one bound takes instead of falling together.
+	// Stagger is the share of its bounds, in StaggerBase ths, after which this group makes its FIRST cut since it was opened
+	// (0: all of them); every cut after it is due at the whole bounds. The 64 data groups of a node are loaded alike, so with
+	// the same bounds they all reach them at the same instant, and their cuts together held the engine lock they share for
+	// seconds at the single-host load, with every acknowledgement queued behind (L2w20Admission19), and at the 5k records/s
+	// gate each cut was silent for 0.3-0.8 s and they fell in one stretch. Each group is given a different share, so the first
+	// cuts of a node are spread over the time one bound takes, and, the loads being alike, the cuts after them keep their
+	// distances from one another: the share is not what a group cuts at in the steady state.
 	Stagger uint16
 	// Retain keeps the entries a cut compacts, in memory, for this long, so that a member that was away for less than
 	// that is sent them instead of a snapshot of the whole state (tail.go); 0 keeps none. RetainBytes bounds the
@@ -61,6 +63,21 @@ func (g *Group) Cadence() Cadence { return g.cadence }
 // CadenceCuts is how many snapshot cuts the cadence loop has completed (cut, superseded snapshots
 // dropped, journal compacted) since the group was opened.
 func (g *Group) CadenceCuts() uint64 { return g.cadenceCuts.Load() }
+
+// CadencePending reports whether the group owes the cadence a cut: one is running, or a bound is reached and the loop has
+// not begun it. After every entry a caller got its answer for has been applied, a group that is not pending has made every
+// cut those entries called for, so a reader of CadenceCuts that waits for this does not mistake a slow cut for a missing one.
+func (g *Group) CadencePending() bool {
+	if !g.cadence.Enabled() {
+		return false
+	}
+	if g.cadenceBusy.Load() {
+		return true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.cutDue()
+}
 
 // CadenceLongestCut is how long the longest completed cadence cut took, from the start of the
 // snapshot to the end of the compaction. Commands keep being applied while it runs, so it is what
@@ -150,13 +167,17 @@ func (g *Group) countApplied(dataBytes int) {
 // in the live profile of L2w20Admission7), a restart replays the journal, which costs ~35 ms per MB.
 // A bound of at most half the last snapshot's size in journal keeps the cut cost amortized (at
 // most 2 bytes cut per byte journaled) and the replay below half of what a cut writes.
+//
+// A Stagger places the first cut of the group, since it was opened, at its share of the bounds; every cut after it is due at the
+// whole of them. The share is for telling the groups of a node apart, not for cutting more: a share that lasted would cut at
+// less than the bound the cadence names for as long as the group runs.
 func (g *Group) cutDue() bool {
 	scale := uint64(1)
 	if g.cadence.Amortize && g.cadence.Bytes > 0 && g.cutBytes > 2*g.cadence.Bytes {
 		scale = uint64(g.cutBytes / (2 * g.cadence.Bytes))
 	}
 	commands, bytes := g.cadence.Commands*scale, g.cadence.Bytes*int64(scale)
-	if s := uint64(g.cadence.Stagger); s != 0 && s < StaggerBase {
+	if s := uint64(g.cadence.Stagger); s != 0 && s < StaggerBase && g.cadenceCuts.Load() == 0 {
 		commands = max(commands*s/StaggerBase, min(commands, 1))
 		bytes = max(bytes*int64(s)/StaggerBase, min(bytes, 1))
 	}
@@ -199,6 +220,8 @@ func (g *Group) cadenceLoop() {
 // cutAndCompact cuts a snapshot at the applied index, drops the superseded ones and compacts the
 // journal onto the cut.
 func (g *Group) cutAndCompact() error {
+	g.cadenceBusy.Store(true)
+	defer g.cadenceBusy.Store(false) // after cadenceCuts counted this cut: no moment of neither
 	// The cut ends when the group stops, so Close (which waits for this loop) never waits out the minute.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

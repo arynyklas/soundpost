@@ -28,6 +28,17 @@ type scheduler struct {
 	queues    map[model.ID]*list.List
 	ring      []model.ID
 	next      int
+	stats     AdmissionStats
+}
+
+// AdmissionStats are cumulative counters of the admission queue since construction. A query that had to
+// queue counts once per limit that blocked it (global, organization, principal), so the counters say
+// which limit a workload runs into.
+type AdmissionStats struct {
+	Admitted, Queued                            uint64
+	BlockedGlobal, BlockedOrg, BlockedPrincipal uint64
+	RefusedFull, TimedOut, Cancelled            uint64
+	QueueWaitSumNS, QueueWaitMaxNS              int64
 }
 type principalKey struct{ org, principal model.ID }
 type waiter struct {
@@ -58,11 +69,13 @@ func (s *scheduler) Acquire(ctx context.Context, org, principal model.ID) (func(
 	s.mu.Lock()
 	if s.canRun(org, principal) {
 		s.start(org, principal)
+		s.stats.Admitted++
 		s.mu.Unlock()
 		return s.releaser(org, principal), nil
 	}
 	q := s.queues[org]
 	if q != nil && q.Len() >= s.maxQueued || q == nil && s.maxQueued == 0 {
+		s.stats.RefusedFull++
 		s.mu.Unlock()
 		return nil, model.Fail(model.Quota)
 	}
@@ -73,13 +86,30 @@ func (s *scheduler) Acquire(ctx context.Context, org, principal model.ID) (func(
 	}
 	w := &waiter{org: org, principal: principal, ready: make(chan struct{})}
 	el := q.PushBack(w)
+	s.stats.Queued++
+	if s.active >= s.global {
+		s.stats.BlockedGlobal++
+	}
+	if s.orgActive[org] >= s.perOrg {
+		s.stats.BlockedOrg++
+	}
+	if s.principal[principalKey{org, principal}] >= s.perPrincipal {
+		s.stats.BlockedPrincipal++
+	}
 	s.mu.Unlock()
+	queued := time.Now()
 
 	timer := time.NewTimer(s.maxWait)
 	defer timer.Stop()
 	var cause error
 	select {
 	case <-w.ready:
+		s.mu.Lock()
+		s.stats.Admitted++
+		waited := time.Since(queued).Nanoseconds()
+		s.stats.QueueWaitSumNS += waited
+		s.stats.QueueWaitMaxNS = max(s.stats.QueueWaitMaxNS, waited)
+		s.mu.Unlock()
 		return s.releaser(org, principal), nil
 	case <-ctx.Done():
 		cause = ctxFault(ctx.Err())
@@ -87,6 +117,11 @@ func (s *scheduler) Acquire(ctx context.Context, org, principal model.ID) (func(
 		cause = model.Fail(model.Timeout)
 	}
 	s.mu.Lock()
+	if f, ok := cause.(*model.Fault); ok && f.Code == model.Timeout {
+		s.stats.TimedOut++
+	} else {
+		s.stats.Cancelled++
+	}
 	if w.granted {
 		// The slot was granted as the wait ended: hand it straight back.
 		s.mu.Unlock()
@@ -178,7 +213,10 @@ func (s *scheduler) dispatchLocked() {
 }
 
 // schedulerState is a consistent snapshot for observability and tests.
-type schedulerState struct{ Active, Queued int }
+type schedulerState struct {
+	Active, Queued int
+	Stats          AdmissionStats
+}
 
 func (s *scheduler) state() schedulerState {
 	s.mu.Lock()
@@ -187,5 +225,5 @@ func (s *scheduler) state() schedulerState {
 	for _, q := range s.queues {
 		queued += q.Len()
 	}
-	return schedulerState{Active: s.active, Queued: queued}
+	return schedulerState{Active: s.active, Queued: queued, Stats: s.stats}
 }

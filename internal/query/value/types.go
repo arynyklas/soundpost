@@ -160,6 +160,9 @@ func InheritMetadata(result *Result, inputs ...Result) {
 		result.Watermarks = nil
 		return
 	}
+	if mergeCanonicalCuts(result, inputs) {
+		return
+	}
 	groups := make(map[model.ID]uint64, len(result.Watermarks))
 	merge := func(cursors []model.Cursor) {
 		for _, c := range cursors {
@@ -184,4 +187,63 @@ func InheritMetadata(result *Result, inputs ...Result) {
 	sort.Slice(result.Watermarks, func(i, j int) bool {
 		return bytes.Compare(result.Watermarks[i].Group[:], result.Watermarks[j].Group[:]) < 0
 	})
+}
+
+// canonicalCut reports whether cursors are one per group in ascending group order, the form every merge of
+// InheritMetadata returns (a cut the storage reports is one cursor per group too, in slot order, which is
+// not always the byte order of the groups).
+func canonicalCut(cursors []model.Cursor) bool {
+	for i := 1; i < len(cursors); i++ {
+		if bytes.Compare(cursors[i-1].Group[:], cursors[i].Group[:]) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeCanonicalCuts is the merge of InheritMetadata for cuts that are already in its output form: one linear
+// pass per cut instead of a map and a sort of every cursor, which every operator of every series of an
+// evaluation paid (6 % of the CPU of the Queries gate mix). The result is the same cursors in the same order,
+// the minimum index of a group in any cut; it reports false, and changes nothing, when a cut is not canonical.
+func mergeCanonicalCuts(result *Result, inputs []Result) bool {
+	var buf [4][]model.Cursor
+	cuts := buf[:0]
+	if len(result.Watermarks) > 0 {
+		cuts = append(cuts, result.Watermarks)
+	}
+	for _, input := range inputs {
+		if len(input.Watermarks) > 0 {
+			cuts = append(cuts, input.Watermarks)
+		}
+	}
+	for _, c := range cuts {
+		if !canonicalCut(c) {
+			return false
+		}
+	}
+	if len(cuts) == 1 && len(result.Watermarks) > 0 {
+		return true // the result's own cut, already in the form the merge returns
+	}
+	merged := append([]model.Cursor(nil), cuts[0]...)
+	for _, next := range cuts[1:] {
+		out := make([]model.Cursor, 0, len(merged)+len(next))
+		i, j := 0, 0
+		for i < len(merged) && j < len(next) {
+			switch bytes.Compare(merged[i].Group[:], next[j].Group[:]) {
+			case -1:
+				out = append(out, merged[i])
+				i++
+			case 1:
+				out = append(out, next[j])
+				j++
+			default:
+				out = append(out, model.Cursor{Group: merged[i].Group, Index: model.Uint64(min(uint64(merged[i].Index), uint64(next[j].Index)))})
+				i, j = i+1, j+1
+			}
+		}
+		out = append(append(out, merged[i:]...), next[j:]...)
+		merged = out
+	}
+	result.Watermarks = merged
+	return true
 }

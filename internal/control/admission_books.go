@@ -250,6 +250,41 @@ type ledgerBooks struct {
 	wins   map[string]model.SettledWindow
 	chg    map[string]uint64
 	chgSer map[string]uint64
+	// compact says that ops() writes the compact admission ops where they say what the plain ops would (compact_admission.go); set
+	// on the books of a round whose group applies them.
+	compact bool
+	// seen and seenCharges are the records of the series tables as the ledger holds them, read once for the round (the root books
+	// only): the books read one read transaction, so a record does not change while the round is judged, and a transition reads it
+	// (series), the write reads it again (setSeries), and the round once more for the op (ops).
+	seen, seenCharges map[string]uint64
+	// settled are the settlements of the round whose charge the voters derive from the rows (compact_settle.go).
+	settled []settledWindowPlan
+}
+
+// ledgerRecord is the count of a series record of the ledger (the settled charges when charges), read once by the round.
+func (b *ledgerBooks) ledgerRecord(tier, id string, charges bool) uint64 {
+	for b.up != nil {
+		b = b.up
+	}
+	memo := &b.seen
+	if charges {
+		memo = &b.seenCharges
+	}
+	key := seriesKey(tier, id)
+	if n, ok := (*memo)[string(key)]; ok {
+		return n
+	}
+	var n uint64
+	if charges {
+		n = b.l.chargeSeries(tier, id)
+	} else {
+		n = b.l.series(tier, id)
+	}
+	if *memo == nil {
+		*memo = map[string]uint64{}
+	}
+	(*memo)[string(key)] = n
+	return n
 }
 
 // headEdit is a quota head a transition read, and what it is now.
@@ -298,6 +333,7 @@ func (b *ledgerBooks) merge(c *ledgerBooks) {
 	for k, v := range c.chgSer {
 		b.chgSer[k] = v
 	}
+	b.settled = append(b.settled, c.settled...)
 }
 
 func (b *ledgerBooks) reservation(id string) (model.AdmissionReservation, bool, error) {
@@ -409,7 +445,7 @@ func (b *ledgerBooks) series(tier, id string) uint64 {
 	if b.up != nil {
 		return b.up.series(tier, id)
 	}
-	return b.l.series(tier, id)
+	return b.ledgerRecord(tier, id, false)
 }
 
 func (b *ledgerBooks) setSeries(tier, id string, n uint64) {
@@ -476,7 +512,7 @@ func (b *ledgerBooks) chargeSeries(tier, id string) uint64 {
 	if b.up != nil {
 		return b.up.chargeSeries(tier, id)
 	}
-	return b.l.chargeSeries(tier, id)
+	return b.ledgerRecord(tier, id, true)
 }
 
 func (b *ledgerBooks) setChargeSeries(tier, id string, n uint64) {
@@ -489,19 +525,31 @@ func (b *ledgerBooks) ops() []patchOp {
 	var ops []patchOp
 	set := func(path []string, v any) { ops = append(ops, patchOp{Op: opSet, Path: path, Value: mustJSON(v)}) }
 	del := func(path []string) { ops = append(ops, patchOp{Op: opDelete, Path: path}) }
+	cover := compactCover{keys: map[string]bool{}, series: map[string]bool{}}
+	settled := b.settledCover()
 	for id, r := range b.res {
-		switch {
-		case r == nil:
-			if _, ok, _ := b.l.reservation(id); ok {
+		if r == nil {
+			if _, ok, _ := b.l.reservation(id); ok && !settled.res[id] {
 				del([]string{"Reservations", id})
 			}
-		default:
-			if old, ok, _ := b.l.reservation(id); !ok || !sameValue(old, *r) {
-				set([]string{"Reservations", id}, *r)
+			continue
+		}
+		old, ok, _ := b.l.reservation(id)
+		if ok && sameValue(old, *r) {
+			continue
+		}
+		if b.compact {
+			if op, done := b.compactReservation(id, old, ok, *r, &cover); done {
+				ops = append(ops, op)
+				continue
 			}
 		}
+		set([]string{"Reservations", id}, *r)
 	}
 	for key, id := range b.keys {
+		if cover.keys[key] || settled.keys[key] {
+			continue
+		}
 		old, ok := b.l.keyed(key)
 		switch {
 		case id == nil:
@@ -531,8 +579,11 @@ func (b *ledgerBooks) ops() []patchOp {
 		}
 	}
 	for key, n := range b.sers {
+		if cover.series[key] {
+			continue
+		}
 		tier, id := splitSeriesKey(key)
-		old := b.l.series(tier, id)
+		old := b.ledgerRecord(tier, id, false)
 		switch {
 		case n == 0 && old != 0:
 			del([]string{"Quotas", tier, "series", id})
@@ -541,11 +592,17 @@ func (b *ledgerBooks) ops() []patchOp {
 		}
 	}
 	for group, span := range b.spans {
+		if settled.spans[group] {
+			continue
+		}
 		if b.l.span(group) != span {
 			set([]string{"settlement", "spans", group}, span)
 		}
 	}
 	for key, w := range b.wins {
+		if settled.wins[key] {
+			continue
+		}
 		if old, ok, _ := b.l.window(key); !ok || !old.Equal(w) {
 			set([]string{"settlement", "windows", key}, w)
 		}
@@ -557,7 +614,7 @@ func (b *ledgerBooks) ops() []patchOp {
 	}
 	for key, n := range b.chgSer {
 		tier, id := splitSeriesKey(key)
-		old := b.l.chargeSeries(tier, id)
+		old := b.ledgerRecord(tier, id, true)
 		switch {
 		case n == 0 && old != 0:
 			del([]string{"settlement", "charges", tier, "series", id})
@@ -565,6 +622,7 @@ func (b *ledgerBooks) ops() []patchOp {
 			set([]string{"settlement", "charges", tier, "series", id}, n)
 		}
 	}
+	ops = append(ops, settleOps(b.settled)...)
 	sort.Slice(ops, func(i, j int) bool { return pathLess(ops[i].Path, ops[j].Path) })
 	return ops
 }

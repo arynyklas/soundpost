@@ -5,6 +5,7 @@ package query
 import (
 	"context"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,7 @@ type Limits struct {
 
 const (
 	defaultMemory   int64 = 256 << 20
+	creditGrain     int64 = 2 << 10 // the pool is charged by a query account in grains of this size
 	defaultReturned       = 5_000_000
 	maxRevalidate         = 5 * time.Second
 )
@@ -68,7 +70,12 @@ func DefaultLimits() Limits {
 		MaxProjects: 128, MaxExpressionBytes: 32 << 10, MaxDiscoveryItems: 10000, MaxDiagnostics: 256, MaxMinCursors: 1024,
 		ProjectParallelism: 4,
 		GlobalMemory:       1 << 30,
-		MaxConcurrent:      8, MaxPerOrg: 4, MaxPerPrincipal: 2,
+		// Sixteen running queries, eight per organization, four per principal: the former 8/4/2 made the
+		// ninth and later concurrent query wait behind long ones (at the Queries gate 51 % of the queries
+		// queued, 85 % of those on the global limit, and the wait was the p95 of every short class), while
+		// the CPU is shared by the Go scheduler either way. The bound that protects the node is the memory
+		// pool (GlobalMemory), not the number of running queries. See docs/queries/admission.md.
+		MaxConcurrent: 16, MaxPerOrg: 8, MaxPerPrincipal: 4,
 		MaxQueuedPerOrg: 16, MaxQueueWait: 10 * time.Second,
 		RevalidateInterval: 2 * time.Second,
 		CacheSettle:        time.Minute,
@@ -88,6 +95,8 @@ func (l Limits) validate() error {
 		l.ProjectParallelism < 1,
 		l.GlobalMemory < l.MaxMemory,
 		l.MaxConcurrent < 1, l.MaxPerOrg < 1 || l.MaxPerOrg > l.MaxConcurrent, l.MaxPerPrincipal < 1 || l.MaxPerPrincipal > l.MaxPerOrg,
+		// Every admitted query must be able to hold one storage iterator per selected project (D105).
+		l.MaxConcurrent > storage.ScanSlots/l.MaxProjects,
 		l.MaxQueuedPerOrg < 0, l.MaxQueueWait <= 0,
 		l.RevalidateInterval <= 0 || l.RevalidateInterval > maxRevalidate,
 		l.CacheSettle < 0:
@@ -126,38 +135,39 @@ func (l Limits) resolve(b Budget) (timeout time.Duration, memory int64, returned
 
 // memoryPool is the process-wide aggregate of every query account. A query
 // charges it before allocating and releases on every path, so the sum of all
-// concurrent working memory never exceeds the limit.
+// concurrent working memory never exceeds the limit. It is lock-free: every
+// query of the process charges and releases it on every sample or row it holds, and
+// a mutex here was 15 % of the CPU of ten concurrent queries.
 type memoryPool struct {
-	mu                sync.Mutex
-	limit, used, peak int64
+	limit      int64
+	used, peak atomic.Int64
+	charges    atomic.Uint64 // successful reserves (the accounts charge in grains, so this stays small)
 }
 
 func newMemoryPool(limit int64) *memoryPool { return &memoryPool{limit: limit} }
 func (p *memoryPool) reserve(n int64) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if n < 0 || n > p.limit-p.used {
-		return model.Fail(model.Quota)
+	for {
+		used := p.used.Load()
+		if n < 0 || n > p.limit-used {
+			return model.Fail(model.Quota)
+		}
+		if p.used.CompareAndSwap(used, used+n) {
+			for peak := p.peak.Load(); used+n > peak && !p.peak.CompareAndSwap(peak, used+n); peak = p.peak.Load() {
+			}
+			p.charges.Add(1)
+			return nil
+		}
 	}
-	p.used += n
-	if p.used > p.peak {
-		p.peak = p.used
-	}
-	return nil
 }
 func (p *memoryPool) release(n int64) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.used -= n
-	if p.used < 0 {
-		p.used = 0
+	for {
+		used := p.used.Load()
+		if p.used.CompareAndSwap(used, max(used-n, 0)) {
+			return
+		}
 	}
 }
-func (p *memoryPool) snapshot() (used, peak int64) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.used, p.peak
-}
+func (p *memoryPool) snapshot() (used, peak int64) { return p.used.Load(), p.peak.Load() }
 
 // queryAccount is the single value.Account shared by every worker, parser,
 // planner, regex scope, scan, merge and result conversion of one query, so the
@@ -172,8 +182,14 @@ type queryAccount struct {
 	mu           sync.Mutex
 	used, peak   int64
 	overReleased int64
+	// credit is memory the account holds in the pool beyond what it has handed out: the pool is charged
+	// in grains of creditGrain, not on every sample, because a compare-and-swap on one shared counter by
+	// every worker was 6 % of the CPU of the gate mix. used + credit never exceeds limit.
+	credit int64
 
 	failure atomic.Pointer[accountFailure]
+	// ops counts Reserve and Release calls that took mu: the contention on one query's account.
+	ops atomic.Uint64
 }
 type accountFailure struct{ err error }
 
@@ -184,14 +200,27 @@ func (a *queryAccount) Reserve(n int64) error {
 	if f := a.failure.Load(); f != nil {
 		return f.err
 	}
+	a.ops.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if n < 0 || n > a.limit-a.used {
 		return model.Fail(model.Quota)
 	}
-	if err := a.pool.reserve(n); err != nil {
-		return err
+	if a.credit < n {
+		need := n - a.credit
+		grain := min(max(need, creditGrain), a.limit-a.used-a.credit)
+		if err := a.pool.reserve(grain); err != nil {
+			if grain == need {
+				return err
+			}
+			grain = need // the pool cannot spare a whole grain: charge exactly what is needed
+			if err = a.pool.reserve(grain); err != nil {
+				return err
+			}
+		}
+		a.credit += grain
 	}
+	a.credit -= n
 	a.used += n
 	if a.used > a.peak {
 		a.peak = a.used
@@ -202,6 +231,7 @@ func (a *queryAccount) Release(n int64) {
 	if n <= 0 {
 		return
 	}
+	a.ops.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if n > a.used {
@@ -209,7 +239,11 @@ func (a *queryAccount) Release(n int64) {
 		n = a.used
 	}
 	a.used -= n
-	a.pool.release(n)
+	a.credit += n
+	if a.credit > 2*creditGrain {
+		a.pool.release(a.credit - creditGrain)
+		a.credit = creditGrain
+	}
 }
 func (a *queryAccount) Check(ctx context.Context) error {
 	if f := a.failure.Load(); f != nil {
@@ -233,8 +267,8 @@ func (a *queryAccount) finish() (leaked, overReleased int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	leaked, overReleased = a.used, a.overReleased
-	a.pool.release(a.used)
-	a.used = 0
+	a.pool.release(a.used + a.credit)
+	a.used, a.credit = 0, 0
 	return leaked, overReleased
 }
 func (a *queryAccount) peakBytes() int64 {
@@ -246,22 +280,48 @@ func (a *queryAccount) peakBytes() int64 {
 // projectAccount is one project worker's view of the shared account: every
 // charge lands on the query account, and the view additionally measures the
 // project's own current and peak bytes for its Stats.
+//
+// The view leases bytes from the query account in grains of leaseGrain and serves the small charges of its
+// own worker from the lease: a log query reserves the cost of every row and releases it at the next, and
+// those calls by ten project workers on the one mutex of the query account were 45 CPU seconds of the gate
+// mix. The bytes of a lease count as used by the query account, so the per-query cap and the pool limit are
+// never exceeded; the slack is at most two grains per project view, a lease that does not fit under the cap
+// is cut to exactly what is needed, and flush hands the rest back when the project is done.
 type projectAccount struct {
-	q          *queryAccount
-	mu         sync.Mutex
-	used, peak int64
+	q                 *queryAccount
+	mu                sync.Mutex
+	used, peak, lease int64
 }
 
+const leaseGrain int64 = 4 << 10
+
 func (a *projectAccount) Reserve(n int64) error {
-	if err := a.q.Reserve(n); err != nil {
-		return err
+	if f := a.q.failure.Load(); f != nil {
+		return f.err
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n < 0 {
+		return model.Fail(model.Quota)
+	}
+	if a.lease < n {
+		need := n - a.lease
+		grain := max(need, leaseGrain)
+		err := a.q.Reserve(grain)
+		if err != nil && grain > need {
+			grain = need // the account cannot spare a whole grain: lease exactly what is needed
+			err = a.q.Reserve(grain)
+		}
+		if err != nil {
+			return err
+		}
+		a.lease += grain
+	}
+	a.lease -= n
 	a.used += n
 	if a.used > a.peak {
 		a.peak = a.used
 	}
-	a.mu.Unlock()
 	return nil
 }
 func (a *projectAccount) Release(n int64) {
@@ -269,23 +329,31 @@ func (a *projectAccount) Release(n int64) {
 		return
 	}
 	a.mu.Lock()
-	over := int64(0)
+	defer a.mu.Unlock()
 	if n > a.used {
-		over = n - a.used
+		a.q.mu.Lock()
+		a.q.overReleased += n - a.used
+		a.q.mu.Unlock()
 		n = a.used
 	}
 	a.used -= n
-	a.mu.Unlock()
-	if over > 0 {
-		a.q.mu.Lock()
-		a.q.overReleased += over
-		a.q.mu.Unlock()
+	a.lease += n
+	if a.lease > 2*leaseGrain {
+		a.q.Release(a.lease - leaseGrain)
+		a.lease = leaseGrain
 	}
-	a.q.Release(n)
 }
 func (a *projectAccount) Check(ctx context.Context) error { return a.q.Check(ctx) }
 func (a *projectAccount) peakBytes() int64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.peak
+}
+
+// flush returns the unused part of the lease to the query account; what the view still holds stays charged.
+func (a *projectAccount) flush() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.q.Release(a.lease)
+	a.lease = 0
 }

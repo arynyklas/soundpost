@@ -68,6 +68,10 @@ func preferredLeader(voters []uint64, seed uint64) uint64 {
 	return sorted[seed%uint64(len(sorted))]
 }
 
+// LeaderTransfers is how many leadership transfers the group's placement has started (this member as the leader that
+// handed the group over), a transfer that did not take included.
+func (g *Group) LeaderTransfers() uint64 { return g.transfers.Load() }
+
 // balanceLocked is called every tick with g.mu held; it hands leadership to the preferred member when all the
 // conditions above hold. The caller flushes the Ready it makes.
 func (g *Group) balanceLocked() {
@@ -123,6 +127,7 @@ func (g *Group) balanceLocked() {
 		return
 	}
 	g.raw.TransferLeader(preferred)
+	g.transfers.Add(1)
 	b.target, b.deadline = preferred, now.Add(max(g.leaderWait, time.Second))
 	b.notBefore = now.Add(balance.cooldown)
 }

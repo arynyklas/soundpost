@@ -9,8 +9,11 @@ import (
 	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func sourceCredential(s *auth.Service, r *http.Request) (auth.SourceCredential, error) {
@@ -36,6 +39,11 @@ func sourceCredential(s *auth.Service, r *http.Request) (auth.SourceCredential, 
 	return s.AuthenticateSource(r.Context(), raw, r.Header.Get("Origin"), false)
 }
 func ingestReply(w http.ResponseWriter, r *http.Request, v any, e error) {
+	ingestReplyAfter(w, r, v, e, "1")
+}
+
+// ingestReplyAfter is ingestReply that tells a sender whose request was refused as retryable to wait retryAfter seconds.
+func ingestReplyAfter(w http.ResponseWriter, r *http.Request, v any, e error, retryAfter string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if e == nil {
@@ -51,7 +59,7 @@ func ingestReply(w http.ResponseWriter, r *http.Request, v any, e error) {
 	status := ingestStatus(f.Code)
 	if status == 429 || status == 503 {
 		copyF.Retryable = true
-		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Retry-After", retryAfter)
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(copyF)
@@ -108,7 +116,19 @@ func RegisterIngestRoutes(mux *http.ServeMux, a *auth.Service, s *ingest.Service
 		})
 	}
 	mux.HandleFunc("POST /ingest/v1/batches", func(w http.ResponseWriter, r *http.Request) {
+		// The bound comes before anything is done for the request (no credential check, no body read): a refusal costs a counter and
+		// the answer. The sender retries after the Retry-After, spread over 1-3 s so that the senders refused together do not return together.
+		if !s.Enter() {
+			ingestReplyAfter(w, r, nil, model.Fail(model.Timeout), strconv.Itoa(1+rand.IntN(3)))
+			return
+		}
+		defer s.Leave()
+		// The control reads that precede the admission of this batch (who the source is, whether it still is, the scope, the
+		// retention, the reservation) share one linearizable read; the revalidation before the receipt is answered makes its own.
+		r = r.WithContext(model.WithReadShare(r.Context()))
+		authFrom := time.Now()
 		c, e := sourceCredential(a, r)
+		ingest.NoteAuthenticate(authFrom)
 		if e != nil {
 			ingestReply(w, r, nil, e)
 			return

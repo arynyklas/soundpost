@@ -11,13 +11,41 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const proposalPath = "/internal/raft/v1/propose/"
+
+// applicationHeader and entryHeader carry the application index a forwarded proposal names and its identity, so that the leader
+// can refuse a proposal whose index has moved before the body is read.
+const (
+	applicationHeader = "X-Soundpost-Application-Index"
+	entryHeader       = "X-Soundpost-Entry"
+)
+
+// proposalsRefusedEarly counts the forwarded proposals the leader refused as stale from their headers, proposalBodiesRead the
+// bodies it read.
+var proposalsRefusedEarly, proposalBodiesRead atomic.Uint64
+
+// applicationMoved says whether the leader would refuse the entry id, which names the application index n, as stale (proposeOneLocked:
+// the log's application index is not n-1). An entry the leader already holds, in flight or decided, is answered from the table
+// whatever its index says, so it is never refused here.
+func (g *Group) applicationMoved(id model.ID, n uint64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, ok := g.completed[id]; ok {
+		return false
+	}
+	if _, ok := g.logCommands[id]; ok {
+		return false
+	}
+	return g.logApplication != ^uint64(0) && g.logApplication+1 != n
+}
 
 type forwardedResult struct {
 	Committed *CommittedEntry `json:"committed,omitempty"`
@@ -45,14 +73,24 @@ func (g *Group) transportMembersLocked() Members {
 	}
 	return members
 }
-func (t *MTLS) peerClient(target Member) (*http.Client, error) {
+
+// peerClient is the HTTP client of the connection a peer's appends, calls and proposals share.
+func (t *MTLS) peerClient(target Member) (*http.Client, error) { return t.laneClient(target, "") }
+
+// beatClient is the HTTP client of a connection of its own to the peer, which only the coalesced heartbeats use
+// (transport_batch.go). A heartbeat that shares the connection of the appends of 65 groups waits in its socket buffer and its
+// flow-control window behind every megabyte of them, which on a link that carries 80 Mbit/s of appends is a good part of a
+// leader's election timeout; on a connection of its own it is a flow the sender's queue discipline serves ahead of the bulk ones.
+func (t *MTLS) beatClient(target Member) (*http.Client, error) { return t.laneClient(target, "|beat") }
+
+func (t *MTLS) laneClient(target Member, lane string) (*http.Client, error) {
 	u, err := url.Parse(target.Address)
 	if err != nil || u.Scheme != "https" || target.ID == 0 {
 		return nil, ErrInvalid
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := target.Address + "|" + target.NodeIdentity
+	key := target.Address + "|" + target.NodeIdentity + lane
 	if client := t.clients[key]; client != nil {
 		return client, nil
 	}
@@ -63,7 +101,7 @@ func (t *MTLS) peerClient(target Member) (*http.Client, error) {
 		}
 		return nil
 	}}
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: cfg, ForceAttemptHTTP2: true, DialContext: t.dialer.DialContext}, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: cfg, ForceAttemptHTTP2: true, DialContext: t.dialer.DialContext, ExpectContinueTimeout: time.Second}, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	t.clients[key] = client
 	return client, nil
 }
@@ -99,6 +137,12 @@ func (t *MTLS) ForwardPropose(ctx context.Context, group model.ID, entry Entry) 
 		return CommittedEntry{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if entry.ApplicationIndex != 0 {
+		// Ask the leader to judge the index before the body is sent (serveProposal): a proposal that lost the race costs a header.
+		request.Header.Set(applicationHeader, strconv.FormatUint(entry.ApplicationIndex, 10))
+		request.Header.Set(entryHeader, entry.ID.String())
+		request.Header.Set("Expect", "100-continue")
+	}
 	request.Header.Set("X-Soundpost-Raft-Hop", "1")
 	response, err := client.Do(request)
 	if err != nil {
@@ -119,7 +163,11 @@ func (t *MTLS) ForwardPropose(ctx context.Context, group model.ID, entry Entry) 
 	if response.StatusCode != http.StatusOK || result.Committed == nil || result.Committed.Group != group || result.Committed.Entry.ID != entry.ID {
 		return CommittedEntry{}, ErrUnavailable
 	}
-	return *result.Committed, nil
+	committed := *result.Committed
+	if committed.Entry.Payload == nil && committed.Entry.Original == nil {
+		committed.Entry.Payload = entry.Payload // the leader does not echo the command the forwarder sent
+	}
+	return committed, nil
 }
 func forwardedError(code model.Code) error {
 	switch code {
@@ -200,6 +248,21 @@ func (t *MTLS) serveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := g.Status()
+	// A proposal that names the application index it was computed for is judged before its body is read: a follower that lost the
+	// race for the index (the control group's proposals: every one of a round is computed against the revision its proposer read)
+	// is answered stale at once, and with `Expect: 100-continue` its body never leaves the follower (see applicationMoved).
+	if raw := r.Header.Get(applicationHeader); raw != "" {
+		var id model.ID
+		n, perr := strconv.ParseUint(raw, 10, 64)
+		if perr == nil && n != 0 && id.UnmarshalText([]byte(r.Header.Get(entryHeader))) == nil && status.ID == status.Leader && g.applicationMoved(id, n) {
+			proposalsRefusedEarly.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(forwardedResult{Code: model.Stale})
+			return
+		}
+	}
+	proposalBodiesRead.Add(1)
 	if status.ID != status.Leader {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(forwardedResult{Code: model.Unavailable})
@@ -229,5 +292,6 @@ func (t *MTLS) serveProposal(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(forwardedResult{Code: forwardedCode(err)})
 		return
 	}
+	committed.Entry.Payload = nil // the forwarder holds the command it sent: its payload is not carried back (a copy: the retry table is untouched)
 	_ = json.NewEncoder(w).Encode(forwardedResult{Committed: &committed})
 }

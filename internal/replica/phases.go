@@ -86,3 +86,7 @@ func (g *Group) TickLagMax() time.Duration { return time.Duration(g.phases.tickL
 // previous call, which resets it. The messages Tick and Step produce leave with the next Ready, so this is the longest a
 // heartbeat can wait for the stage.
 func (g *Group) CycleMax() time.Duration { return time.Duration(g.phases.cycleMax.Swap(0)) }
+
+// ReadCalls is how many ReadIndex calls the group answered through a round (a solo group answers none): what a request that
+// reads the state several times costs the quorum.
+func (g *Group) ReadCalls() uint64 { return g.phases.readN.Load() }

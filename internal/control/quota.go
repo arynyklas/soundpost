@@ -195,17 +195,27 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 	// the owner's receipts can tell: the first run reports it (errNeedsAdmittedLookup, nothing
 	// committed), the owner is asked, and the update runs again with its answer. A node that
 	// already knows windows were settled asks before the first run.
-	run := func() (e error) {
-		looked, admitted = true, nil
-		if admitted, e = s.admittedBatch(ctx, r); e != nil {
+	// A voter that is not the leader has the leader judge it (admission_remote.go); it judges it itself when no leader serves the call.
+	update := func() error {
+		if handled, e := s.reserveAtLeader(ctx, scope, b, &r, looked, admitted); handled {
 			return e
 		}
 		return s.admissionUpdate(ctx, writerReserveAdmission, body)
 	}
+	run := func() (e error) {
+		looked, admitted = true, nil
+		lookFrom := time.Now()
+		admitted, e = s.admittedBatch(ctx, r)
+		noteStep("admitted_lookup", lookFrom)
+		if e != nil {
+			return e
+		}
+		return update()
+	}
 	var e error
 	if s.settledSeen.Load() {
 		e = run()
-	} else if e = s.admissionUpdate(ctx, writerReserveAdmission, body); errors.Is(e, errNeedsAdmittedLookup) {
+	} else if e = update(); errors.Is(e, errNeedsAdmittedLookup) {
 		s.settledSeen.Store(true)
 		e = run()
 	}
@@ -269,7 +279,14 @@ func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r Final
 	if owner == nil {
 		return model.Fail(model.Unavailable)
 	}
-	if e := owner.VerifyFinalization(ctx, r); e != nil {
+	verifyFrom := time.Now()
+	e := owner.VerifyFinalization(ctx, r)
+	noteStep("verify_finalization", verifyFrom)
+	if e != nil {
+		noteFailure("verify_finalization", e)
+		return e
+	}
+	if handled, e := s.finalizeAtLeader(ctx, scope, r); handled {
 		return e
 	}
 	return s.admissionUpdate(ctx, writerFinalizeAdmission, func(core *State, books admissionBooks) error {

@@ -453,6 +453,21 @@ func (s *indexSet) ForEach(fn func(k, v []byte) error) error {
 // not survive writes to the buckets it reads.
 func (s *indexSet) Cursor() *indexCursor { return newIndexCursor(s.sources()) }
 
+// CursorCached is Cursor for a scan: the blocks of the runs it reads come from the cache of the payload log
+// when it holds them (block_cache.go).
+func (s *indexSet) CursorCached() *indexCursor {
+	sources := s.sources()
+	c := &indexCursor{srcs: make([]cursorSource, len(sources)), h: make(cursorHeap, 0, len(sources))}
+	for i, src := range sources {
+		if run, ok := src.(blockRun); ok {
+			c.srcs[i] = cursorSource{cur: run.cachedCursor(), pri: i}
+		} else {
+			c.srcs[i] = cursorSource{cur: src.Cursor(), pri: i}
+		}
+	}
+	return c
+}
+
 // cursorSource is one bucket of a merged cursor: its cursor, the entry it stands on, its priority (a lower
 // value wins when two sources hold the same key).
 type cursorSource struct {

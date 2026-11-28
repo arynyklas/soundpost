@@ -84,8 +84,17 @@ type orgScope struct {
 // encodings of the state before and after fn are compared, and anything but the organization's own
 // record, appended audit rows and added commands, or an attestation change, bumps the
 // installation-wide AuthorityRevision exactly as an unclassified writer does.
+//
+// A command whose proposal lost the application-index race to another control commit is judged again
+// on a fresh read of the state and proposed again (retryLostProposals), as a retention command is:
+// fn re-judges the state it is given, the caller's own view (the expected epoch against the object it
+// changes) included, so a save whose view still holds commits, and one whose object changed meanwhile
+// is the conflict it always was. Without it an admin save made through any voter was refused with the
+// plain `stale` (HTTP 409) whenever any other voter committed anything between its read and its
+// proposal, which nothing the caller did explains and repeating the request cured. fn MUST therefore
+// be a function of the state alone: it runs once per attempt, and nothing a run decided carries over.
 func (s *Store) UpdateOrgAuthority(ctx context.Context, org model.ID, fn func(*State) error) error {
-	return s.updateOrgScoped(ctx, classAdmin, func(st *State, name func(model.ID)) error {
+	return s.updateOrgScoped(retryLostProposals(ctx), classAdmin, func(st *State, name func(model.ID)) error {
 		name(org)
 		return fn(st)
 	})

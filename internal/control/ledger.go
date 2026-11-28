@@ -54,10 +54,12 @@ const (
 	tableCommands              // command ID -> the Result it committed (JSON)
 	tableCommandOwners         // command ID -> the binding (principal:org:kind) that committed it (raw bytes)
 	tableJobPositions          // job producer position key (org:project) -> JobPositionRecord (JSON, as the blob held it)
+	tableRuleBooks             // rule book key (org:project:rule) -> RuleBook (JSON, as the blob held it); empty while the rule facts are members of the blob (D108)
+	tableRuleOutputs           // rule outbox key (org:project:rule:id) -> RuleOutput (JSON)
 	ledgerTableCount
 )
 
-var ledgerTables = [ledgerTableCount]string{"adm_res", "adm_keys", "adm_quota", "adm_series", "adm_spans", "adm_windows", "adm_charge", "adm_cseries", "job_books", "issue_books", "grouping_issues", "cmd_results", "cmd_owners", "job_positions"}
+var ledgerTables = [ledgerTableCount]string{"adm_res", "adm_keys", "adm_quota", "adm_series", "adm_spans", "adm_windows", "adm_charge", "adm_cseries", "job_books", "issue_books", "grouping_issues", "cmd_results", "cmd_owners", "job_positions", "rule_books", "rule_outputs"}
 
 var (
 	ledgerAccKey    = []byte("ledger_acc")
@@ -69,6 +71,10 @@ var (
 	// this build finds the two apart and takes the books from the blob (migrateLedger) instead of
 	// trusting a ledger that is older than the blob.
 	ledgerSealKey = []byte("ledger_seal")
+	// ledgerRulesKey says that the file keeps the rule books and the rule outbox in the ledger (D108): written, with the
+	// move of the two members out of the blob, by the transaction that applies the command that marks the installation
+	// (model.RuleLedgerKey), or by an install of a state that carries the mark. Absent: they are members of the blob.
+	ledgerRulesKey = []byte("ledger_rules")
 	// openIndexBucket is the bucket of the open-reservation index (ledgerTx.open) and ledgerOpenKey the ledger
 	// accumulator it was last brought up to date with: the index belongs to the ledger only while the two agree,
 	// and a file whose ledger a build without the index changed finds them apart and rebuilds it.
@@ -122,6 +128,11 @@ type ledgerMembers struct {
 	Commands       map[string]model.ControlResult
 	CommandOwners  map[string]string
 	JobPositions   map[string]json.RawMessage
+	// RuleBooks and RuleOutputs are the rule facts of an installation that keeps them in the ledger (D108, Rules): a
+	// record per rule and one per outbox entry. Rules says the members carry them (the blob holds them otherwise).
+	RuleBooks   map[string]json.RawMessage
+	RuleOutputs map[string]json.RawMessage
+	Rules       bool
 }
 
 // memberScope says which of the ledger's members a transition reads or writes: the admission books, the
@@ -133,6 +144,10 @@ const (
 	scopeAdmission memberScope = 1 << iota
 	scopeBooks
 	scopeCommands
+	// scopeRules is the rule books and the rule outbox. It is no part of scopeAll: a file holds them in the ledger only
+	// after the command that marks it (model.RuleLedgerKey), and a transition names them (and a read assembles them)
+	// only for such a file (ledgerTx.rules).
+	scopeRules
 	scopeAll = scopeAdmission | scopeBooks | scopeCommands
 )
 
@@ -143,12 +158,21 @@ func tableScope(table int) memberScope {
 		return scopeBooks
 	case tableCommands, tableCommandOwners:
 		return scopeCommands
+	case tableRuleBooks, tableRuleOutputs:
+		return scopeRules
 	}
 	return scopeAdmission
 }
 
-// detachLedger moves every ledger member out of st (they are empty in what the blob holds).
-func detachLedger(st *State) ledgerMembers { return detachScope(st, scopeAll) }
+// detachLedger moves every ledger member out of st (they are empty in what the blob holds). The rule books and the rule
+// outbox go with them when the state carries the mark of a ledger that holds them (model.RuleLedgerKey).
+func detachLedger(st *State) ledgerMembers {
+	scope := scopeAll
+	if st.RulesInLedger() {
+		scope |= scopeRules
+	}
+	return detachScope(st, scope)
+}
 
 // detachScope moves the members of scope out of st and leaves the others where they are.
 func detachScope(st *State, scope memberScope) (m ledgerMembers) {
@@ -164,11 +188,21 @@ func detachScope(st *State, scope memberScope) (m ledgerMembers) {
 		m.Commands, m.CommandOwners = st.Commands, st.CommandOwners
 		st.Commands, st.CommandOwners = nil, nil
 	}
+	if scope&scopeRules != 0 {
+		m.RuleBooks, m.RuleOutputs, m.Rules = st.RuleBooks, st.RuleOutputs, true
+		st.RuleBooks, st.RuleOutputs = nil, nil
+	}
 	return m
 }
 
 // attachLedger is the inverse of detachLedger.
-func attachLedger(st *State, m ledgerMembers) { attachScope(st, m, scopeAll) }
+func attachLedger(st *State, m ledgerMembers) {
+	scope := scopeAll
+	if m.Rules {
+		scope |= scopeRules
+	}
+	attachScope(st, m, scope)
+}
 
 // attachScope is the inverse of detachScope.
 func attachScope(st *State, m ledgerMembers, scope memberScope) {
@@ -180,6 +214,9 @@ func attachScope(st *State, m ledgerMembers, scope memberScope) {
 	}
 	if scope&scopeCommands != 0 {
 		st.Commands, st.CommandOwners = m.Commands, m.CommandOwners
+	}
+	if scope&scopeRules != 0 {
+		st.RuleBooks, st.RuleOutputs = m.RuleBooks, m.RuleOutputs
 	}
 }
 
@@ -248,6 +285,12 @@ func (m ledgerMembers) normalized() ledgerMembers {
 	if len(m.CommandOwners) == 0 {
 		m.CommandOwners = nil
 	}
+	if len(m.RuleBooks) == 0 {
+		m.RuleBooks = nil
+	}
+	if len(m.RuleOutputs) == 0 {
+		m.RuleOutputs = nil
+	}
 	return m
 }
 
@@ -272,10 +315,16 @@ func bookRoot(name string) bool {
 	return false
 }
 
-// splitLedgerOps separates the ops that address the ledger from the ones that address the blob.
-func splitLedgerOps(ops []patchOp) (blob, ledger []patchOp) {
+// ruleRoot says whether the first member of a patch path is one of the rule facts that a file keeps in the ledger once it
+// carries the mark of it (model.RuleLedgerKey): each record is addressed as [member, key], as the books' are. For any other
+// file the same paths address the blob, so ledgerRoot does not name them.
+func ruleRoot(name string) bool { return name == "RuleBooks" || name == "RuleOutputs" }
+
+// splitLedgerOps separates the ops that address the ledger from the ones that address the blob. rules says that the file
+// keeps the rule facts in the ledger.
+func splitLedgerOps(ops []patchOp, rules bool) (blob, ledger []patchOp) {
 	for _, op := range ops {
-		if len(op.Path) > 0 && ledgerRoot(op.Path[0]) {
+		if len(op.Path) > 0 && (ledgerRoot(op.Path[0]) || rules && ruleRoot(op.Path[0])) {
 			ledger = append(ledger, op)
 		} else {
 			blob = append(blob, op)
@@ -291,6 +340,15 @@ var quotaFields = map[string]bool{"bytes": true, "max_bytes": true, "max_series"
 // with it before any state is read.
 func validLedgerOp(op patchOp) bool {
 	p := op.Path
+	if op.Op == opReserve || op.Op == opFinalize {
+		return len(p) == 2 && p[0] == "Reservations"
+	}
+	if op.Op == opSettle {
+		return len(p) == 2 && p[0] == "settlement" && p[1] == "stl"
+	}
+	if op.Op == opRecord {
+		return len(p) == 2 && (p[0] == "JobBooks" || p[0] == "GroupingIssues")
+	}
 	set, del := op.Op == opSet, op.Op == opDelete
 	if !set && !del {
 		return false
@@ -324,8 +382,10 @@ func validLedgerOp(op patchOp) bool {
 
 // ledgerTx is the ledger inside one bolt transaction.
 type ledgerTx struct {
-	ctrl *bolt.Bucket
-	t    [ledgerTableCount]ledgerTable
+	// rules says that the file keeps the rule books and the rule outbox in the ledger (ledgerRulesKey).
+	rules bool
+	ctrl  *bolt.Bucket
+	t     [ledgerTableCount]ledgerTable
 	// ov is the overlay of the random-key tables (ledger_overlay.go): the reservation keys and the series tables.
 	ov    *ovTx
 	tx    *bolt.Tx
@@ -420,6 +480,7 @@ func openLedger(tx *bolt.Tx) (*ledgerTx, error) {
 		copy(l.acc[:], raw)
 	}
 	l.open = tx.Bucket(openIndexBucket) // nil in a file that does not have it yet (ensureOpenIndex)
+	l.rules = l.ctrl.Get(ledgerRulesKey) != nil
 	return l, nil
 }
 
@@ -636,7 +697,7 @@ func (l *ledgerTx) chargeSeries(tier, id string) uint64 {
 }
 
 // members assembles the members of the State (in the normalized form).
-func (l *ledgerTx) members() (ledgerMembers, error) { return l.membersOf(scopeAll) }
+func (l *ledgerTx) members() (ledgerMembers, error) { return l.membersOf(l.allScope()) }
 
 // membersOf assembles the members of scope (in the normalized form); the others come empty.
 func (l *ledgerTx) membersOf(scope memberScope) (m ledgerMembers, err error) {
@@ -708,6 +769,20 @@ func (l *ledgerTx) membersOfKeyed(scope memberScope, command string) (m ledgerMe
 			m.JobPositions = map[string]json.RawMessage{}
 		}
 		m.JobPositions[string(k)] = bytes.Clone(v)
+		return nil
+	})
+	each(tableRuleBooks, func(k, v []byte) error {
+		if m.RuleBooks == nil {
+			m.RuleBooks = map[string]json.RawMessage{}
+		}
+		m.RuleBooks[string(k)] = bytes.Clone(v)
+		return nil
+	})
+	each(tableRuleOutputs, func(k, v []byte) error {
+		if m.RuleOutputs == nil {
+			m.RuleOutputs = map[string]json.RawMessage{}
+		}
+		m.RuleOutputs[string(k)] = bytes.Clone(v)
 		return nil
 	})
 	each(tableCommandOwners, func(k, v []byte) error {
@@ -807,6 +882,7 @@ func (l *ledgerTx) membersOfKeyed(scope memberScope, command string) (m ledgerMe
 		s.Charges[string(tier)] = c
 		return nil
 	})
+	m.Rules = l.rules && scope&scopeRules != 0
 	return m, err
 }
 
@@ -939,6 +1015,19 @@ func (l *ledgerTx) replace(m ledgerMembers) error {
 			return err
 		}
 	}
+	for key, raw := range m.RuleBooks {
+		if err := l.putBook(tableRuleBooks, key, raw); err != nil {
+			return err
+		}
+	}
+	for key, raw := range m.RuleOutputs {
+		if err := l.putBook(tableRuleOutputs, key, raw); err != nil {
+			return err
+		}
+	}
+	if err := l.setRules(m.Rules); err != nil {
+		return err
+	}
 	return l.flush()
 }
 
@@ -955,6 +1044,10 @@ func recordTable(member string) int {
 		return tableCommands
 	case "JobPositions":
 		return tableJobPositions
+	case "RuleBooks":
+		return tableRuleBooks
+	case "RuleOutputs":
+		return tableRuleOutputs
 	}
 	return tableCommandOwners
 }
@@ -1162,6 +1255,16 @@ func decodeValue(raw []byte, v any) error {
 }
 
 func (a *opApplier) apply(op patchOp) error {
+	switch op.Op {
+	case opReserve:
+		return a.reserve(op)
+	case opFinalize:
+		return a.finalize(op)
+	case opSettle:
+		return a.settle(op)
+	case opRecord:
+		return a.record(op)
+	}
 	if wholeMemberOp(op) {
 		return model.Fail(model.Corrupt) // a whole member is an op of the blob layout, never of the ledger
 	}
@@ -1182,7 +1285,7 @@ func (a *opApplier) apply(op patchOp) error {
 			return model.Fail(model.Corrupt)
 		}
 		return l.put(tableReservations, []byte(p[1]), raw)
-	case "JobBooks", "IssueBooks", "GroupingIssues", "Commands", "CommandOwners", "JobPositions":
+	case "JobBooks", "IssueBooks", "GroupingIssues", "Commands", "CommandOwners", "JobPositions", "RuleBooks", "RuleOutputs":
 		table := recordTable(p[0])
 		if !set {
 			_, err := l.del(table, []byte(p[1]))
@@ -1284,12 +1387,7 @@ func (a *opApplier) quota(op patchOp) error {
 		if err = decodeValue(op.Value, &n); err != nil || n == 0 {
 			return model.Fail(model.Corrupt)
 		}
-		if err = l.put(tableSeries, key, u64(n)); err != nil {
-			return err
-		}
-		if !had {
-			hs.h.Series++
-		}
+		return a.setSeriesCount(tier, p[3], n)
 	}
 	return nil
 }
@@ -1401,6 +1499,16 @@ func (l *ledgerTx) verifyOp(op patchOp) error {
 		return model.Fail(model.Corrupt)
 	}
 	p := op.Path
+	switch op.Op {
+	case opReserve:
+		return l.verifyReserve(op)
+	case opFinalize:
+		return l.verifyFinalize(op)
+	case opSettle:
+		return l.verifySettle(op)
+	case opRecord:
+		return l.verifyRecord(op)
+	}
 	set := op.Op == opSet
 	bad := model.Fail(model.Corrupt)
 	switch p[0] {
@@ -1419,7 +1527,7 @@ func (l *ledgerTx) verifyOp(op patchOp) error {
 		if decodeValue(op.Value, &want) != nil || !ok || !sameValue(r, want) {
 			return bad
 		}
-	case "JobBooks", "IssueBooks", "GroupingIssues", "Commands", "CommandOwners", "JobPositions":
+	case "JobBooks", "IssueBooks", "GroupingIssues", "Commands", "CommandOwners", "JobPositions", "RuleBooks", "RuleOutputs":
 		table := recordTable(p[0])
 		got := l.t[table].Get([]byte(p[1]))
 		if !set {
@@ -1852,6 +1960,8 @@ func diffLedger(before, after ledgerMembers) []patchOp {
 		}
 	}
 	diffBooks("JobPositions", before.JobPositions, after.JobPositions)
+	diffBooks("RuleBooks", before.RuleBooks, after.RuleBooks)
+	diffBooks("RuleOutputs", before.RuleOutputs, after.RuleOutputs)
 	// The settlement is small next to the books and written only by SettleAdmissions: one op for it.
 	if !sameValue(before.Settlement, after.Settlement) {
 		if after.Settlement == nil {
@@ -2077,10 +2187,12 @@ func moveBooksToLedger(tx *bolt.Tx, ctrl *bolt.Bucket) error {
 	return ctrl.Put(ledgerSealKey, ctrl.Get(stateSealKey))
 }
 
-// noteLayout records the layout of the file (layoutLedger).
+// noteLayout records the layout of the file (layoutLedger, ruleLedger).
 func (s *Store) noteLayout() {
 	_ = s.db.View(func(tx *bolt.Tx) error {
-		s.layoutLedger.Store(ledgerLayout(tx.Bucket([]byte("control"))))
+		ctrl := tx.Bucket([]byte("control"))
+		s.layoutLedger.Store(ledgerLayout(ctrl))
+		s.ruleLedger.Store(ctrl != nil && ctrl.Get(ledgerRulesKey) != nil)
 		return nil
 	})
 }
@@ -2126,7 +2238,7 @@ func onlyStepOps(ops []patchOp) bool {
 // whole states (a map that was null becomes the map). A file that keeps them in the ledger refuses it.
 func wholeMemberOp(op patchOp) bool {
 	p := op.Path
-	return len(p) == 1 && (p[0] == "Reservations" || p[0] == "AdmissionKeys" || p[0] == "Quotas" || bookRoot(p[0])) && (op.Op == opSet || op.Op == opDelete)
+	return len(p) == 1 && (p[0] == "Reservations" || p[0] == "AdmissionKeys" || p[0] == "Quotas" || bookRoot(p[0]) || ruleRoot(p[0])) && (op.Op == opSet || op.Op == opDelete)
 }
 
 // moveSeriesToBlocks moves a file of the layout before the overlay (previousLedgerFormat) to this one: the series

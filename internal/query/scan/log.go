@@ -12,7 +12,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/query/value"
 	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
-	"strings"
+	"unsafe"
 )
 
 type LogSelection struct {
@@ -73,7 +73,7 @@ func (s *logSource) Select(ctx context.Context, r LogSelection) (LogIterator, er
 		}
 		selectors = append(selectors, storage.Matcher{Target: storage.MatchField, Name: "source_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: r.Source.String()}})
 	}
-	rows, err := s.scanner.Scan(ctx, s.scope, storage.ScanRequest{Projects: []model.ID{s.project}, Signal: model.Log, Start: r.Start, End: r.End, Selectors: selectors, Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldLog}, Fence: s.fence})
+	rows, err := s.scanner.Scan(ctx, s.scope, storage.ScanRequest{Projects: []model.ID{s.project}, Signal: model.Log, Start: r.Start, End: r.End, Selectors: selectors, Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldLog}, Fence: s.fence, MaxPageRows: storage.MaxScanPageRows})
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +93,22 @@ type logIterator struct {
 	partial, closed, exhausted bool
 	terminal                   error
 	marks                      []model.Cursor
-	held                       int64
-	current                    LogRow
+	// sawPage is set once a page was read: from then on the cut is certified when it is asked for, and
+	// marked once it is certified for good (at the end of the rows or when the iterator closes early).
+	// Certifying it at every page cost a second release barrier, a fence over every group of the cut
+	// and an authority read, for each page.
+	sawPage, marked bool
+	held            int64
+	current         LogRow
 }
 
-func (i *logIterator) Watermarks() []model.Cursor { return append([]model.Cursor(nil), i.marks...) }
-func (i *logIterator) Partial() bool              { return i.partial }
+func (i *logIterator) Watermarks() []model.Cursor {
+	if !i.marked && !i.closed && i.sawPage {
+		return append([]model.Cursor(nil), i.rows.Watermarks()...)
+	}
+	return append([]model.Cursor(nil), i.marks...)
+}
+func (i *logIterator) Partial() bool { return i.partial }
 func (i *logIterator) release() {
 	i.selection.Account.Release(i.held)
 	i.held = 0
@@ -109,6 +119,11 @@ func (i *logIterator) Close() error {
 		return nil
 	}
 	i.closed = true
+	if !i.marked && i.sawPage && i.terminal == nil {
+		// Closed before the end of the rows: the cut is certified now, while the rows can still say it.
+		i.marks = append([]model.Cursor(nil), i.rows.Watermarks()...)
+		i.marked = true
+	}
 	i.release()
 	i.page = storage.Page{}
 	return i.rows.Close()
@@ -149,6 +164,7 @@ func (i *logIterator) Next(ctx context.Context) (LogRow, error) {
 					return i.fail(err)
 				}
 				i.marks = append([]model.Cursor(nil), i.rows.Watermarks()...)
+				i.marked = true
 				if err = i.Close(); err != nil {
 					return i.fail(err)
 				}
@@ -163,7 +179,7 @@ func (i *logIterator) Next(ctx context.Context) (LogRow, error) {
 				return i.fail(model.Fail(model.Unavailable))
 			}
 			i.partial = i.partial || page.Partial
-			i.marks = append([]model.Cursor(nil), i.rows.Watermarks()...)
+			i.sawPage = true
 			i.page = page
 			i.index = 0
 			if n == 0 {
@@ -200,42 +216,17 @@ func (i *logIterator) Next(ctx context.Context) (LogRow, error) {
 		for _, l := range log.StreamLabels {
 			cost += int64(32 + len(l.Name) + len(l.Value))
 		}
-		for _, fields := range []map[string]model.Scalar{log.Fields, log.Metadata} {
-			for n, v := range fields {
-				raw, e := v.MarshalJSON()
-				if e != nil {
-					return i.fail(model.Fail(model.Corrupt))
-				}
-				cost += int64(64 + len(n) + len(raw))
-			}
+		for n, v := range log.Fields {
+			cost += int64(64 + len(n) + v.JSONLen())
+		}
+		for n, v := range log.Metadata {
+			cost += int64(64 + len(n) + v.JSONLen())
 		}
 		if err = i.selection.Account.Reserve(cost); err != nil {
 			return i.fail(err)
 		}
 		i.held = cost
-		owned := *log
-		owned.Line = strings.Clone(log.Line)
-		owned.TemplateID = strings.Clone(log.TemplateID)
-		owned.Severity = strings.Clone(log.Severity)
-		owned.StreamLabels = value.CloneLabels(log.StreamLabels)
-		owned.Fields = cloneScalars(log.Fields)
-		owned.Metadata = cloneScalars(log.Metadata)
-		if log.Timestamp != nil {
-			at := *log.Timestamp
-			owned.Timestamp = &at
-		}
-		if log.Trace != nil {
-			id := *log.Trace
-			owned.Trace = &id
-		}
-		if log.Span != nil {
-			id := *log.Span
-			owned.Span = &id
-		}
-		if log.Run != nil {
-			id := *log.Run
-			owned.Run = &id
-		}
+		owned := ownLogRecord(log)
 		if err = i.selection.Account.Check(ctx); err != nil {
 			return i.fail(err)
 		}
@@ -243,10 +234,66 @@ func (i *logIterator) Next(ctx context.Context) (LogRow, error) {
 		return i.current, nil
 	}
 }
-func cloneScalars(in map[string]model.Scalar) map[string]model.Scalar {
-	out := make(map[string]model.Scalar, len(in))
-	for n, v := range in {
-		out[strings.Clone(n)] = v
+
+// ownedPointers holds the optional scalars of one owned row in one allocation.
+type ownedPointers struct {
+	at    model.UnixNano
+	trace model.ID
+	span  model.SpanID
+	run   model.ID
+}
+
+// ownLogRecord is a copy of a stored record that owns its strings and slices. The strings of a row (the
+// line, the template, the severity, the label names and values) are copied into one buffer, the labels are
+// one slice and the optional pointers one struct: a dozen allocations per row before, two for a row with
+// labels. The field and metadata maps are shared read-only, see below.
+func ownLogRecord(log *model.LogRecord) model.LogRecord {
+	size := len(log.Line) + len(log.TemplateID) + len(log.Severity) + len(log.SourceClass)
+	for _, l := range log.StreamLabels {
+		size += len(l.Name) + len(l.Value)
 	}
-	return out
+	buf := make([]byte, 0, size)
+	own := func(s string) string {
+		if s == "" {
+			return ""
+		}
+		at := len(buf)
+		buf = append(buf, s...)
+		return unsafe.String(&buf[at], len(s))
+	}
+	owned := *log
+	owned.Line = own(log.Line)
+	owned.TemplateID = own(log.TemplateID)
+	owned.Severity = own(log.Severity)
+	owned.SourceClass = own(log.SourceClass)
+	if log.StreamLabels != nil {
+		owned.StreamLabels = make(model.Labels, len(log.StreamLabels))
+		for i, l := range log.StreamLabels {
+			owned.StreamLabels[i] = model.Label{Name: own(l.Name), Value: own(l.Value)}
+		}
+	}
+	// owned.Fields and owned.Metadata stay the stored maps: the decoded page they belong to is immutable and
+	// shared (the page cache), the pipeline and the evaluators only read them, and the scalars in them are
+	// strings of the page either way. Copying them was a map allocation and an insert per field of every
+	// row (34 CPU seconds, with the strings, of the 24 h log class in a 60 s mix profile).
+	if log.Timestamp != nil || log.Trace != nil || log.Span != nil || log.Run != nil {
+		p := new(ownedPointers)
+		if log.Timestamp != nil {
+			p.at = *log.Timestamp
+			owned.Timestamp = &p.at
+		}
+		if log.Trace != nil {
+			p.trace = *log.Trace
+			owned.Trace = &p.trace
+		}
+		if log.Span != nil {
+			p.span = *log.Span
+			owned.Span = &p.span
+		}
+		if log.Run != nil {
+			p.run = *log.Run
+			owned.Run = &p.run
+		}
+	}
+	return owned
 }

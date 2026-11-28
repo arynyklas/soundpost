@@ -18,6 +18,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
+	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -80,9 +81,14 @@ type LedgerMachine interface {
 // selected snapshot when that holds a file of the same name, size and hash (a hard link,
 // or a verified copy where links are unavailable). That is how a cut stays incremental.
 type PinnedFile struct {
-	Name   string
-	Path   string
-	Reuse  bool
+	Name  string
+	Path  string
+	Reuse bool
+	// Own gives the file at Path to the snapshot store: the machine wrote it for this cut, synced it and states its Size and SHA-256, and
+	// will not write it again. The store moves it into the snapshot directory instead of copying it (a copy where a move is not possible:
+	// another file system), so that a cut writes the bytes once. Nothing is shared with the snapshot afterwards, no inode and no later
+	// write: the machine's release finds the name gone.
+	Own    bool
 	Size   uint64
 	SHA256 model.Hash
 }
@@ -102,6 +108,34 @@ type FileMachine interface {
 // handed over by SnapshotStoreUser.
 type CompactMachine interface {
 	CompactSnapshot() ([]byte, error)
+}
+
+// CutPinner is optionally implemented by a machine that can answer a snapshot cut for one applied index after the group
+// has gone on applying. A cut holds the group's ready stage and lock (lockAll) for as long as it asks the machine for its
+// state, its deletion ledger and its pinned files, and a group that holds them runs no cycle and takes no tick or step: a
+// machine whose derivation takes a long time (a data group's window table decodes every command of its open window) kept
+// a leader silent for the length of every cut. With a CutPinner the cut holds them only for what the applied index fixes
+// (the index and term, the members, the retry table and PinCut), and the PinnedCut derives the rest without them.
+//
+// PinCut is called with both locks held, at the applied index of the cut, and nothing is applied while it runs. It
+// captures what only that index fixes and does no derivation, no I/O and no waiting, and calls nothing of the group.
+// What it returns holds nothing that outlives the cut except through PinFiles' release.
+//
+// A machine implements it only when everything the PinnedCut derives is a function of its state at that index that no
+// later command changes. The retry table of such a cut is always inline in the envelope, whatever CompactStateMachine
+// says: that decision reads the state, which a pinned cut derives after the retry table is taken.
+type CutPinner interface {
+	PinCut() (PinnedCut, error)
+}
+
+// PinnedCut answers LedgerMachine, CompactMachine and FileMachine for the index its CutPinner was called at, whatever the
+// machine has applied since. The group calls CompactSnapshot, DeletionLedger and PinFiles, in that order, once each,
+// without any lock of its own and while it goes on applying, from the one cut that holds the group's cutMu. A ledger that
+// names a command after the index of the cut is refused (ErrNoLedger) as it is for any machine.
+type PinnedCut interface {
+	LedgerMachine
+	CompactMachine
+	FileMachine
 }
 
 // SnapshotStoreUser is optionally implemented by a machine that resolves a compact state or
@@ -288,67 +322,26 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	lockBegan := time.Now()
-	g.lockAll()
-	if g.failed || g.closed || g.applied == 0 {
-		g.unlockAll()
-		return Snapshot{}, ErrUnavailable
-	}
-	if g.application < uint64(at.Index) {
-		g.unlockAll()
-		return Snapshot{}, ErrStale
-	}
-	index := g.applied
-	term, err := g.memory.Term(index)
+	pinner, _ := g.machine.(CutPinner)
+	c, err := g.captureCut(at, ledgerMachine, pinner)
 	if err != nil {
-		g.unlockAll()
 		return Snapshot{}, err
 	}
-	var state []byte
-	if compact, ok := g.machine.(CompactMachine); ok {
-		state, err = compact.CompactSnapshot()
-	} else {
-		state, err = g.machine.Snapshot()
-	}
-	if err != nil {
-		g.unlockAll()
-		return Snapshot{}, err
-	}
-	ledger, err := ledgerMachine.DeletionLedger()
-	if err != nil {
-		g.unlockAll()
-		return Snapshot{}, err
-	}
-	var pinned []PinnedFile
-	release := func() {}
-	if files, ok := g.machine.(FileMachine); ok {
-		if err = g.trip("snapshot_pin"); err != nil {
-			g.unlockAll()
-			return Snapshot{}, err
-		}
-		if pinned, release, err = files.PinFiles(); err != nil {
-			g.unlockAll()
+	sinceMax(&g.phases.cutLockNS, &g.phases.cutLockMax, lockBegan)
+	defer func() { c.release() }()
+	if c.pinned != nil { // the machine answers for the index it pinned, without the group's locks
+		if err = g.deriveCut(&c, c.pinned, c.pinned, c.pinned); err != nil {
 			return Snapshot{}, err
 		}
 	}
-	defer func() { release() }()
-	envelope := snapshotEnvelope{Application: g.application, State: state, Members: cloneMembers(g.members), Retiring: append([]Member(nil), g.retiring...)}
-	var plan *retryPlan
-	if g.compactRetry(state) {
-		plan = g.planRetryLocked()
-		envelope.Completed, envelope.RetryFrom = plan.plain, plan.from
-	} else {
-		for _, c := range g.completed {
-			envelope.Completed = append(envelope.Completed, c)
-		}
+	envelopeBegan := time.Now()
+	envelope := c.envelope
+	envelope.State = c.state
+	if c.plan == nil { // the retry table is inline: ordered and marked from the copy the locks guarded
 		envelope.markRetry()
 		sort.Slice(envelope.Completed, func(i, j int) bool { return envelope.Completed[i].Index < envelope.Completed[j].Index })
 	}
-	completed := len(g.completed)
-	conf := g.conf
-	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
-	g.unlockAll()
-	sinceMax(&g.phases.cutLockNS, &g.phases.cutLockMax, lockBegan)
-	envelopeBegan := time.Now()
+	index, term, cursor, conf, plan, completed, ledger, pinned := c.index, c.term, c.cursor, c.conf, c.plan, c.completed, c.ledger, c.files
 	if ledger.Version != 1 || ledger.Group != g.group || ledger.Entries == nil {
 		return Snapshot{}, ErrNoLedger
 	}
@@ -409,7 +402,7 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 		if !safeFileName.MatchString(f.Name) {
 			return Snapshot{}, ErrInvalid
 		}
-		sources = append(sources, bundleSource{name: filePrefix + f.Name, path: f.Path, reuse: f.Reuse, size: f.Size, sum: f.SHA256})
+		sources = append(sources, bundleSource{name: filePrefix + f.Name, path: f.Path, reuse: f.Reuse, own: f.Own, size: f.Size, sum: f.SHA256})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].name < sources[j].name })
 	manifest := SnapshotManifest{Version: snapshotFormat, Group: g.group, Index: index, Term: term, Cursor: cursor, Generation: ledger.Generation}
@@ -430,6 +423,113 @@ func (g *Group) cut(ctx context.Context, at model.Cursor) (Snapshot, error) {
 		g.mu.Unlock()
 	}
 	return snapshot, err
+}
+
+// cutCapture is what a cut takes of the group at its applied index, under the group's locks. For a machine that does not pin
+// (CutPinner) that includes everything the machine derives; for one that does, the pinned cut is derived from afterwards
+// (deriveCut), without the locks.
+type cutCapture struct {
+	index, term uint64
+	cursor      model.Cursor
+	conf        *pb.ConfState
+	envelope    snapshotEnvelope // without the machine's state
+	plan        *retryPlan       // nil: the retry table is inline in the envelope
+	completed   int              // the entries of the retry table, for the phase counters
+	pinned      PinnedCut        // the machine's cut at the index, when it pins
+	state       []byte
+	ledger      Ledger
+	files       []PinnedFile
+	release     func() // never nil: releases what files pinned
+}
+
+// captureCut takes the group's locks and returns what the applied index fixes: its index and term, the members, the retry
+// table (copied, not yet ordered) and the machine's cut. The locks are held for the capture and not a moment longer: a machine
+// that pins (CutPinner) is only asked to pin, and everything it derives comes after (deriveCut); any other machine is asked
+// for its state, ledger and files here, as it always was, because they are its state at this index and nothing else holds it
+// there.
+func (g *Group) captureCut(at model.Cursor, ledgers LedgerMachine, pinner CutPinner) (c cutCapture, err error) {
+	c.release = func() {}
+	g.lockAll()
+	defer g.unlockAll()
+	if g.failed || g.closed || g.applied == 0 {
+		return c, ErrUnavailable
+	}
+	if g.application < uint64(at.Index) {
+		return c, ErrStale
+	}
+	c.index = g.applied
+	if c.term, err = g.memory.Term(c.index); err != nil {
+		return c, err
+	}
+	c.envelope = snapshotEnvelope{Application: g.application, Members: cloneMembers(g.members), Retiring: append([]Member(nil), g.retiring...)}
+	if pinner != nil {
+		if c.pinned, err = pinner.PinCut(); err != nil {
+			return c, err
+		}
+		if c.pinned == nil {
+			return c, ErrInvalid
+		}
+		c.envelope.Completed = g.completedLocked()
+	} else {
+		compact, _ := g.machine.(CompactMachine)
+		files, _ := g.machine.(FileMachine)
+		if err = g.deriveCut(&c, compact, ledgers, files); err != nil {
+			return c, err
+		}
+		if g.compactRetry(c.state) {
+			c.plan = g.planRetryLocked()
+			c.envelope.Completed, c.envelope.RetryFrom = c.plan.plain, c.plan.from
+		} else {
+			c.envelope.Completed = g.completedLocked()
+		}
+	}
+	c.completed = len(g.completed)
+	c.conf = g.conf
+	c.cursor = model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
+	return c, nil
+}
+
+// completedLocked copies the retry table, in no order. g.mu is held.
+func (g *Group) completedLocked() []CommittedEntry {
+	if len(g.completed) == 0 {
+		return nil
+	}
+	out := make([]CommittedEntry, 0, len(g.completed))
+	for _, c := range g.completed {
+		out = append(out, c)
+	}
+	return out
+}
+
+// deriveCut asks the machine (or its pinned cut) for the state, the deletion ledger and the pinned files of the cut. A machine
+// that is not a CompactMachine is asked for its whole state; one that is not a FileMachine has no files.
+func (g *Group) deriveCut(c *cutCapture, compact CompactMachine, ledgers LedgerMachine, files FileMachine) (err error) {
+	if compact != nil {
+		c.state, err = compact.CompactSnapshot()
+	} else {
+		c.state, err = g.machine.Snapshot()
+	}
+	if err != nil {
+		return err
+	}
+	if c.ledger, err = ledgers.DeletionLedger(); err != nil {
+		return err
+	}
+	if files == nil {
+		return nil
+	}
+	if err = g.trip("snapshot_pin"); err != nil {
+		return err
+	}
+	pinned, release, err := files.PinFiles()
+	if err != nil {
+		return err
+	}
+	c.files = pinned
+	if release != nil {
+		c.release = release
+	}
+	return nil
 }
 
 func (g *Group) trip(at string) error {

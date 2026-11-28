@@ -41,6 +41,9 @@ type Scope struct {
 	elevationExpires time.Time
 	sourceCredential *SourceCredential
 	historical       bool
+	// claimed marks a scope made of another voter's claim (ScopeOfClaim): the organization and project it carries were
+	// told, not read from this voter's state, so every validation against a state checks them against it.
+	claimed bool
 	// release marks a scope derived by AuthorizeRelease: its token authority is release.write.
 	release bool
 	// expiresAt is the instant the scope's raw-read authority lapses on its

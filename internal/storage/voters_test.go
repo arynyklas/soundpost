@@ -28,6 +28,8 @@ type testMesh struct {
 	groups  map[uint64]map[model.ID]*replica.Group
 	queues  map[meshQueueKey]chan meshMessage
 	blocked map[uint64]bool
+	// appDelay, per destination node, holds every append message in transit for that long before it is delivered: a slow follower.
+	appDelay map[uint64]time.Duration
 	// holdSnap, per destination node, blocks the delivery of snapshot messages until it is closed:
 	// a snapshot the sender cut and sent that is still in transit.
 	holdSnap map[uint64]chan struct{}
@@ -58,7 +60,7 @@ type meshTransport struct {
 }
 
 func newTestMesh() *testMesh {
-	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, snaps: map[uint64]int{}, inflight: map[meshSource]int{}, stop: make(chan struct{})}
+	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, appDelay: map[uint64]time.Duration{}, holdSnap: map[uint64]chan struct{}{}, inflight: map[meshSource]int{}, snaps: map[uint64]int{}, stop: make(chan struct{})}
 }
 func (m *testMesh) register(node uint64, groups []*replica.Group) {
 	// Status takes the group mutex, which a ticking group holds while it calls
@@ -129,6 +131,30 @@ func (t meshTransport) Send(group model.ID, message *pb.Message) error {
 	}
 }
 
+// CallLeader is the in-process wire of a call to the leader of a group (replica.Group.CallLeader): the handler of the
+// leader's group runs in this process, as the route of the production transport runs it over TLS.
+func (t meshTransport) CallLeader(ctx context.Context, group model.ID, name string, body []byte) ([]byte, error) {
+	t.mesh.mu.Lock()
+	own := t.mesh.groups[t.node][group]
+	t.mesh.mu.Unlock()
+	if own == nil {
+		return nil, replica.ErrUnavailable
+	}
+	leader, self := own.Leader()
+	t.mesh.mu.Lock()
+	destination, down := t.mesh.groups[leader][group], t.mesh.blocked[t.node] || t.mesh.blocked[leader]
+	t.mesh.mu.Unlock()
+	if leader == 0 || self || destination == nil || down {
+		return nil, replica.ErrUnavailable
+	}
+	if meshCallLost.Load() {
+		// The leader runs the handler and the connection drops before the answer comes back.
+		_, _ = destination.ServeCall(ctx, t.node, name, body)
+		return nil, replica.ErrCallOutcomeUnknown
+	}
+	return destination.ServeCall(ctx, t.node, name, body)
+}
+
 // finished records that a message of node in group is no longer in flight.
 func (m *testMesh) finished(node uint64, group model.ID) {
 	m.mu.Lock()
@@ -164,10 +190,21 @@ func (m *testMesh) deliver(key meshQueueKey, queue <-chan meshMessage) {
 			m.mu.Lock()
 			destination, source := m.groups[key.to][key.group], m.groups[in.from][key.group]
 			down := m.blocked[in.from] || m.blocked[key.to]
+			delay := m.appDelay[key.to]
+			if in.m.GetType() != pb.MsgApp {
+				delay = 0
+			}
 			if in.m.GetType() == pb.MsgSnap && !down && destination != nil {
 				m.snaps[key.to]++
 			}
 			m.mu.Unlock()
+			if delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-m.stop:
+					return
+				}
+			}
 			var err error
 			switch {
 			case destination == nil || down:

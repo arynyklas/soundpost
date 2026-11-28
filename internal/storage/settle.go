@@ -79,7 +79,7 @@ func (e *Engine) SettleCandidatesFor(ctx context.Context, books SettleBooks) ([]
 	// together, so this pass found 64 of them to derive: it did so under the engine lock, the lock every append
 	// of every slot takes, and the acknowledgements stopped for the minute that took (the collapse at 820 s of
 	// the single-host load, L2w20Admission21). The commands of an applied window never change except by
-	// erasure, which takes cutMu exclusively (as for a snapshot cut, windowTableForCut): the derivation holds it
+	// erasure, which takes cutMu exclusively (as for a snapshot cut, windowTableAt): the derivation holds it
 	// shared, per slot, and no engine lock.
 	for slot := range uint16(64) {
 		if err := ctx.Err(); err != nil {

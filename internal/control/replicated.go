@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -116,6 +117,9 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 		return nil, err
 	}
 	m.group = group
+	group.HandleCall(turnCall, s.serveTurn)
+	group.HandleCall(admitCall, s.serveAdmission)
+	group.HandleCall(settleCall, s.serveSettle)
 	s.repl = m
 	go m.withdrawLoop()
 	s.registerDiag(group, c.Directory)
@@ -170,13 +174,14 @@ func (e *unnamedError) Error() string {
 // (retryLostProposals), so the second run is as good as the first and the cost of naming the ledger is
 // paid only by the transition that needs it.
 func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, members memberScope, fn func(*State) error) error {
+	retrying := ctx.Value(lostProposalRetryKey{}) != nil
 	attempts := 1
-	if ctx.Value(lostProposalRetryKey{}) != nil {
+	if retrying {
 		attempts = maxLostProposals
 	}
 	for attempt := 1; ; attempt++ {
 		var lost bool
-		err := s.replicatedUpdateOnce(ctx, bump, force, members, fn, &lost)
+		err := s.replicatedUpdateOnce(ctx, bump, force, members, fn, &lost, retrying && attempt > 1)
 		var unnamed *unnamedError
 		if errors.As(err, &unnamed) && members|unnamed.need != members {
 			members |= unnamed.need
@@ -184,6 +189,9 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, me
 			continue
 		}
 		if !lost || attempt >= attempts || ctx.Err() != nil {
+			if retrying {
+				s.turn.noteAttempts(attempt)
+			}
 			return err
 		}
 	}
@@ -191,9 +199,14 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, me
 
 // replicatedUpdateOnce is one read-compute-propose round; lost reports that the proposal was refused
 // as stale (another command committed since the read).
-func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool, members memberScope, fn func(*State) error, lost *bool) error {
+func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool, members memberScope, fn func(*State) error, lost *bool, lostBefore bool) error {
 	defer s.lockUpdates()()
 	r := s.repl
+	entryID := model.NewID()
+	if lostBefore {
+		// A writer that lost its last proposal asks the leader to hold the other commands until this entry arrives (admission_turn.go).
+		s.askTurn(ctx, entryID)
+	}
 	if _, err := r.group.ReadIndex(ctx); err != nil {
 		return replicaFaultUnder(ctx, err)
 	}
@@ -204,6 +217,8 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	// window is the command whose records the log was reduced to when the transition read it ("": the whole log).
 	var window string
 	var layoutBaseOf string // the digest ledgerBase names for the state read (layout 2)
+	var rulesOn bool        // the file keeps the rule books and the rule outbox in the ledger (ledgerTx.rules, D108)
+	allScope := scopeAll    // every member the file keeps in the ledger
 	// A command is a patch once every member declared the first protocol of it (SetLegacyStatePatchGate)
 	// when the books are in the blob, as the previous release holds them and the patch names the digest it
 	// computes. When they are in the ledger, the digest and the ledger commands need the protocol of that
@@ -225,6 +240,12 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 			if err != nil {
 				return err
 			}
+			if rulesOn = l.rules; rulesOn {
+				allScope |= scopeRules
+				if members&scopeBooks != 0 {
+					members |= scopeRules
+				}
+			}
 			layoutBaseOf = layoutBase(ctrl, l.acc)
 			if members != 0 {
 				if patch {
@@ -243,7 +264,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 				}
 				writableCommands(&st, members)
 			}
-			if rest := scopeAll &^ members; !patch && rest != 0 {
+			if rest := allScope &^ members; !patch && rest != 0 {
 				// a replacement carries the whole state, the rest of the ledger as it is
 				if heldLedger, err = l.membersOf(rest); err != nil {
 					return err
@@ -270,7 +291,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	}
 	var newLedger ledgerMembers
 	if layout {
-		if need := unnamedMembers(&st, members); need != 0 {
+		if need := unnamedMembers(&st, members, rulesOn); need != 0 {
 			return &unnamedError{need: need}
 		}
 		if members != 0 {
@@ -309,7 +330,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	case !layout:
 	default:
 		attachScope(&st, newLedger, members)
-		attachScope(&st, heldLedger, scopeAll&^members)
+		attachScope(&st, heldLedger, allScope&^members)
 	}
 	switch scope, _ := ctx.Value(orgScopeKey{}).(*orgScope); {
 	case bump || force != nil && *force:
@@ -333,7 +354,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	if err != nil {
 		return err
 	}
-	_, err = r.group.Propose(ctx, replica.Entry{ID: model.NewID(), Kind: replica.Control, Payload: payload, ApplicationIndex: uint64(st.Revision)})
+	_, err = r.group.Propose(ctx, replica.Entry{ID: entryID, Kind: replica.Control, Payload: payload, ApplicationIndex: uint64(st.Revision)})
 	// The leader refuses a proposal naming an old application index with the typed Stale fault
 	// (Validate), a forwarding voter gets it back as replica.ErrStale: both are a lost race.
 	var fault *model.Fault
@@ -359,8 +380,9 @@ func hasFinishedDeletion(st *State) bool {
 }
 
 // unnamedMembers is the members of the ledger that st holds although the transition did not name them
-// (they are empty in the state a transition that does not name them is given).
-func unnamedMembers(st *State, named memberScope) (need memberScope) {
+// (they are empty in the state a transition that does not name them is given). rules says that the file keeps the
+// rule books and the rule outbox in the ledger: a state of such a file holds them only when they were named.
+func unnamedMembers(st *State, named memberScope, rules bool) (need memberScope) {
 	if named&scopeAdmission == 0 && (st.Reservations != nil || st.AdmissionKeys != nil || st.Quotas != nil || st.Settlement != nil) {
 		need |= scopeAdmission
 	}
@@ -369,6 +391,9 @@ func unnamedMembers(st *State, named memberScope) (need memberScope) {
 	}
 	if named&scopeCommands == 0 && (len(st.Commands) != 0 || len(st.CommandOwners) != 0) {
 		need |= scopeCommands
+	}
+	if rules && named&scopeRules == 0 && (st.RuleBooks != nil || st.RuleOutputs != nil) {
+		need |= scopeRules
 	}
 	return need
 }
@@ -410,7 +435,7 @@ func commandKeyOf(ctx context.Context) string {
 func booksOfOrg(ops []patchOp, scope *orgScope, before ledgerMembers, window string) bool {
 	org := scope.org.String()
 	for _, op := range ops {
-		if len(op.Path) != 2 || !bookRoot(op.Path[0]) {
+		if len(op.Path) != 2 || !bookRoot(op.Path[0]) && !ruleRoot(op.Path[0]) {
 			return false
 		}
 		key := op.Path[1]
@@ -475,6 +500,13 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		}
 		return decoded, nil
 	}
+	defer func(from time.Time) {
+		label := "apply.plain"
+		if haveCommand && decoded.patch != nil && slices.ContainsFunc(decoded.patch.Ops, func(op patchOp) bool { return op.Op == opSettle }) {
+			label = "apply.settle"
+		}
+		noteStepD(label, time.Since(from))
+	}(time.Now())
 	applied := m.Applied()
 	if c.Entry.Kind != replica.Noop && c.Index <= applied {
 		rejected := false
@@ -523,8 +555,11 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 		}
 	}
-	rejected, activated := false, false
+	rejected, activated, ruleActivated := false, false, false
+	updateFrom := time.Now()
+	var bodyNS time.Duration
 	err := m.store.db.Update(func(tx *bolt.Tx) error {
+		defer func(from time.Time) { bodyNS = time.Since(from) }(time.Now())
 		meta := tx.Bucket([]byte("replica_control"))
 		physical := readWatermark(meta.Get([]byte("physical")))
 		if c.Index <= physical {
@@ -536,6 +571,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		}
 		b := tx.Bucket([]byte("control"))
 		layout := ledgerLayout(b)
+		rulesOn := b.Get(ledgerRulesKey) != nil
 		// The bytes of the state the command is applied to are read only when the command cannot be applied
 		// without them. A file of layout 2 keeps the revision outside its blob (state_layout.go), so a
 		// command that only steps the revision (an admission round, a stale rejection, a no-op) never reads
@@ -708,7 +744,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				}
 				blobOps := p.Ops
 				if layout {
-					blobOps, ledgerOps = splitLedgerOps(p.Ops)
+					blobOps, ledgerOps = splitLedgerOps(p.Ops, rulesOn)
 				}
 				stepOnly = onlyStepOps(blobOps)
 				if layout && stepOnly {
@@ -790,7 +826,10 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if replaceLedger != nil {
 					e = l.replace(*replaceLedger)
 				} else {
+					ledgerFrom := time.Now()
 					e = l.applyLedgerOps(ledgerOps)
+					noteStepD("apply.ledger", time.Since(ledgerFrom))
+					noteStepD("apply.ledger_ops", time.Duration(len(ledgerOps)))
 				}
 				if e != nil {
 					return e
@@ -806,6 +845,17 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 					return e
 				}
 				activated = true
+			}
+			// The command that marks the installation as one that keeps the rule facts in the ledger (model.RuleLedgerKey) is
+			// the one that moves them out of the blob, on every voter at the same command (D108).
+			if layout && !rulesOn && !rejected && commandNamesRuleLedger(&cmd) {
+				if e := markerFault(ruleMarkerBefore); e != nil {
+					return e
+				}
+				if e := migrateRules(tx); e != nil {
+					return e
+				}
+				ruleActivated = true
 			}
 			if spliced {
 				m.store.rawApplies.Add(1)
@@ -838,11 +888,19 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		}
 		return nil
 	})
+	noteStepD("apply.body", bodyNS)
+	noteStepD("apply.commit", time.Since(updateFrom)-bodyNS)
 	if err != nil {
 		return err
 	}
 	if activated {
 		m.store.layoutLedger.Store(true)
+	}
+	if ruleActivated {
+		if e := markerFault(ruleMarkerAfter); e != nil {
+			return e // the mark is committed: a stop here is a crash after the move, which the next open finds in the file
+		}
+		m.store.ruleLedger.Store(true)
 	}
 	if rejected {
 		return replica.ErrConflict
@@ -1198,6 +1256,9 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 		}
 		installation, expected, revision = cmd.replacement.State.Installation, cmd.replacement.Expected, cmd.replacement.State.Revision
 	}
+	if m.store.turn.holds(command.ID, time.Now()) {
+		return model.Fail(model.Stale) // held for the writer that has the turn (admission_turn.go): the proposer tries again
+	}
 	ledgerCommand := cmd.patch != nil && ledgerOnlyPatch(cmd.patch)
 	if now := time.Now(); ledgerCommand && m.store.admissionYielding(now) {
 		return model.Fail(model.Stale) // held for a writer that lost (admission_yield.go): the proposer tries again
@@ -1226,6 +1287,9 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 		}
 		return nil
 	})
+	if err == nil {
+		m.store.turn.done(command.ID, time.Now())
+	}
 	if !ledgerCommand && isStale(err) {
 		m.store.noteWriterLost(time.Now())
 	}

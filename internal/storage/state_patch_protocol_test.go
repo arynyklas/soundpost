@@ -66,8 +66,8 @@ func TestControlStatePatchGateReadsTheControlGroupsOwnMembers(t *testing.T) {
 // ledger, stays open for a group whose oldest member is the previous release, and the gates of the
 // older protocols (audit delta 4, bounds 3) open as they did.
 func TestControlStatePatchGateWaitsForTheLedgerProtocol(t *testing.T) {
-	if statePatchProtocol != 9 || legacyStatePatchProtocol != 5 || declaredProtocol != 9 {
-		t.Fatalf("state patch protocol %d, first protocol %d, declared %d: the ledger layout with the grouping issues and the command log as records and the scoped delta is protocol 9, the previous release declares 5", statePatchProtocol, legacyStatePatchProtocol, declaredProtocol)
+	if statePatchProtocol != 9 || legacyStatePatchProtocol != 5 || compactAdmissionProtocol != 10 || declaredProtocol != 10 {
+		t.Fatalf("state patch protocol %d, first protocol %d, compact admission protocol %d, declared %d: the ledger layout with the grouping issues and the command log as records and the scoped delta is protocol 9, the compact admission ops are 10, the previous release declares 5", statePatchProtocol, legacyStatePatchProtocol, compactAdmissionProtocol, declaredProtocol)
 	}
 	f := newWithdrawFixtureUndeclared(t) // the voters declare below (the declared fixture of 10.35#12 has every voter at the current protocol already)
 	ctx := context.Background()
@@ -138,14 +138,33 @@ func TestControlStatePatchGateWaitsForTheLedgerProtocol(t *testing.T) {
 			t.Fatalf("node %d: the gate of the scoped delta is open while node 3 declared protocol 8", node)
 		}
 	}
+	// Node 3 is the build of the scoped delta (protocol 9): the patches flow, and the compact admission ops, which it does not
+	// decode, stay held back (D104).
+	if err := e3.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
+		return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(id), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(9), Cursor: cursor}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for node := uint64(1); node <= 3; node++ {
+		e := f.v.engines[node]
+		if !eventually(30*time.Second, func() bool { return e.ControlStatePatchReady(slotZero) && e.ControlLegacyStatePatchReady(slotZero) }) {
+			t.Fatalf("node %d: a patch gate stays closed after every member declared protocol 9", node)
+		}
+		if e.ControlCompactAdmissionReady(slotZero) {
+			t.Fatalf("node %d: the compact admission gate is open while node 3 declared only protocol 9", node)
+		}
+	}
 	// Node 3 is upgraded and declares: the gate opens on every member.
 	if err := e3.declareErasure(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for node := uint64(1); node <= 3; node++ {
 		e := f.v.engines[node]
-		if !eventually(30*time.Second, func() bool { return e.ControlStatePatchReady(slotZero) && e.ControlLegacyStatePatchReady(slotZero) }) {
-			t.Fatalf("node %d: a gate stays closed after every member declared protocol 9", node)
+		if !eventually(30*time.Second, func() bool { return e.ControlCompactAdmissionReady(slotZero) }) {
+			t.Fatalf("node %d: the compact admission gate stays closed after every member declared protocol 10", node)
 		}
+	}
+	if e1 := f.v.engines[1]; e1.ControlCompactAdmissionReady(nil) || (&Engine{}).ControlCompactAdmissionReady(slotZero) {
+		t.Fatal("the compact admission gate is open without a control configuration or without replication")
 	}
 }

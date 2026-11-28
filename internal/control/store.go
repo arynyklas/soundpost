@@ -40,6 +40,11 @@ type Store struct {
 	// read by every admission before it decides how to commit, and set where the layout changes: Open,
 	// the activation in Apply and a snapshot install.
 	layoutLedger atomic.Bool
+	// ruleLedger says whether this file keeps the rule books and the rule outbox in the ledger (D108, rule_ledger.go): set
+	// where the layout changes (noteLayout, the activation in Apply).
+	ruleLedger atomic.Bool
+	// ruleMarker is the revision of the command that marked the installation, plus one (0: not read yet), kept by RuleLayout.
+	ruleMarker atomic.Uint64
 	// boundedGate says whether the bounded-state rules apply (bounded_rules.go); nil: they do.
 	boundedGate atomic.Pointer[func() bool]
 	// auditDeltaGate says whether the audit delta command may be proposed (audit_delta.go); nil: it may not.
@@ -54,6 +59,12 @@ type Store struct {
 	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
 	statePatchGate                atomic.Pointer[func() bool]
 	statePatches, statePatchBytes atomic.Uint64
+	// compactAdmissionGate says whether every member declared the protocol that applies the compact admission ops
+	// (compact_admission.go, D104); nil: they are not proposed.
+	compactAdmissionGate atomic.Pointer[func() bool]
+	// compactReserves and compactFinalizes count the rsv and fin ops the admission rounds proposed (CompactAdmissionOps), and
+	// compactSettles the chs ops (CompactSettleOps), compactRecords the rec ops (CompactRecordOps).
+	compactReserves, compactFinalizes, compactSettles, compactRecords atomic.Uint64
 	// sparseCommits counts the commands proposed by sparseUpdate (sparse.go).
 	sparseCommits atomic.Uint64
 	// sparseLockedDecodes counts the sparse commits that had to decode the state under the lock.
@@ -72,11 +83,27 @@ type Store struct {
 	// admissionRoundItems count the rounds proposed and the transitions they carried.
 	admissions                           admissionQueue
 	admissionRounds, admissionRoundItems atomic.Uint64
+	// admissionStats times the rounds (roundOnce) for a diagnostic build's report: attempts, the ones lost to the
+	// application-index race, the wait of the transitions in the queue and where an attempt spends its time.
+	admissionStats roundStats
+	// scopes makes the scope of a claim (BindAdmissionScopes); remoteDownUntil is when a voter whose call to the leader failed
+	// judges its own transitions until (UnixNano); the counters are the calls made, their time, the ones that fell back and the
+	// calls served as the leader (admission_remote.go).
+	scopes                                                   atomic.Pointer[claimScopes]
+	remoteDownUntil                                          atomic.Int64
+	remoteCalls, remoteCallNS, remoteFallbacks, remoteServed atomic.Uint64
+	// turn is the leader's turn for a writer that keeps losing; turnDownUntil is when a voter whose leader serves no such call
+	// stops asking (UnixNano; admission_turn.go).
+	turn          turnState
+	turnDownUntil atomic.Int64
 	// layoutSupportGate names the members of the control group whose running binary does not read
 	// the contracted index layout (index_layout.go); nil: none is known to.
 	layoutSupportGate atomic.Pointer[func() []string]
 	// memberLayoutQuery is the live question to one member (index_layout.go); nil: none answers.
 	memberLayoutQuery atomic.Pointer[func(context.Context, replica.Member) error]
+	// memberRuleLedgerQuery is the live question to one member whether it reads the rule facts as records of the ledger (D108,
+	// index_layout.go); asked once the installation carries the mark. nil: none answers.
+	memberRuleLedgerQuery atomic.Pointer[func(context.Context, replica.Member) error]
 	// rawApplies and decodedApplies count the committed commands this store applied to the bytes of
 	// its state (stateRoot, patchRaw) and the ones it had to decode the state for (Apply).
 	rawApplies, decodedApplies atomic.Uint64
@@ -328,10 +355,8 @@ func (s *Store) viewCore(ctx context.Context, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if s.repl != nil {
-		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFaultUnder(ctx, err)
-		}
+	if err := s.readBarrier(ctx); err != nil {
+		return err
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		var st State
@@ -350,10 +375,8 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if s.repl != nil {
-		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFaultUnder(ctx, err)
-		}
+	if err := s.readBarrier(ctx); err != nil {
+		return err
 	}
 	books := model.WantsBooks(ctx)
 	return s.db.View(func(tx *bolt.Tx) error {
@@ -372,11 +395,15 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 				if err != nil {
 					return err
 				}
-				m, err := l.membersOf(scopeBooks)
+				scope := scopeBooks
+				if l.rules {
+					scope |= scopeRules // the rule facts are the workers' books too, wherever the file keeps them
+				}
+				m, err := l.membersOf(scope)
 				if err != nil {
 					return err
 				}
-				attachScope(&st, m, scopeBooks)
+				attachScope(&st, m, scope)
 			}
 		}
 		return fn(st)
@@ -399,10 +426,8 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if s.repl != nil {
-		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFaultUnder(ctx, err)
-		}
+	if err := s.readBarrier(ctx); err != nil {
+		return err
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		st, err := s.coreMembers(tx, readOnlyMembers)
@@ -416,6 +441,7 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 				return err
 			}
 			books.ledger = ledgerBookSource{l}
+			books.rules = l.rules
 		}
 		if err = fn(model.ReadOnlyOfWith(st, books)); err != nil {
 			return err
@@ -482,6 +508,12 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Command, correlationID model.ID) (Result, error) {
 	var out Result
 	legacy := false
+	// A rule command of a file that keeps the rule facts in the ledger commits as the records of its own rule (rule_ledger.go).
+	if CommandKind(cmd.Kind) == KindApplyRuleEvaluation {
+		if res, handled, err := s.transactRule(ctx, scope, &cmd); handled {
+			return res, err
+		}
+	}
 	// A retention command carries the caller's view as a range ([AuthorityRevision, Revision], see
 	// expectedRevisionOK), so a proposal that lost the application-index race to an unrelated write
 	// is judged again against the new state instead of failing the caller: without this a deletion
@@ -556,6 +588,9 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 	} else {
 		ctx = withCommandKey(ctx, cmd.CommandID.String()) // applies one command: reads and writes its records and no other
 		members := membersOfKind(cmd)
+		if CommandKind(cmd.Kind) == KindApplyRuleEvaluation && s.ruleLedger.Load() {
+			members |= scopeRules // the arms the plan leaves to the funnel (retirement, catalogue, late erasure) read and write the rule facts
+		}
 		if members&scopeBooks == 0 {
 			// The handler commits an effect: when a finished deletion exists it re-runs the erasure over the books
 			// too (eraseLateEffect), so it is given them then (replicatedUpdateOnce).

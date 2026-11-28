@@ -21,6 +21,12 @@ func (s *Store) SparseCommitsForTest() uint64 { return s.sparseCommits.Load() }
 // AdmissionRoundsForTest is how many rounds of the group commit carried an admission transition.
 func (s *Store) AdmissionRoundsForTest() uint64 { return s.admissionRounds.Load() }
 
+// RemoteAdmissionForTest is how many admission transitions this store asked the leader to judge, how many of those it judged itself
+// after all (no leader that serves the call), and how many calls it served as the leader.
+func (s *Store) RemoteAdmissionForTest() (calls, fallbacks, served uint64) {
+	return s.remoteCalls.Load(), s.remoteFallbacks.Load(), s.remoteServed.Load()
+}
+
 // AdmissionQueuedForTest is how many transitions wait in the queue of the group commit for a round.
 func (s *Store) AdmissionQueuedForTest() int {
 	s.admissions.mu.Lock()
@@ -71,3 +77,8 @@ func (s *Store) SparseLockedDecodesForTest() uint64 { return s.sparseLockedDecod
 
 // SettleScanRowsForTest is how many reservation rows the planning of settlements decoded.
 func (s *Store) SettleScanRowsForTest() uint64 { return s.settleScanRows.Load() }
+
+// IssueCodecCountsForTest is how many issue records the commits of this process decoded and encoded.
+func (s *Store) IssueCodecCountsForTest() (decodes, encodes uint64) {
+	return issueDecodes.Load(), issueMarshals.Load()
+}

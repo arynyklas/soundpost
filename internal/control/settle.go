@@ -75,6 +75,7 @@ type settledWindowPlan struct {
 	rows      []model.AdmissionReservation
 	record    model.SettledWindow // what the window is after the plan
 	parts     int                 // parts whose rows the plan drops (0 for a window settled whole)
+	added     []model.SettledPart // the parts the plan adds to the record (none for a window settled whole)
 }
 
 // settleCandidateValid refuses a candidate whose own fields contradict each other: it is the data's
@@ -261,6 +262,7 @@ func planParts(key string, c model.SettleCandidate, existing model.SettledWindow
 			continue
 		}
 		record.Parts = append(record.Parts, model.SettledPart{J: p.J, Count: uint64(len(rows)), Charge: p.Charge})
+		plan.added = append(plan.added, model.SettledPart{J: p.J, Count: uint64(len(rows)), Charge: p.Charge})
 		record.Count += uint64(len(rows))
 		plan.rows = append(plan.rows, rows...)
 		plan.parts++
@@ -279,6 +281,12 @@ func planParts(key string, c model.SettleCandidate, existing model.SettledWindow
 	return plan, true
 }
 
+// settleDeriver is the books of a round whose group applies the stl op: a settlement is handed over as it is planned, and the
+// books answer whether the voters derive its charge (the round then writes the rows' deletes and the window, not the charge).
+type settleDeriver interface {
+	deriveSettlement(w settledWindowPlan) bool
+}
+
 // applySettlement drops the planned rows, folds their charge into the settlement and stores the records.
 func applySettlement(books admissionBooks, plan []settledWindowPlan) SettleReport {
 	var rep SettleReport
@@ -286,16 +294,26 @@ func applySettlement(books admissionBooks, plan []settledWindowPlan) SettleRepor
 		c := w.candidate
 		books.setSpan(c.Group.String(), c.Span)
 		books.putWindow(w.key, w.record)
-		for _, r := range w.rows {
-			for _, tier := range quotaKeys(r) {
-				books.setCharge(tier, books.charge(tier)+uint64(r.Bytes))
-				for _, id := range r.Series {
-					books.setChargeSeries(tier, id, books.chargeSeries(tier, id)+1)
-				}
+		if d, ok := books.(settleDeriver); ok && d.deriveSettlement(w) {
+			// The voters derive the charge from the rows they hold (compact_settle.go): the round neither reads nor writes a
+			// series record for it. The rows and their keys are gone for the transitions that follow in the round.
+			for _, r := range w.rows {
+				books.delReservation(r.ID.String())
+				books.delKey(reservationKey(r))
+				rep.Reservations++
 			}
-			books.delReservation(r.ID.String())
-			books.delKey(reservationKey(r))
-			rep.Reservations++
+		} else {
+			for _, r := range w.rows {
+				for _, tier := range quotaKeys(r) {
+					books.setCharge(tier, books.charge(tier)+uint64(r.Bytes))
+					for _, id := range r.Series {
+						books.setChargeSeries(tier, id, books.chargeSeries(tier, id)+1)
+					}
+				}
+				books.delReservation(r.ID.String())
+				books.delKey(reservationKey(r))
+				rep.Reservations++
+			}
 		}
 		rep.Parts += w.parts
 		if w.record.Complete() {
@@ -353,6 +371,9 @@ func settleRowsHeld(books admissionBooks, plan []settledWindowPlan) (bool, error
 func (s *Store) SettleAdmissions(ctx context.Context, candidates []model.SettleCandidate) (SettleReport, error) {
 	if len(candidates) == 0 {
 		return SettleReport{}, nil
+	}
+	if rep, handled, err := s.settleAtLeader(ctx, candidates); handled {
+		return rep, err
 	}
 	var plan []settledWindowPlan
 	var rows settleRows

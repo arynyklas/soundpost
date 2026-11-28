@@ -111,15 +111,19 @@ func TestActiveIteratorBudgetAndRelease(t *testing.T) {
 	}
 	defer e.Close()
 	var opened []RowIterator
-	for range 32 {
+	for range ScanSlots {
 		it, err := e.Scan(context.Background(), read, ScanRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, End: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
 		opened = append(opened, it)
 	}
-	if _, err = e.Scan(context.Background(), read, ScanRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, End: 2}); err == nil {
-		t.Fatal("iterator budget unbounded")
+	// Over the pool a scan waits for a slot (D105): it is never answered too_large, and it ends with its context.
+	ctx, cancel := context.WithCancel(context.Background())
+	go cancel()
+	_, err = e.Scan(ctx, read, ScanRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, End: 2})
+	if f, ok := err.(*model.Fault); !ok || f.Code != model.Cancelled {
+		t.Fatalf("a scan over the slot pool: %v, want cancelled with its context", err)
 	}
 	for _, it := range opened {
 		it.Close()

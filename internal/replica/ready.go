@@ -546,6 +546,8 @@ func (g *Group) cycle() (bool, error) {
 	if err := g.stage(rd, priorLast); err != nil {
 		return false, err
 	}
+	g.lane.cycleN.Add(1)
+	g.lane.cycleNS.Add(uint64(time.Since(began)))
 	if d := int64(time.Since(began)); d > g.phases.cycleMax.Load() {
 		g.phases.cycleMax.Store(d) // ioMu is held: the only writer
 	}
@@ -583,6 +585,7 @@ func (g *Group) stage(rd raft.Ready, priorLast uint64) error {
 		}
 		since(&g.phases.persistNS, persistBegan)
 		g.phases.persistN.Add(1)
+		g.lane.persisted(rd, persistBegan)
 	}
 	if err := g.install(rd, priorLast); err != nil {
 		return err
@@ -822,8 +825,10 @@ func (g *Group) applyEntry(ent *pb.Entry) error {
 	}
 	applyBegan := time.Now()
 	result := g.machine.Apply(c)
-	since(&g.phases.applyNS, applyBegan)
+	applyEnd := time.Now()
+	g.phases.applyNS.Add(uint64(applyEnd.Sub(applyBegan)))
 	g.phases.applyN.Add(1)
+	g.lane.applied(c.Entry.ID, applyBegan, applyEnd)
 	if result != nil && result != ErrConflict {
 		return result
 	}

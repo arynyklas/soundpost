@@ -167,6 +167,8 @@ type mixedRun struct {
 	lastFacts map[uint64]memberFact
 	// exp is the account and the writes of the ledger and replay writes (expandSetup); nil until the scenario makes them.
 	exp *mixedExpand
+	// diag names, per voter, the diagnostic address of a candidate built with the soundpost_diag tag (the rule layout tests); nil: none.
+	diag map[uint64]string
 }
 
 // markPatches remembers the patch counts every voter's journal holds and the saves made so far.
@@ -259,6 +261,7 @@ func (m *mixedRun) startGroup(releaseOf func(uint64) string) (func(), error) {
 		return cleanup, err
 	}
 	m.c = cluster.(*processCluster)
+	m.c.diagAddr = m.diag
 	cfg := m.c.installConfig()
 	if err = config.Validate(cfg); err != nil {
 		return cleanup, err
@@ -1044,30 +1047,57 @@ func (m *mixedRun) membershipSave(id uint64) error {
 	return m.adminSave(id, s, "membership", auth.AdminPayload{UserID: m.fx.reader.User, Enabled: true})
 }
 
+// policyWrite is POST /api/v1/policies (write, retention) on the epoch read just before it. A write through a voter of the
+// PREVIOUS release proposes once, as that release always did, and a proposal that lost the application-index race for any other
+// control commit of the group is answered `stale` (409, nothing committed) with the expected revision still valid: it is repeated
+// as the same command (a command id is applied once) on a fresh read, at most eight times. The candidate proposes again itself
+// (control.UpdateOrgAuthority), so the same answer through a candidate voter is a product failure and ends the scenario, as does a
+// `conflict` (the view the save was based on moved) through either release.
 func (m *mixedRun) policyWrite(id uint64) error {
 	s, err := m.login(id)
 	if err != nil {
 		return err
 	}
 	site := m.sites[id]
-	status, raw, err := postRetryStale(site, "/api/v1/policies", map[string]any{"org": m.fx.org, "project_id": m.fx.project, "operation": "read"}, s.CSRF, "", &m.stale)
-	if err = requireSmokeResponse("policy_read", status, 200, raw, err); err != nil {
-		return err
-	}
-	var view struct {
-		Revision model.Revision `json:"revision"`
-	}
-	if err = json.Unmarshal(raw, &view); err != nil {
-		return err
-	}
 	m.retentionDays++
-	status, raw, err = postRetryStale(site, "/api/v1/policies", map[string]any{"org": m.fx.org, "project_id": m.fx.project, "operation": "write", "command_id": model.NewID(), "expected_revision": view.Revision,
-		"reason": "mixed-binary smoke", "change": map[string]any{"kind": "retention", "retention": map[string]any{"signal": "metrics", "days": m.retentionDays}}}, s.CSRF, "", &m.stale)
+	commandID := model.NewID()
+	var status int
+	var raw []byte
+	for attempt := 0; ; attempt++ {
+		status, raw, err = postRetryStale(site, "/api/v1/policies", map[string]any{"org": m.fx.org, "project_id": m.fx.project, "operation": "read"}, s.CSRF, "", &m.stale)
+		if err = requireSmokeResponse("policy_read", status, 200, raw, err); err != nil {
+			return err
+		}
+		var view struct {
+			Revision model.Revision `json:"revision"`
+		}
+		if err = json.Unmarshal(raw, &view); err != nil {
+			return err
+		}
+		status, raw, err = postRetryStale(site, "/api/v1/policies", map[string]any{"org": m.fx.org, "project_id": m.fx.project, "operation": "write", "command_id": commandID, "expected_revision": view.Revision,
+			"reason": "mixed-binary smoke", "change": map[string]any{"kind": "retention", "retention": map[string]any{"signal": "metrics", "days": m.retentionDays}}}, s.CSRF, "", &m.stale)
+		if err != nil || !m.lostRaceOfPreviousRelease(id, status, raw) || attempt >= 8 {
+			break
+		}
+		m.say("  policy write on voter %d (%s): 409 stale, a proposal that lost the race for the application index (nothing committed); repeated as the same command", id, m.release[id])
+	}
 	if err = requireSmokeResponse("policy_write", status, 200, raw, err); err != nil {
 		return err
 	}
 	m.say("  policy write on voter %d: 200 (retention metrics %d days)", id, m.retentionDays)
 	return nil
+}
+
+// lostRaceOfPreviousRelease says whether an admin save through voter id was refused as `stale` by a voter of the previous
+// release, which proposes a command once (the typed `stale` fault is no `conflict`: the caller's view is not what moved).
+func (m *mixedRun) lostRaceOfPreviousRelease(id uint64, status int, raw []byte) bool {
+	if status != 409 || m.release[id] != "old" {
+		return false
+	}
+	var fault struct {
+		Code model.Code `json:"code"`
+	}
+	return json.Unmarshal(raw, &fault) == nil && fault.Code == model.Stale
 }
 
 func (m *mixedRun) waitSourceOpen(id uint64, s auth.Session) (auth.AdminSource, error) {

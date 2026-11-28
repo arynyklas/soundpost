@@ -15,8 +15,14 @@ import (
 // that trusted the stat could zero pages a reader that is just beginning may still walk. The
 // engine counts its readers itself before bolt sees them: a reader caught in that window defers
 // the scrub, and the rerun finishes it.
+//
+// The index merger (a goroutine of the engine, every 200 ms) reads through bolt's own transactions, and a scrub of one
+// attempt that meets one of them defers, as it should: with the merger running, the rerun below found it about once in
+// a hundred runs under the race detector on a busy machine (a pending scrub with nothing scrubbed, the merger's
+// compactIndexRuns read in the goroutine dump). The test is about the one reader it opens, so the merger is stopped.
 func TestScrubDefersToAReaderBoltHasNotCountedYet(t *testing.T) {
 	x := newEraseEnv(t)
+	x.e.stopIndexMerger()
 	x.appendMixed(eraseCanary, bothDeadlines)
 	x.e.scrub = scrubConfig{attempts: 1}
 	entered, release := make(chan struct{}), make(chan struct{})

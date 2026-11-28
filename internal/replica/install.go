@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -69,9 +70,22 @@ type bundleSource struct {
 	// reuse names a file of the selected snapshot (same name, size and hash) taken without
 	// being read; size and sum describe it.
 	reuse bool
-	size  uint64
-	sum   model.Hash
+	// own names a file the machine wrote for this cut and gave to the store (PinnedFile.Own); size and sum describe it.
+	own  bool
+	size uint64
+	sum  model.Hash
 }
+
+// adoptRename moves a file a machine gave the store into the snapshot directory being built; a test replaces it to make the move fail the way a
+// move between two file systems does.
+var adoptRename = os.Rename
+
+// snapshotBytesCopied counts the bytes cuts of this process wrote into snapshot directories from the files a machine pinned
+// (the window files of a data group): the measure of how much of a cut is a copy of what the machine wrote already.
+var snapshotBytesCopied atomic.Uint64
+
+// SnapshotBytesCopied reports the bytes written so far by this process's snapshot cuts for the files their machines pinned.
+func SnapshotBytesCopied() uint64 { return snapshotBytesCopied.Load() }
 
 // ErrReuseLost means a file the cut meant to take from the selected snapshot is no longer
 // there (another snapshot was selected in between). The cut is repeated.
@@ -428,15 +442,16 @@ func (s *SnapshotStore) copyOut(ctx context.Context, prefix, tmp, name string, i
 	if err != nil {
 		return SnapshotFile{}, err
 	}
+	sink := &syncChunkWriter{f: out}
 	h := sha256.New()
 	var n int64
 	if want != nil {
-		n, err = copyContext(ctx, io.MultiWriter(out, h), io.LimitReader(in, int64(want.Size)))
+		n, err = copyContext(ctx, io.MultiWriter(sink, h), io.LimitReader(in, int64(want.Size)))
 		if err == nil && uint64(n) != want.Size {
 			err = ErrCorrupt
 		}
 	} else {
-		n, err = copyContext(ctx, io.MultiWriter(out, h), in)
+		n, err = copyContext(ctx, io.MultiWriter(sink, h), in)
 	}
 	if err == nil {
 		if err = s.hook(prefix, "file_sync"); err == nil {
@@ -455,6 +470,61 @@ func (s *SnapshotStore) copyOut(ctx context.Context, prefix, tmp, name string, i
 		return SnapshotFile{}, ErrCorrupt
 	}
 	return file, nil
+}
+
+// snapshotSyncChunk is how many bytes of a snapshot file the store writes before it syncs them. A file is synced when it is complete, as
+// before; the chunks only keep the pages a 50 MB file leaves dirty from reaching the disk in one burst that the journals' fsyncs queue behind.
+const snapshotSyncChunk = 4 << 20
+
+// syncChunkWriter writes to f and syncs it after every snapshotSyncChunk bytes.
+type syncChunkWriter struct {
+	f       *os.File
+	pending int
+}
+
+func (w *syncChunkWriter) Write(p []byte) (int, error) {
+	n, err := w.f.Write(p)
+	w.pending += n
+	if err == nil && w.pending >= snapshotSyncChunk {
+		w.pending = 0
+		err = w.f.Sync()
+	}
+	return n, err
+}
+
+// adopt takes the file a machine gave the store (PinnedFile.Own) into the snapshot directory being built: the machine wrote it, synced it
+// and states its size and SHA-256, so the file is moved, not copied, and the cut writes its bytes once. The directory entry is synced with
+// the rest of the directory tree before the snapshot is published (build: syncDirTree). Where a move is not possible (the file is on
+// another file system) it is copied and checked against the hash the machine stated. A moved file is verified, as every file the cut
+// wrote, by VerifyCut (it is listed in fresh): the manifest names the hash the machine stated.
+func (s *SnapshotStore) adopt(ctx context.Context, prefix, tmp, name string, src bundleSource) (SnapshotFile, bool, error) {
+	dst := filepath.Join(tmp, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return SnapshotFile{}, false, err
+	}
+	info, err := os.Stat(src.path)
+	if err != nil || !info.Mode().IsRegular() || uint64(info.Size()) != src.size {
+		return SnapshotFile{}, false, ErrCorrupt
+	}
+	if err = s.hook(prefix, "file_write"); err != nil {
+		return SnapshotFile{}, false, err
+	}
+	file := SnapshotFile{Name: name, Size: src.size, SHA256: src.sum}
+	if adoptRename(src.path, dst) != nil {
+		in, err := os.Open(src.path)
+		if err != nil {
+			return SnapshotFile{}, false, err
+		}
+		want := file
+		file, err = s.copyOut(ctx, prefix, tmp, name, in, &want)
+		in.Close()
+		if err != nil {
+			return SnapshotFile{}, false, err
+		}
+		snapshotBytesCopied.Add(file.Size)
+	}
+	s.fresh = append(s.fresh, name)
+	return file, true, nil
 }
 
 func copyContext(ctx context.Context, w io.Writer, r io.Reader) (int64, error) {
@@ -509,6 +579,9 @@ func (s *SnapshotStore) create(ctx context.Context, m SnapshotManifest, ledgerRa
 	cur, curErr := s.loadCurrent(false)
 	s.reuse = func(name, dst string) (SnapshotFile, bool, error) {
 		for _, src := range sources {
+			if src.name == name && src.own {
+				return s.adopt(ctx, prefix, tmp, name, src)
+			}
 			if src.name != name || !src.reuse {
 				continue
 			}
@@ -606,6 +679,9 @@ func (s *SnapshotStore) build(ctx context.Context, prefix, tmp string, m Snapsho
 		}
 		if !install {
 			s.fresh = append(s.fresh, name)
+			if strings.HasPrefix(name, filePrefix) {
+				snapshotBytesCopied.Add(file.Size)
+			}
 		}
 		files = append(files, file)
 	}

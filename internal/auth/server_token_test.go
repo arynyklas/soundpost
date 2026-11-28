@@ -75,4 +75,6 @@ func TestServerTokenCannotBroadenOrSurviveRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCode(t, service.Revalidate(ctx, scope), model.Unauthenticated)
+	_, err = service.Authenticate(ctx, issued.Token) // the very next request
+	assertCode(t, err, model.Unauthenticated)
 }

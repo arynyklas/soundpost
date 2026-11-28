@@ -33,6 +33,7 @@ type scanSource struct {
 	unfiltered bool // deliver whole series, as sources that ignore the window do
 	partial    bool
 	cursors    []model.Cursor
+	moving     bool // each Select reports a cut one commit later than the one before
 	failAt     int64
 	failErr    error
 
@@ -78,7 +79,14 @@ func (s *scanSource) Select(ctx context.Context, r scan.MetricSelection) (scan.S
 			s.bytes += value.SampleBytes(p)
 		}
 	}
-	return &scanIter{series: out, partial: s.partial, cursors: s.cursors}, nil
+	cursors := s.cursors
+	if s.moving { // the cut of every scan is later than the cut of the one before it
+		cursors = make([]model.Cursor, len(s.cursors))
+		for k, c := range s.cursors {
+			cursors[k] = model.Cursor{Group: c.Group, Index: c.Index + model.Uint64(s.calls)}
+		}
+	}
+	return &scanIter{series: out, partial: s.partial, cursors: cursors}, nil
 }
 
 type scanIter struct {

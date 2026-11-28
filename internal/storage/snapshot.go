@@ -37,7 +37,87 @@ const (
 	quotaCertFile      = "quota-reconciliation.json"
 )
 
-// ---- Machine side: ledger and pinned transfer set ---------------------------
+// ---- Machine side: the cut, its ledger and its pinned transfer set -------------
+
+// PinCut is replica.CutPinner: the cut of the slot at the index it is called at, which the group holds (it applies nothing
+// while its locks are held, and PinCut is called under them). It captures what only that index fixes: the slot's applied
+// index, the manifest's tombstone generation and the number of deletion operations fenced in the slot. Everything else a cut
+// needs is derived by the pinnedSlotCut from the stored commands at or below that index, which no command applied later changes
+// (erasure, the one writer that rewrites them, takes cutMu exclusively and the derivation takes it shared): the window table,
+// which decodes every command of the open window (0.3-0.8 s of CPU at the single-host load, held against the group's ready
+// stage and lock, which stopped its leader's cycles, ticks and heartbeats for as long), the ledger and the window files.
+func (m *slotMachine) PinCut() (replica.PinnedCut, error) {
+	cut, err := m.pinSlotCut()
+	if err != nil {
+		return nil, err
+	}
+	return cut, nil
+}
+
+func (m *slotMachine) pinSlotCut() (*pinnedSlotCut, error) {
+	e := m.engine
+	e.mu.Lock()
+	if e.failed || e.closed {
+		e.mu.Unlock()
+		return nil, model.Fail(model.Unavailable)
+	}
+	cut := &pinnedSlotCut{m: m, application: e.indexes[m.slot], generation: e.catalog.Manifest.TombstoneGeneration}
+	e.mu.Unlock()
+	// The rows of the slot's tombstones are written only by the apply of the slot's own delete_barrier commands, so a pinned
+	// slot's are those of its index.
+	err := e.db.View(func(tx *bolt.Tx) error {
+		rows, err := tombstonesWithPrefix(tx, slotKey(m.slot))
+		cut.fenced = uint64(len(rows))
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cut, nil
+}
+
+// pinnedSlotCut is the cut of one slot at the index it was pinned at (replica.PinnedCut): the group calls its methods one after the
+// other, from one goroutine, without a lock of its own and while the slot goes on applying.
+type pinnedSlotCut struct {
+	m           *slotMachine
+	application uint64 // the slot's applied index at the pin
+	generation  uint64 // the storage manifest's tombstone generation
+	fenced      uint64 // the deletion operations the slot had fenced at the pin (its tombstone rows)
+	table       []windowRecord
+	tabled      bool
+}
+
+var (
+	_ replica.CutPinner      = (*slotMachine)(nil)
+	_ replica.PinnedCut      = (*pinnedSlotCut)(nil)
+	_ replica.LedgerMachine  = (*slotMachine)(nil)
+	_ replica.CompactMachine = (*slotMachine)(nil)
+)
+
+// windows is the window table of the first application commands of the slot, derived once for the state, the ledger and the
+// files of the cut: they name the same windows. The ledger kinds of a command are not changed by the redaction of a batch, so
+// deriving the open window again would only repeat its decode.
+func (c *pinnedSlotCut) windows() ([]windowRecord, error) {
+	if !c.tabled {
+		table, err := c.m.engine.windowTableAt(c.m.slot, c.application)
+		if err != nil {
+			return nil, err
+		}
+		c.table, c.tabled = table, true
+	}
+	return c.table, nil
+}
+
+// CompactSnapshot is the state a locally cut snapshot carries in its envelope (replica.CompactMachine): the window table.
+// The history itself is in the snapshot's window files (PinFiles).
+func (c *pinnedSlotCut) CompactSnapshot() ([]byte, error) {
+	table, err := c.windows()
+	if err != nil {
+		return nil, err
+	}
+	e := c.m.engine
+	return json.Marshal(slotSnapshotV2{Version: 2, Identity: e.identity, Slot: c.m.slot, Application: model.Uint64(c.application), Span: model.Uint64(snapshotWindow), Windows: refsOf(table)})
+}
 
 // DeletionLedger lists every retained tombstone-class command of the slot: source
 // fences, cancellation fences and artifact deletions, each with the digest of its
@@ -53,54 +133,49 @@ const (
 // ApplyDeletionLedger) and meta/deletion_generation (installation-wide, fed by BuildLedger from
 // control's deletion ledger, tombstone.go). They are independent; consumers must read the one
 // their own layer owns.
-func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
-	e := m.engine
-	e.mu.Lock()
-	if e.failed || e.closed {
-		e.mu.Unlock()
-		return replica.Ledger{}, model.Fail(model.Unavailable)
-	}
-	generation, cut, application := e.catalog.Manifest.TombstoneGeneration, m.cut, e.indexes[m.slot]
-	e.mu.Unlock()
-	var table []windowRecord
-	if cut != nil && cut.application == application {
-		// The table CompactSnapshot just derived for this cut: the ledger kinds of a command are not changed by
-		// the redaction of a batch, so deriving the open window again would only repeat its decode.
-		table = cut.windows
-	} else {
-		var err error
-		if table, _, err = e.windowTableForCut(m.slot); err != nil {
-			return replica.Ledger{}, err
-		}
-	}
-	ledger := replica.Ledger{Version: 1, Group: e.group(m.slot), Generation: generation, Entries: []replica.LedgerEntry{}}
-	for _, rec := range table {
-		ledger.Entries = append(ledger.Entries, rec.Ledger...)
-	}
-	var fenced int
-	e.cutMu.RLock()
-	err := e.db.View(func(tx *bolt.Tx) error {
-		rows, err := tombstonesWithPrefix(tx, slotKey(m.slot))
-		fenced = len(rows)
-		return err
-	})
-	e.cutMu.RUnlock()
+func (c *pinnedSlotCut) DeletionLedger() (replica.Ledger, error) {
+	table, err := c.windows()
 	if err != nil {
 		return replica.Ledger{}, err
 	}
-	ledger.Generation += uint64(fenced)
+	e := c.m.engine
+	ledger := replica.Ledger{Version: 1, Group: e.group(c.m.slot), Generation: c.generation + c.fenced, Entries: []replica.LedgerEntry{}}
+	for _, rec := range table {
+		ledger.Entries = append(ledger.Entries, rec.Ledger...)
+	}
 	return ledger, nil
+}
+
+// CompactSnapshot and DeletionLedger of the machine itself answer for the index the slot has applied when they are called
+// (replica.CompactMachine, replica.LedgerMachine): what a group that does not pin would ask under its locks, and what the
+// tests ask. The group of a slot pins (PinCut) and asks the cut.
+func (m *slotMachine) CompactSnapshot() ([]byte, error) {
+	cut, err := m.pinSlotCut()
+	if err != nil {
+		return nil, err
+	}
+	return cut.CompactSnapshot()
+}
+
+func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
+	cut, err := m.pinSlotCut()
+	if err != nil {
+		return replica.Ledger{}, err
+	}
+	return cut.DeletionLedger()
 }
 
 // PinFiles pins the files of a cut (replica.FileMachine). Every slot supplies the window files of
 // the table CompactSnapshot just wrote: a window whose files the selected snapshot already
-// holds is named, not read (replica.PinnedFile.Reuse); any other is written, verified against the
-// table, into a staging directory the release removes. Slot 0 also carries the derived segment
+// holds is named, not read (replica.PinnedFile.Reuse); any other is written once, verified against the
+// table and synced in chunks, into a staging directory the release removes, and given to the snapshot store (replica.PinnedFile.Own),
+// which moves it into the snapshot directory instead of copying it. Slot 0 also carries the derived segment
 // transfer set (so 64 slot snapshots do not copy it 64 times), again naming a segment the
 // selected snapshot holds. Compaction defers the removal of any pinned segment until release.
-// The window files are written without the engine lock (stageWindows): the engine lock is held only for
-// the engine's own state, for a moment.
-func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
+// The window files are written without the engine lock (stageWindows) and while the slot goes on applying: the engine lock is held only for
+// the engine's own state, for a moment, and the files hold the windows of the table, which name the commands up to the pinned index.
+func (c *pinnedSlotCut) PinFiles() ([]replica.PinnedFile, func(), error) {
+	m := c.m
 	e := m.engine
 	e.mu.Lock()
 	if e.failed || e.closed {
@@ -118,18 +193,15 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 			}
 		}
 	}
-	cut, application := m.cut, e.indexes[m.slot]
 	e.mu.Unlock()
+	// The window files of a snapshot are a file each of the windows of the table the cut derived (CompactSnapshot).
 	reusable := func(name string, size uint64, sum model.Hash) bool {
 		h, ok := have["files/"+name]
 		return ok && h.Size == size && h.SHA256 == sum
 	}
-	if cut == nil || cut.application != application {
-		table, applied, err := e.windowTableForCut(m.slot)
-		if err != nil {
-			return nil, nil, err
-		}
-		cut = &cutTable{application: applied, windows: table}
+	table, err := c.windows()
+	if err != nil {
+		return nil, nil, err
 	}
 	// The previous snapshot's file of a window the cut extends is the prefix of the new one (writeWindowFilesFromPrior).
 	priorFile := func(n uint64) (*os.File, windowFile, bool) {
@@ -143,7 +215,7 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 		}
 		return f, windowFile{Size: h.Size, SHA256: h.SHA256}, true
 	}
-	files, stage, err := m.stageWindows(cut, reusable, priorFile)
+	files, stage, err := m.stageWindows(table, reusable, priorFile)
 	removeStage := func() {
 		if stage != "" {
 			_ = os.RemoveAll(stage)
@@ -217,12 +289,13 @@ func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
 // stageWindows names the window files of a cut, and writes those the selected snapshot does not hold into a
 // staging directory (returned even on an error, for the caller to remove). A window the slot's cache derived and the
 // previous snapshot holds an earlier state of (prior) is written from that file and the commands added since; any other
-// is derived whole. It holds cutMu shared and no engine lock.
-func (m *slotMachine) stageWindows(cut *cutTable, reusable func(string, uint64, model.Hash) bool, prior func(uint64) (*os.File, windowFile, bool)) (files []replica.PinnedFile, stage string, err error) {
+// is derived whole. It holds cutMu shared and no engine lock, and it names the commands of the windows it is given, so
+// the slot may go on applying meanwhile.
+func (m *slotMachine) stageWindows(windows []windowRecord, reusable func(string, uint64, model.Hash) bool, prior func(uint64) (*os.File, windowFile, bool)) (files []replica.PinnedFile, stage string, err error) {
 	e := m.engine
 	e.cutMu.RLock()
 	defer e.cutMu.RUnlock()
-	for _, rec := range cut.windows {
+	for _, rec := range windows {
 		type part struct {
 			name  string
 			file  windowFile
@@ -247,11 +320,18 @@ func (m *slotMachine) stageWindows(cut *cutTable, reusable func(string, uint64, 
 			// The commands are read through short read transactions, the payload log outside them (fetchedCommands).
 			src := e.fetchedCommands(m.slot)
 			err = func() error {
+				defer e.cutGate.enter()()
+				if err := e.trip("window_stage_begin"); err != nil {
+					return err
+				}
 				if done, err := e.writeWindowFilesFromPrior(src, m.slot, rec, stage, prior); done || err != nil {
 					return err
 				}
-				return writeWindowFiles(src, rec, stage)
+				return e.writeWindowFiles(src, rec, stage)
 			}()
+			if err == nil {
+				err = e.trip("window_stage_written")
+			}
 			if err != nil {
 				return nil, stage, err
 			}
@@ -260,7 +340,7 @@ func (m *slotMachine) stageWindows(cut *cutTable, reusable func(string, uint64, 
 			if p.reuse {
 				files = append(files, replica.PinnedFile{Name: p.name, Reuse: true, Size: p.file.Size, SHA256: p.file.SHA256})
 			} else {
-				files = append(files, replica.PinnedFile{Name: p.name, Path: filepath.Join(stage, p.name)})
+				files = append(files, replica.PinnedFile{Name: p.name, Path: filepath.Join(stage, p.name), Own: true, Size: p.file.Size, SHA256: p.file.SHA256})
 			}
 		}
 	}

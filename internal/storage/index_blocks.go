@@ -365,6 +365,12 @@ type blockRun struct{ b *bolt.Bucket }
 
 func (r blockRun) Cursor() indexSourceCursor { return &blockCursor{bc: r.b.Cursor(), tx: r.b.Tx()} }
 
+// cachedCursor is Cursor for a scan: the blocks it enters come from the cache of the payload log when it holds them
+// (block_cache.go).
+func (r blockRun) cachedCursor() indexSourceCursor {
+	return &blockCursor{bc: r.b.Cursor(), tx: r.b.Tx(), cached: true}
+}
+
 // blockOf is the block that a bolt value of the run stands for; nil when its record cannot be read (damage).
 func (r blockRun) blockOf(stored []byte) []byte { return storedTx(r.b.Tx(), stored) }
 
@@ -527,6 +533,9 @@ type blockCursor struct {
 	key  []byte // bolt key of the current block
 	live bool   // standing on a pair
 	err  error
+	// cached makes the cursor read its blocks through the cache of the payload log (scans); the verification of the
+	// indexes does not, since it is there to read what the disk holds.
+	cached bool
 
 	// held is true while rd.blk is the block filed under key. It is the block bolt's Seek finds for every key above lo (from lo on
 	// when bound is boundIncl; for every key up to key when bound is boundNone, the first block): the block before it ends at lo,
@@ -581,7 +590,13 @@ func (c *blockCursor) enter(boltKey, raw, seek []byte, search bool, lo []byte, b
 	if boltKey == nil {
 		return nil, nil
 	}
-	blk, ok := parseIndexBlock(storedTx(c.tx, raw))
+	var stored []byte
+	if c.cached {
+		stored = storedBlockTx(c.tx, raw)
+	} else {
+		stored = storedTx(c.tx, raw)
+	}
+	blk, ok := parseIndexBlock(stored)
 	if ok {
 		c.held, c.bound = true, bound
 		c.lo = append(c.lo[:0], lo...)

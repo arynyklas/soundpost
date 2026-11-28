@@ -13,6 +13,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // Control is the consumer-owned view of the C05 control authority; *control.Store
@@ -219,8 +220,8 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, a Action, at mod
 		}
 	}
 	for range maxRevisionRetries {
-		var revision model.Revision
-		if err = s.control.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := control.RevisionOf(ctx, s.control)
+		if err != nil {
 			return err
 		}
 		_, err = s.control.Transact(ctx, scope, control.Command{CommandID: a.CommandID, ExpectedRevision: revision, Kind: string(control.KindIncidentAction), Payload: payload})
@@ -235,6 +236,7 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, a Action, at mod
 			}
 			return &VersionConflict{Current: rec.Version}
 		}
+		staleretry.Note(staleretry.Incidents)
 		// The control revision moved; the command conflicted with nothing. The
 		// command ID makes the retry a no-op if it had already committed.
 	}

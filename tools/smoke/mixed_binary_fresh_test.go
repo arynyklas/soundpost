@@ -243,6 +243,12 @@ func (m *mixedRun) runFreshOldVoter() error {
 // add it with `soundpost membership add-learner`: every group must refuse it with layout_incompatible:<identity>,
 // none may apply it, no voter may list it, and it must still be running. add repeats the call for the same learner.
 func (m *mixedRun) refuseOldLearner(label string) (replica.Member, func(via uint64) (string, error), error) {
+	return m.refuseOldLearnerThen(label, func(l string) error { return m.expandRequire(l, true) })
+}
+
+// refuseOldLearnerThen is refuseOldLearner with the layout check that closes it named by the caller (nil: none), for the groups whose indexes
+// are not contracted.
+func (m *mixedRun) refuseOldLearnerThen(label string, layoutCheck func(label string) error) (replica.Member, func(via uint64) (string, error), error) {
 	learner, err := m.prepareLearner()
 	if err != nil {
 		return learner, nil, err
@@ -288,7 +294,10 @@ func (m *mixedRun) refuseOldLearner(label string) (replica.Member, func(via uint
 		}
 	}
 	m.say("%s refused in %d groups, applied nowhere, listed by no voter", label, totalIncompatible)
-	return learner, add, m.expandRequire(label+" after the refusals", true)
+	if layoutCheck == nil {
+		return learner, add, nil
+	}
+	return learner, add, layoutCheck(label + " after the refusals")
 }
 
 func (m *mixedRun) runFreshOldLearner() error {

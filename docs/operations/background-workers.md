@@ -21,7 +21,8 @@ each project (at most `MaxProjects` per pass, in rotation):
    in rotation and runs the scheduler under the lease with the project-scoped
    read scope and the project's organization-administrator scope. The grid is
    fixed by the committed state, so a second pass at the same time commits
-   nothing.
+   nothing. `Tick` runs this step in the pass; `Run` serves it in a loop of its own
+   (see "The rule loop").
 2. **Recording outputs.** If an `OutputAdmission` is configured, flushes up to
    `OutputLimit` pending recording outputs.
 3. **Producers.** Runs each configured `Producer` (issues and incidents from
@@ -59,8 +60,28 @@ skipped.
 `Run` waits `Interval` (default 5 s, at least 10 ms) between passes. Passes that
 report errors double the wait up to `MaxBackoff` (default 1 min); a clean pass or
 a non-leader node returns to `Interval`. A pass is bounded by `PassTimeout`
-(default 2 min). `Run` starts no goroutine of its own and returns after the pass
-in flight observes cancellation.
+(default 2 min). `Run` starts one goroutine for the rule loop (below) beside its own
+loop over the other stages, and returns after the pass in flight of each loop observes
+cancellation. Each loop has its own wait and backoff; `Observe` is called by one loop
+at a time and carries the errors of the last pass of each loop.
+
+### The rule loop
+
+A rule is evaluated on its grid (a multiple of its interval), so the evaluation of a minute-rule is owed once a minute, whatever the rest of the pass is doing.
+When the rule step was one step of the serial pass over the projects, a rule was evaluated once per pass over its project. Under 100 records a second over 100
+projects the pass took 47 to 120 s (the `PassTimeout`: the pass ended at 60 to 85 projects), because the producers, the notification decisions and the delivery
+step of a project took 0.2 s each on average (up to 0.8 s) next to 0.04 s for its rules: 69 evaluations a minute for 100 rules, p50 lag 51 s. `Run` therefore
+serves the rule scheduling (`Workers.RuleTick`) in a loop of its own and the other stages (recording outputs, producers, conditions, notification decisions,
+ownership mode, delivery) in the other. `RuleTick` serves the next `MaxProjects` projects of each organization, `MaxRules` rules of each, by at most
+`RuleWorkers` projects at the same time (default 4); one goroutine serves a project, so the rules of a project are evaluated one after the other, in their
+rotation, and two rule passes never overlap. A rule's commit lands with the rule's own records; a lost race for the control revision is retried with the same
+command ID and counted (`PassReport.StaleRetries`, by writer: rules, outbox, conditions, incidents). Measured under the same ingest with four rule workers:
+103 evaluations a minute in each of six minutes, lag p50 2.2 s, p95 4.1 s, no retry by the rule writer, and the other writers' retries as many as with the
+serial pass (outbox 323 a minute against 350). Every effect is still validated by the lease; a goroutine that meets the loss stops the others between projects.
+What the loop does not change: a condition output a rule committed is consumed and decided at the next visit of the other loop to that project, so the
+time from a firing grid point to its notification is still one pass of the other loop.
+`PassReport.Took` and `PassReport.Steps` say where a pass spent its time (auth, rules with its evaluate and commit, outputs, produce, consume, submit, cutover,
+outbox; summed over the projects served). A `soundpost_faults` build also writes one line per pass and per project served to `<SOUNDPOST_FAULT_DIR>/workers.jsonl`.
 
 ### Pass time grows with the number of projects
 

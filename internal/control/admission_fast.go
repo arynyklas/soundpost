@@ -55,10 +55,8 @@ func (s *Store) viewCoreOf(ctx context.Context, want memberSet, fn func(State) e
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if s.repl != nil {
-		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFaultUnder(ctx, err)
-		}
+	if err := s.readBarrier(ctx); err != nil {
+		return err
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		st, err := s.coreMembers(tx, want)
@@ -196,10 +194,8 @@ func (s *Store) ViewAdmission(ctx context.Context, fn func(State, auth.Admission
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if s.repl != nil {
-		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFaultUnder(ctx, err)
-		}
+	if err := s.readBarrier(ctx); err != nil {
+		return err
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		st, err := s.coreState(tx)
@@ -234,7 +230,7 @@ func (s *Store) admissionUpdate(ctx context.Context, w writer, build func(core *
 	if _, keep := nonAuthorityWriters[w]; !keep || !s.layoutLedger.Load() {
 		return s.updateAs(ctx, w, func(st *State) error { return build(st, stateBooks{st}) })
 	}
-	err := s.submitAdmission(ctx, build)
+	err := s.submitAdmission(ctx, w, build)
 	if errors.Is(err, errNotLedgerLayout) {
 		// The file left the layout between the decision and the read (a snapshot of an installation
 		// that is not contracted was installed): the whole-state funnel commits it.

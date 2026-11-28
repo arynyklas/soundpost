@@ -286,8 +286,11 @@ type Stats struct {
 	LogsReturned    model.Uint64 `json:"logs_returned"`
 	PeakMemoryBytes model.Uint64 `json:"peak_memory_bytes"`
 	ElapsedNS       model.Int64  `json:"elapsed_ns"`
-	Cached          bool         `json:"cached"`
-	LimitReached    bool         `json:"limit_reached"`
+	// QueueWaitNS is the time the query waited for admission before it ran (the same for every project of
+	// one request); ElapsedNS does not include it.
+	QueueWaitNS  model.Int64 `json:"queue_wait_ns"`
+	Cached       bool        `json:"cached"`
+	LimitReached bool        `json:"limit_reached"`
 }
 
 // Failure is the typed reason one project produced no value. It only appears

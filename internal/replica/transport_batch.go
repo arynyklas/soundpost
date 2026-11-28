@@ -220,7 +220,7 @@ func (t *MTLS) sendBatch(b *peerBatcher, target Member, entries []batchEntry) {
 		}
 		body = appendBatchFrame(body, e.group, raw)
 	}
-	client, err := t.peerClient(target)
+	client, err := t.beatClient(target)
 	if err != nil {
 		return
 	}

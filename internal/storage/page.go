@@ -71,7 +71,7 @@ func decodePageColumns(b []byte, resources, payload bool) (Page, error) {
 			return Page{}, model.Fail(model.Corrupt)
 		}
 		skip := i == 2 && !resources || i == 3 && !payload
-		if !skip {
+		if !skip && !fastDecodeColumn(i, column, n, &p, &delta) {
 			if err := decodeColumn(column, c); err != nil {
 				return Page{}, err
 			}

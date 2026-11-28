@@ -60,7 +60,10 @@ func TestIncrementalWindowFilesAreThoseOfAWholeDerivation(t *testing.T) {
 		t.Fatalf("compact state: %v compact=%v", err, compact)
 	}
 	w.e.dropWindowCaches() // the next derivation is from the commands
-	table, application, err := w.e.windowTableForCut(w.slot)
+	w.e.mu.Lock()
+	application := w.e.indexes[w.slot]
+	w.e.mu.Unlock()
+	table, err := w.e.windowTableAt(w.slot, application)
 	if err != nil {
 		t.Fatal(err)
 	}

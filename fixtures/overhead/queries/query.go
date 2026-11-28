@@ -72,6 +72,7 @@ type row struct {
 	limitReached       bool
 	code, digest, req  string
 	golden             string
+	queueUS            int64
 }
 
 func b01(b bool) int {
@@ -83,9 +84,9 @@ func b01(b bool) int {
 
 func (r row) csv() string {
 	clean := func(s string) string { return strings.NewReplacer(",", "_", "\n", " ", "\r", " ").Replace(s) }
-	return fmt.Sprintf("%d,%d,%d,%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%s,%s,%s,%s",
+	return fmt.Sprintf("%d,%d,%d,%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%s,%s,%s,%s,%d",
 		r.startUS, r.latencyUS, r.status, r.worker, r.class, r.lang, r.projects, r.windowS, r.pages, r.rows, r.bytes, r.peakMem, r.serverUS,
-		b01(r.cached), r.completeness, r.returned, b01(r.limitReached), clean(r.code), r.digest, r.req, r.golden)
+		b01(r.cached), r.completeness, r.returned, b01(r.limitReached), clean(r.code), r.digest, r.req, r.golden, r.queueUS)
 }
 
 // completenessRank orders the letters of the column from the best to the worst answer.
@@ -142,6 +143,7 @@ func (r *row) fill(t target, status int, body []byte, wantDigest bool) {
 			r.peakMem += uint64(s.PeakMemoryBytes)
 			r.returned += uint64(s.SamplesReturned) + uint64(s.LogsReturned)
 			r.serverUS = max(r.serverUS, int64(s.ElapsedNS)/1000)
+			r.queueUS = max(r.queueUS, int64(s.QueueWaitNS)/1000)
 			r.cached = r.cached || s.Cached
 			r.limitReached = r.limitReached || s.LimitReached
 			worst = worse(worst, letter(p.Completeness))

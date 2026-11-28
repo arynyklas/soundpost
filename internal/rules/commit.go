@@ -12,6 +12,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // Control is the part of the C05 control store that commits rule commands
@@ -60,6 +61,7 @@ func transact(ctx context.Context, ctl Control, scope auth.Scope, id model.ID, c
 		}
 		if faultCode(err) == model.Conflict {
 			if now, rerr := readRevision(); rerr == nil && now != revision {
+				staleretry.Note(staleretry.Rules)
 				continue // the revision moved; the command did not conflict with anything
 			}
 		}

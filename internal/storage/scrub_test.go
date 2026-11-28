@@ -131,6 +131,7 @@ func TestExpireScrubsFreedPagesOfApplyDatabase(t *testing.T) {
 // durable, not an in-memory flag.
 func TestEraseScrubDefersWhileAReaderIsOpenThenCompletes(t *testing.T) {
 	x := newEraseEnv(t)
+	x.e.stopIndexMerger() // its reads defer a scrub of one attempt too (TestScrubDefersToAReaderBoltHasNotCountedYet)
 	x.appendMixed(eraseCanary, bothDeadlines)
 	x.e.scrub = scrubConfig{attempts: 1}
 	var reader *bolt.Tx

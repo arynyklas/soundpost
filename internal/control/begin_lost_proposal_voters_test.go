@@ -85,6 +85,49 @@ func beginUnderSaturatingIntake(t *testing.T, patch bool) {
 	defer func() { close(stop); wg.Wait() }()
 	time.Sleep(2 * time.Second) // intake is saturating on every voter before the first Begin
 	const begins = 12
+	// No voter's Begin needs more attempts than attemptBound (D107 condition 3), a quarter of the budget of 64. The plain build's bound is
+	// the measured one: under eight CPU burners, 1560 Begins per voter (both modes), at most 7 attempts from a follower and 12 from the
+	// leader, whose attempts are short and partly spent in the rest between turns. Under the race detector every attempt is several times as
+	// long as the turn (sized for a plain build), so the tail is longer: raceAttemptScale is that factor, measured over the race runs of
+	// both modes under 8 and 16 burners (72 runs, 216 voter tails; the report of the final run has them): at most 32 attempts from any
+	// voter (a follower; the leader's at most 28), 2 times the plain bound, so 3 times it (48) is a bound with room that is still below
+	// the budget. In neither build may a Begin reach the budget itself: that is the refusal (stale, not retryable) this test rules out.
+	const attemptBound = 16
+	const raceAttemptScale = 3
+	bound := attemptBound
+	if raceEnabled {
+		bound *= raceAttemptScale
+	}
+	ran := time.Now()
+	for _, node := range []uint64{3, 2, 1} {
+		before := v.fx[node].store.AttemptCountsForTest()
+		defer func() {
+			after := v.fx[node].store.AttemptCountsForTest()
+			var dist []string
+			bounds := control.AttemptBoundsForTest()
+			for i, n := range after {
+				if n -= before[i]; n > 0 {
+					bucket := "33+"
+					if i < len(bounds) {
+						bucket = fmt.Sprintf("<=%d", bounds[i])
+					}
+					dist = append(dist, fmt.Sprintf("%s=%d", bucket, n))
+				}
+			}
+			most := v.fx[node].store.MostAttemptsForTest()
+			t.Logf("ATTEMPTS voter %d (leader: %v): most %d (bound %d, budget %d), %v", node, node == 1, most, bound, control.MaxLostProposalsForTest, dist)
+			if most > bound {
+				t.Errorf("voter %d (leader: %v): a Begin needed %d attempts, more than %d", node, node == 1, most, bound)
+			}
+			if most >= control.MaxLostProposalsForTest {
+				t.Errorf("voter %d (leader: %v): a Begin used up the budget of %d attempts", node, node == 1, control.MaxLostProposalsForTest)
+			}
+			if node == 1 {
+				granted, refused, stale, held, maxHold := v.fx[1].store.TurnStatsForTest()
+				t.Logf("TURNS granted %d refused-in-rest %d stale-answers %d held %v (%.1f%% of %v) max-hold %v", granted, refused, stale, held, 100*float64(held)/float64(time.Since(ran)), time.Since(ran).Round(time.Millisecond), maxHold)
+			}
+		}()
+	}
 	for _, node := range []uint64{3, 2, 1} {
 		f := v.fx[node]
 		refused := map[string]int{}

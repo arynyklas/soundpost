@@ -103,6 +103,87 @@ type batchView struct {
 	reservations map[model.ID]struct{}
 }
 
+// laneTrace is where the time of a proposal goes on the leader, in the order of its path: waiting in the queue for a cycle, the
+// encoding and Raft proposal under the group lock (intake), the wait for the journal to hold its entry (the stage still busy with the
+// previous Ready, the write and the fsync), the wait for the commit (the append to the followers, their fsync and answer, the leader's
+// commit-only persist) and the machine's Apply. persist: the Readys with entries and the commit-only ones apart, and what the stage
+// was busy with. Atomics beside the work; batch and open belong to the cycle (ioMu).
+type laneTrace struct {
+	n, queueNS, intakeNS, persistNS, commitNS, applyNS atomic.Uint64
+	entriesN, entriesNS, entriesBytes, hardN, hardNS   atomic.Uint64
+	cycleN, cycleNS                                    atomic.Uint64
+	batch                                              []*proposalTrace
+	open                                               map[model.ID]*proposalTrace
+}
+
+type proposalTrace struct {
+	id                      model.ID
+	queueNS, intakeNS       int64
+	proposedAt, persistedAt time.Time
+}
+
+// proposed notes that the command id was proposed (queued since queued, the batch's intake began at intakeFrom, this one at began).
+func (l *laneTrace) proposed(id model.ID, queued, intakeFrom, began time.Time) {
+	now := time.Now()
+	l.batch = append(l.batch, &proposalTrace{id: id, queueNS: int64(intakeFrom.Sub(queued)), intakeNS: int64(now.Sub(began)), proposedAt: now})
+}
+
+// persisted notes a journal write of rd that began at began: the proposals of the batch are in the journal if it carried entries.
+func (l *laneTrace) persisted(rd raft.Ready, began time.Time) {
+	now := time.Now()
+	if len(rd.Entries) == 0 {
+		l.hardN.Add(1)
+		l.hardNS.Add(uint64(now.Sub(began)))
+		return
+	}
+	l.entriesN.Add(1)
+	l.entriesNS.Add(uint64(now.Sub(began)))
+	var size int
+	for _, ent := range rd.Entries {
+		size += len(ent.GetData())
+	}
+	l.entriesBytes.Add(uint64(size))
+	if len(l.batch) == 0 {
+		return
+	}
+	if l.open == nil || len(l.open) > 8192 {
+		l.open = map[model.ID]*proposalTrace{}
+	}
+	for _, t := range l.batch {
+		t.persistedAt = now
+		l.open[t.id] = t
+	}
+	l.batch = l.batch[:0]
+}
+
+// applied notes that the machine applied the command id between from and to.
+func (l *laneTrace) applied(id model.ID, from, to time.Time) {
+	t, ok := l.open[id]
+	if !ok {
+		return
+	}
+	delete(l.open, id)
+	l.n.Add(1)
+	l.queueNS.Add(uint64(t.queueNS))
+	l.intakeNS.Add(uint64(t.intakeNS))
+	l.persistNS.Add(uint64(t.persistedAt.Sub(t.proposedAt)))
+	l.commitNS.Add(uint64(from.Sub(t.persistedAt)))
+	l.applyNS.Add(uint64(to.Sub(from)))
+}
+
+// LaneTrace is the cumulative lane trace of the group (a diagnostic build reports it): proposals that were traced from the queue
+// to their apply, and the nanoseconds they spent in each step, the journal writes by kind, and the stage's busy time.
+func (g *Group) LaneTrace() map[string]uint64 {
+	l := &g.lane
+	return map[string]uint64{
+		"n": l.n.Load(), "queue_ns": l.queueNS.Load(), "intake_ns": l.intakeNS.Load(), "persist_wait_ns": l.persistNS.Load(),
+		"commit_wait_ns": l.commitNS.Load(), "apply_ns": l.applyNS.Load(),
+		"persist_entries_n": l.entriesN.Load(), "persist_entries_ns": l.entriesNS.Load(), "persist_entries_bytes": l.entriesBytes.Load(),
+		"persist_hard_n": l.hardN.Load(), "persist_hard_ns": l.hardNS.Load(),
+		"cycles": l.cycleN.Load(), "cycle_ns": l.cycleNS.Load(),
+	}
+}
+
 // intake proposes the queued commands. The caller holds ioMu: no cycle is in flight, so everything the previous batch
 // proposed is in the log and in the tables. mu is taken for one command at a time (encoding a payload is the longest
 // thing done under it), so a tick or a step that arrives meanwhile waits for one command, not for the batch.
@@ -112,6 +193,7 @@ func (g *Group) intake() {
 		return
 	}
 	view := batchView{entries: map[model.ID]Entry{}, reservations: map[model.ID]struct{}{}}
+	intakeFrom := time.Now()
 	for _, p := range batch {
 		g.phases.proposeN.Add(1)
 		sinceMax(&g.phases.proposeWaitNS, &g.phases.proposeWaitMax, p.queued)
@@ -119,9 +201,14 @@ func (g *Group) intake() {
 			p.done <- proposalResult{err: ErrUnavailable}
 			continue
 		}
+		began := time.Now()
+		_, had := view.entries[p.entry.ID]
 		g.mu.Lock()
 		g.proposeOneLocked(p, g.raw.BasicStatus(), &view)
 		g.mu.Unlock()
+		if _, has := view.entries[p.entry.ID]; has && !had {
+			g.lane.proposed(p.entry.ID, p.queued, intakeFrom, began)
+		}
 	}
 }
 

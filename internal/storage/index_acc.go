@@ -114,8 +114,18 @@ type orderedCursor interface {
 }
 
 // openOrderedCursor opens the cursor of the query index name: the union of its base bucket and runs
-// in the runs layout, the bucket itself otherwise.
+// in the runs layout, the bucket itself otherwise. It reads what the disk holds.
 func openOrderedCursor(tx *bolt.Tx, name string) (orderedCursor, error) {
+	return openIndexCursor(tx, name, false)
+}
+
+// openScanCursor is openOrderedCursor for a scan: the blocks of the runs come from the cache of the payload
+// log when it holds them (block_cache.go). The verification of the indexes uses openOrderedCursor.
+func openScanCursor(tx *bolt.Tx, name string) (orderedCursor, error) {
+	return openIndexCursor(tx, name, true)
+}
+
+func openIndexCursor(tx *bolt.Tx, name string, cached bool) (orderedCursor, error) {
 	if tx.Bucket([]byte(runsRegistry)) == nil {
 		bucket := tx.Bucket([]byte(name))
 		if bucket == nil {
@@ -126,6 +136,9 @@ func openOrderedCursor(tx *bolt.Tx, name string) (orderedCursor, error) {
 	set, err := openIndexSet(tx, name)
 	if err != nil {
 		return nil, err
+	}
+	if cached {
+		return set.CursorCached(), nil
 	}
 	return set.Cursor(), nil
 }

@@ -136,6 +136,19 @@ func loadIncident(st *State, key string) (IncidentRecord, bool, error) {
 	return r, true, nil
 }
 
+// loadIncidentRO is loadIncident against a read-only control state: it reads the one record, not the books.
+func loadIncidentRO(ro model.ReadOnlyControl, key string) (IncidentRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookIncidents, key)
+	if !ok {
+		return IncidentRecord{}, false, nil
+	}
+	var r IncidentRecord
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return IncidentRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return r, true, nil
+}
+
 // incidentActionScope admits the scope to the incident action. An organization
 // administrator acts as before; a member holding incidents.write on the project
 // acts as a person (decision D19, auth.AuthorizeWrite). The in-process system
@@ -394,12 +407,12 @@ func boundIncidentStubs(st *State, prefix string, limit int) int {
 // read. The scope is checked before the incident is looked up; a project the
 // scope does not name is indistinguishable from an absent incident.
 func (s *Store) Incident(ctx context.Context, scope auth.Scope, project, incident model.ID) (out IncidentRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadIncident(&st, incidentKey(scope.OrgID(), project, incident))
+		out, found, e = loadIncidentRO(st, incidentKey(scope.OrgID(), project, incident))
 		return e
 	})
 	return

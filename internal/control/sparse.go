@@ -80,7 +80,7 @@ func (s *Store) warmCore() {
 const sparseRoundBytes = 2 << 20
 
 // bookTables are the tables a sparse plan may read or write.
-var bookTables = [...]int{tableJobBooks, tableIssueBooks, tableGroupingIssues, tableCommands, tableCommandOwners, tableJobPositions}
+var bookTables = [...]int{tableJobBooks, tableIssueBooks, tableGroupingIssues, tableCommands, tableCommandOwners, tableJobPositions, tableRuleBooks, tableRuleOutputs}
 
 // roundTable is a table of the books as the sparse plans of a round left it: the records they wrote in front of
 // the table of the transaction behind them (a nil value is a deleted record).
@@ -124,6 +124,9 @@ type sparseRound struct {
 	// that writes them: set while the log has no rows, append once it has (every plan judges that against the same state).
 	audits  []json.RawMessage
 	auditOp string
+	// compact says that the group applies the compact ops (record_delta.go): a record of the job books or the grouping issues that
+	// the round changes is written as the delta of the record the round started from when that is smaller.
+	compact bool
 }
 
 // auditsPath is the path of the append-only audit log, the one op on a path that is not a record a plan may write.
@@ -175,7 +178,7 @@ func (r *sparseRound) admit(plan sparsePlan, core *State, l *ledgerTx) (written 
 			size += len(op.Value)
 			continue
 		}
-		if len(op.Path) != 2 || !bookRoot(op.Path[0]) || op.Op != opSet && op.Op != opDelete {
+		if len(op.Path) != 2 || !bookRoot(op.Path[0]) && !ruleRoot(op.Path[0]) || op.Op != opSet && op.Op != opDelete {
 			return nil, false, model.Fail(model.Invalid)
 		}
 		size += len(op.Value)
@@ -209,6 +212,15 @@ func (r *sparseRound) admit(plan sparsePlan, core *State, l *ledgerTx) (written 
 func (r *sparseRound) ops() []patchOp {
 	out := make([]patchOp, 0, len(r.final)+1)
 	for _, op := range r.final {
+		if r.compact && op.Op == opSet && (op.Path[0] == "JobBooks" || op.Path[0] == "GroupingIssues") {
+			table := r.tbl[recordTable(op.Path[0])]
+			// the record as the transaction holds it (the round has not written it) and as the plans of the round left it
+			if before := table.ledgerTable.Get([]byte(op.Path[1])); before != nil {
+				if rec, ok := recordDeltaOp(op.Path, before, table.puts[op.Path[1]]); ok {
+					op = rec
+				}
+			}
+		}
 		out = append(out, op)
 	}
 	if len(r.audits) != 0 {
@@ -221,20 +233,20 @@ func (r *sparseRound) ops() []patchOp {
 // stepOps are the ops that step a layout 2 file from revision expected: the revision and, when the stamp
 // of this commit moves it, the revision clock.
 func (s *Store) stepOps(ctrl *bolt.Bucket, expected model.Revision) ([]patchOp, error) {
+	var stamps []model.RevisionStamp
+	if raw := ctrl.Get(stateClockKey); raw != nil {
+		if json.Unmarshal(raw, &stamps) != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+	}
 	if expected == ^model.Revision(0) {
 		return nil, model.Fail(model.Unavailable)
 	}
 	step := []patchOp{revisionOp(expected + 1)}
-	clock := State{Revision: expected + 1}
-	if raw := ctrl.Get(stateClockKey); raw != nil {
-		if json.Unmarshal(raw, &clock.RevisionClock) != nil {
-			return nil, model.Fail(model.Corrupt)
-		}
-	}
-	before := slices.Clone(clock.RevisionClock)
-	noteRevisionTime(&clock, s.clockNow().UnixNano())
-	if !slices.Equal(before, clock.RevisionClock) {
-		step = append(step, patchOp{Op: opSet, Path: []string{"revision_clock"}, Value: mustJSON(clock.RevisionClock)})
+	st := State{Revision: expected + 1, RevisionClock: slices.Clone(stamps)}
+	noteRevisionTime(&st, s.clockNow().UnixNano())
+	if !slices.Equal(stamps, st.RevisionClock) {
+		step = append(step, patchOp{Op: opSet, Path: []string{"revision_clock"}, Value: mustJSON(st.RevisionClock)})
 	}
 	return step, nil
 }

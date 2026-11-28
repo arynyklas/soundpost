@@ -228,8 +228,19 @@ func (s *metricState) retain(u *rangeUnion, previous *model.UnixNano, e rangeEnt
 		u.sorted = false
 	}
 	*previous = e.at
-	u.entries = append(u.entries, e)
+	u.entries = appendDoubling(u.entries, e)
 	return nil
+}
+
+// appendDoubling is append that doubles a full slice: append grows a large slice by a quarter, which copies
+// a slice of a million entries about five times over while it is filled.
+func appendDoubling[T any](s []T, v T) []T {
+	if len(s) == cap(s) {
+		grown := make([]T, len(s), max(2*cap(s), 64))
+		copy(grown, s)
+		s = grown
+	}
+	return append(s, v)
 }
 
 // dropUnions releases everything the union scans retain and sends every later
