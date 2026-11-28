@@ -163,7 +163,7 @@ Phases 4–6 depend only on Phase 1 (scan API) and Phase 3 (wiring), so they can
 ### Task 0.3: Pinned toolchain, offline
 
 **Files:**
-- Create: `rust-toolchain.toml` (exact stable version chosen on the day from the Rust release metadata, with components `rustfmt` and `clippy` and targets `x86_64-unknown-linux-musl` and `x86_64-pc-windows-msvc`), `xtask/src/toolchain.rs`, `docs/support/rust-toolchain.md`
+- Create: `rust-toolchain.toml` (exact stable version chosen on the day from the Rust release metadata, with components `rustfmt` and `clippy` and targets `x86_64-unknown-linux-musl` and `x86_64-pc-windows-msvc`), `xtask/src/toolchain.rs`, `docs/support/rust-toolchain.md` (also records one dated nightly, with `rust-src`, used only for the ThreadSanitizer run in Task 1.8 and never for release builds)
 
 **Interfaces:**
 - Produces: `xtask toolchain verify`, which checks that `rustc --version` equals the pinned version and that the installed archive's sha256 matches `docs/support/rust-toolchain.md`.
