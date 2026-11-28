@@ -34,3 +34,6 @@ playwright-report/
 /.worktrees/
 /.superpowers/
 /.tools/
+
+# Rust
+/target
