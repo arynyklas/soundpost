@@ -1,0 +1,8 @@
+# The single pinned stable toolchain. The lab VMs have no rustup and no internet: the same version is installed
+# from the standalone archives recorded in docs/support/rust-toolchain.md, and `cargo xtask toolchain verify`
+# checks both this pin and that installation.
+[toolchain]
+channel = "1.100.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
