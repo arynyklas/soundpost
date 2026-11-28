@@ -393,7 +393,7 @@ Tests are derived from the Phase 1 obligation rows. The Go storage tests are a s
 ### Task 1.5: Metadata store and write-set bound
 
 **Files:**
-- Create: `crates/sp-storage/src/meta/{store.rs,tables.rs,backend.rs}`, `docs/storage/format-v1.md` (rewritten)
+- Create: `crates/sp-storage/src/meta/{store.rs,tables.rs,backend.rs}`, `docs/storage/format-v1.md` (rewritten; it states the frontier slot's atomic-write assumption explicitly, with the probe, the fail-closed consequence and the drills that check it)
 - Test: `crates/sp-storage/tests/meta_bounds.rs`
 
 **Interfaces:**
@@ -491,7 +491,8 @@ Tests are derived from the Phase 1 obligation rows. The Go storage tests are a s
 - [ ] **Step 2:** Measure simulator throughput per suite; set and record each suite's campaign budget; run the campaigns on a lab VM. Expected: 0 failures.
 - [ ] **Step 3:** `cargo test -p sp-storage --release` 3× and under ThreadSanitizer (the separately pinned nightly, this check only). Expected: all green, 0 reports.
 - [ ] **Step 4:** `cargo-mutants` on the WAL, recovery, group milestone and erasure modules, plus hand-written ordering mutants (release before sync, release before apply commit, wrong cursor, skipped deny revalidation, tail treated as torn without proof): every surviving viable mutant killed by a new test or explained; timeouts and unviable mutants reported separately. `cargo-fuzz` on the frame, segment, snapshot and generation-root decoders and on recovery for a recorded time budget; minimized crashes become regression tests.
-- [ ] **Step 5:** Single-host power-loss drill: append load, `echo b > /proc/sysrq-trigger` on a disposable VM, 10 cycles, FULL read-back. Expected: 0 missing ACKed records.
+- [ ] **Step 5:** Single-host power-loss drill: append load, `echo b > /proc/sysrq-trigger` on a disposable VM, 10 cycles, FULL read-back; plus 10 cycles of a hypervisor hard stop of the VM (through the platform, with the owner's permission; if not granted, recorded as not run). After every cycle the frontier file opens with both slots valid; a slot that fails its check counts as a failed cycle, never as a rollback. Expected: 0 missing ACKed records, 0 failed slots. A torn slot on this hardware stops Phase 2 until the frontier format is revised.
+- [ ] **Step 5b:** Measure append→ACK latency (p50/p95/p99 at the design §13 single-host load) on the same VM's real disk with the frontier sync and, as a measurement-only build flag, without it; record both and the fsync count per ACK in the report. The format is not changed on this measurement alone: a cost above the design §13 budget goes to the owner with the alternatives before Phase 2.
 - [ ] **Step 6:** `cargo xtask obligations run --phase 1` on a lab VM. Expected: PASS; set the current phase to 2.
 - [ ] **Step 7:** Write the Phase 2 detailed plan in this format, as `docs/superpowers/plans/2026-11-29-rust-rewrite-phase2.md`; review by `m1` and `m2` before execution.
 
