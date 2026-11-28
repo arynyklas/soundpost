@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -15,6 +16,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/notify"
 	"github.com/arynyklas/soundpost/internal/replica"
 	"github.com/arynyklas/soundpost/internal/rules"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // LeaderFence is the control group's leadership authority (*replica.Group).
@@ -134,6 +136,9 @@ type WorkerConfig struct {
 	// MaxRules bounds the rules scheduled per project per pass (default 32),
 	// also in rotation.
 	MaxRules int
+	// RuleWorkers bounds the projects whose rules the rule loop of Run evaluates at the same time
+	// (default 4). The rules of one project are evaluated one after the other whatever it is.
+	RuleWorkers int
 	// OutputLimit, ConsumeLimit, NotifyLimit and DeliveryBatch bound the work of
 	// the other stages per project per pass (defaults 64, 256, 64, 16).
 	OutputLimit   int
@@ -184,7 +189,54 @@ type PassReport struct {
 	Submitted int
 	// Attempted counts deliveries handed to the sender.
 	Attempted int
-	Errors    []StageError
+	// Took is the wall time of the pass.
+	Took time.Duration
+	// Steps is the wall time the pass spent in each step, summed over the projects it served.
+	Steps StepTimes
+	// StaleRetries counts the commands the pass's writers submitted again because the control
+	// revision moved under them (not semantic conflicts), by writer.
+	StaleRetries staleretry.Counts
+	Errors       []StageError
+}
+
+// StepTimes is wall time by step of the per-project service. Evaluate and Commit are parts of Rules
+// (the rule scheduling step: its listing of the project's rules, then the evaluation and the commit of
+// every due grid point); Outbox is the delivery worker's RunOnce (claim, send, complete).
+type StepTimes struct {
+	Auth, Rules, Evaluate, Commit, Outputs, Produce, Consume, Submit, Cutover, Outbox time.Duration
+}
+
+func (s *StepTimes) add(o StepTimes) {
+	s.Auth += o.Auth
+	s.Rules += o.Rules
+	s.Evaluate += o.Evaluate
+	s.Commit += o.Commit
+	s.Outputs += o.Outputs
+	s.Produce += o.Produce
+	s.Consume += o.Consume
+	s.Submit += o.Submit
+	s.Cutover += o.Cutover
+	s.Outbox += o.Outbox
+}
+
+// passKind is what a pass of the workers serves: Tick does all of it in one pass over the projects;
+// the runner serves the rule scheduling and the other stages apart.
+type passKind uint8
+
+const (
+	passAll   passKind = iota // rule scheduling and every other stage
+	passRules                 // rule scheduling only
+	passWork                  // every stage but the rule scheduling
+)
+
+func (k passKind) String() string {
+	switch k {
+	case passRules:
+		return "rules"
+	case passWork:
+		return "work"
+	}
+	return "all"
 }
 
 // Workers runs the leader-only background work of a node: rule scheduling and
@@ -204,10 +256,17 @@ type Workers struct {
 	cutover   *notify.CutoverService
 	state     *rules.StateStore
 
-	mu          sync.Mutex
+	mu          sync.Mutex // one pass over the stages beyond the rules (and Tick) at a time
 	projectNext int
 	acquired    replica.FenceToken // the leadership Acquirers have run for
-	ruleNext    map[model.ID]int
+	cursorMu    sync.Mutex
+	ruleNext    map[model.ID]int // guarded by cursorMu
+
+	ruleMu          sync.Mutex // one rule pass at a time
+	ruleProjectNext int
+
+	obsMu      sync.Mutex // Observe is called by one loop at a time
+	loopErrors [2][]StageError
 }
 
 const (
@@ -221,6 +280,7 @@ const (
 	defaultConsumeLimit   = 256
 	defaultNotifyLimit    = 64
 	defaultDeliveryBatch  = 16
+	defaultRuleWorkers    = 4
 )
 
 func positive[T int | time.Duration](v, fallback T) T {
@@ -264,6 +324,7 @@ func (a *App) NewWorkers(cfg WorkerConfig) (*Workers, error) {
 	cfg.ConsumeLimit = positive(cfg.ConsumeLimit, defaultConsumeLimit)
 	cfg.NotifyLimit = positive(cfg.NotifyLimit, defaultNotifyLimit)
 	cfg.DeliveryBatch = positive(cfg.DeliveryBatch, defaultDeliveryBatch)
+	cfg.RuleWorkers = positive(cfg.RuleWorkers, defaultRuleWorkers)
 
 	w := &Workers{app: a, cfg: cfg, ruleNext: map[model.ID]int{}}
 	w.state = rules.NewStateStore(a.Control)
@@ -319,11 +380,35 @@ func (a *App) RunWorkers(ctx context.Context, cfg WorkerConfig) error {
 	return nil
 }
 
-// Run passes at the configured interval until ctx ends. It starts no goroutine
-// and returns only after the pass in flight has observed the cancellation. The
-// pause grows exponentially (to MaxBackoff) while passes fail and returns to the
-// interval after a clean pass or while this node is not the leader.
+// Run passes at the configured interval until ctx ends. The rule scheduling has a loop of its own beside
+// the loop over the other stages (producers, conditions, notifications, delivery): a rule is evaluated on
+// its grid at the pace of the rule loop, whatever the other stages are doing for the projects. Run returns
+// only after the pass in flight of each loop has observed the cancellation. The pause of a loop grows
+// exponentially (to MaxBackoff) while its passes fail and returns to the interval after a clean pass or
+// while this node is not the leader.
 func (w *Workers) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	if w.scheduler != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.loop(ctx, loopRules, w.RuleTick)
+		}()
+	}
+	w.loop(ctx, loopWork, w.workTick)
+	wg.Wait()
+}
+
+const (
+	loopWork = iota
+	loopRules
+)
+
+func (w *Workers) loop(ctx context.Context, which int, tick func(context.Context) PassReport) {
+	name := "work"
+	if which == loopRules {
+		name = "rules"
+	}
 	timer := time.NewTimer(w.cfg.Interval)
 	defer timer.Stop()
 	failures := 0
@@ -334,11 +419,10 @@ func (w *Workers) Run(ctx context.Context) {
 		case <-timer.C:
 		}
 		pass, cancel := context.WithTimeout(ctx, w.cfg.PassTimeout)
-		report := w.Tick(pass)
+		report := tick(pass)
 		cancel()
-		if w.cfg.Observe != nil {
-			w.cfg.Observe(report)
-		}
+		workerPassObserved(name, report)
+		w.observe(which, report)
 		if len(report.Errors) > 0 {
 			failures++
 		} else {
@@ -346,6 +430,19 @@ func (w *Workers) Run(ctx context.Context) {
 		}
 		timer.Reset(w.delay(failures))
 	}
+}
+
+// observe hands the report of a pass to Observe. The errors it carries are those of the last pass of each
+// loop, so a clean pass of one loop does not report a recovery while the other still fails.
+func (w *Workers) observe(which int, report PassReport) {
+	if w.cfg.Observe == nil {
+		return
+	}
+	w.obsMu.Lock()
+	defer w.obsMu.Unlock()
+	w.loopErrors[which] = report.Errors
+	report.Errors = append(append([]StageError(nil), w.loopErrors[loopWork]...), w.loopErrors[loopRules]...)
+	w.cfg.Observe(report)
 }
 
 func (w *Workers) delay(failures int) time.Duration {
@@ -388,7 +485,19 @@ func code(err error) string {
 func (w *Workers) Tick(ctx context.Context) PassReport {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var report PassReport
+	return w.pass(ctx, passAll)
+}
+
+func (w *Workers) pass(ctx context.Context, kind passKind) (report PassReport) {
+	begun := time.Now()
+	before := staleretry.Snapshot()
+	defer func() {
+		report.Took = time.Since(begun)
+		report.StaleRetries = staleretry.Snapshot().Since(before)
+		if kind == passWork {
+			report.StaleRetries.Rules = 0 // the rule loop's, not this pass's
+		}
+	}()
 	lease, err := w.cfg.Fence.Fence(ctx)
 	if err != nil {
 		w.acquired = replica.FenceToken{} // the next leadership is a new acquisition
@@ -405,9 +514,99 @@ func (w *Workers) Tick(ctx context.Context) PassReport {
 		if ctx.Err() != nil || report.Deposed {
 			break
 		}
-		w.serveOrg(ctx, org, lease, &report)
+		w.serveOrg(ctx, org, lease, &report, kind)
 	}
 	return report
+}
+
+// workTick is one pass over every stage but the rule scheduling, which has its own loop in Run.
+func (w *Workers) workTick(ctx context.Context) PassReport {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.pass(ctx, passWork)
+}
+
+// RuleTick is one pass of the rule scheduling alone: the rules of the next MaxProjects projects of every
+// organization, MaxRules of each, served by at most RuleWorkers projects at a time. One goroutine serves a
+// project, so the rules of a project are evaluated one after the other, in their rotation, and two rule
+// passes never overlap. Every effect is validated by the lease like those of Tick, whichever goroutine
+// meets the loss first stops the others between projects. The other stages are not run.
+func (w *Workers) RuleTick(ctx context.Context) (report PassReport) {
+	if w.scheduler == nil {
+		return report
+	}
+	w.ruleMu.Lock()
+	defer w.ruleMu.Unlock()
+	begun := time.Now()
+	before := staleretry.Snapshot()
+	defer func() {
+		report.Took = time.Since(begun)
+		report.StaleRetries = staleretry.Counts{Rules: staleretry.Snapshot().Rules - before.Rules} // the other loop's are its own
+	}()
+	lease, err := w.cfg.Fence.Fence(ctx)
+	if err != nil {
+		return report
+	}
+	report.Leader = true
+	orgs, err := w.orgs(ctx)
+	if err != nil {
+		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
+		return report
+	}
+	for _, org := range orgs {
+		if ctx.Err() != nil || report.Deposed {
+			break
+		}
+		w.serveRuleOrg(ctx, org, lease, &report)
+	}
+	return report
+}
+
+func (w *Workers) serveRuleOrg(ctx context.Context, org model.ID, lease replica.FenceToken, report *PassReport) {
+	projects, err := w.projects(ctx, org, &w.ruleProjectNext)
+	if err != nil {
+		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
+		return
+	}
+	parts := make([]PassReport, min(w.cfg.RuleWorkers, len(projects)))
+	var next atomic.Int64
+	var lost atomic.Bool
+	var wg sync.WaitGroup
+	for i := range parts {
+		wg.Add(1)
+		go func(part *PassReport) {
+			defer wg.Done()
+			for ctx.Err() == nil && !lost.Load() {
+				k := int(next.Add(1)) - 1
+				if k >= len(projects) {
+					return
+				}
+				part.Projects++
+				w.serveProject(ctx, org, projects[k], lease, part, passRules)
+				if part.Deposed {
+					lost.Store(true)
+				}
+			}
+		}(&parts[i])
+	}
+	wg.Wait()
+	for i := range parts {
+		report.merge(parts[i])
+	}
+}
+
+// merge adds the counts, the step times and the errors of one server's part of a pass.
+func (r *PassReport) merge(o PassReport) {
+	r.Deposed = r.Deposed || o.Deposed
+	r.Projects += o.Projects
+	r.Evaluated += o.Evaluated
+	r.Produced += o.Produced
+	r.Finalized += o.Finalized
+	r.Consumed += o.Consumed
+	r.Submitted += o.Submitted
+	r.Attempted += o.Attempted
+	r.Steps.add(o.Steps)
+	r.Errors = append(r.Errors, o.Errors...)
 }
 
 // Acquirer is a Producer that keeps state in this node's memory which is a
@@ -466,8 +665,8 @@ func (w *Workers) orgs(ctx context.Context) ([]model.ID, error) {
 	return out, err
 }
 
-func (w *Workers) serveOrg(ctx context.Context, org model.ID, lease replica.FenceToken, report *PassReport) {
-	projects, err := w.projects(ctx, org)
+func (w *Workers) serveOrg(ctx context.Context, org model.ID, lease replica.FenceToken, report *PassReport, kind passKind) {
+	projects, err := w.projects(ctx, org, &w.projectNext)
 	if err != nil {
 		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
 		return
@@ -477,14 +676,14 @@ func (w *Workers) serveOrg(ctx context.Context, org model.ID, lease replica.Fenc
 			return
 		}
 		report.Projects++
-		w.serveProject(ctx, org, project, lease, report)
+		w.serveProject(ctx, org, project, lease, report, kind)
 	}
 }
 
 // projects returns the next MaxProjects projects of the organization in
-// rotation, in a stable order, so a large organization is served in full over
-// consecutive passes.
-func (w *Workers) projects(ctx context.Context, org model.ID) ([]model.ID, error) {
+// rotation from *cursor, in a stable order, so a large organization is served
+// in full over consecutive passes.
+func (w *Workers) projects(ctx context.Context, org model.ID, cursor *int) ([]model.ID, error) {
 	var all []model.ID
 	err := w.app.Control.ViewCore(ctx, func(st model.ControlState) error {
 		o, ok := st.Orgs[org.String()]
@@ -508,8 +707,8 @@ func (w *Workers) projects(ctx context.Context, org model.ID) ([]model.ID, error
 	if n <= w.cfg.MaxProjects {
 		return all, nil
 	}
-	start := w.projectNext % n
-	w.projectNext = (start + w.cfg.MaxProjects) % n
+	start := *cursor % n
+	*cursor = (start + w.cfg.MaxProjects) % n
 	out := make([]model.ID, 0, w.cfg.MaxProjects)
 	for i := range w.cfg.MaxProjects {
 		out = append(out, all[(start+i)%n])
@@ -549,27 +748,40 @@ func (w *Workers) still(ctx context.Context, lease replica.FenceToken, report *P
 	return false
 }
 
-func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease replica.FenceToken, report *PassReport) {
+func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease replica.FenceToken, report *PassReport, kind passKind) {
+	begun := time.Now()
+	var steps StepTimes
+	defer func() {
+		report.Steps.add(steps)
+		workerProjectObserved(kind.String(), project, time.Since(begun), steps)
+	}()
 	if !w.still(ctx, lease, report) {
 		return
 	}
 	// The scopes are derived afresh for every project of every pass: an organization
 	// or project that ended, or a policy that moved, yields none from here on.
+	t := time.Now()
 	admin, err := w.app.Auth.AuthorizeSystem(ctx, org, []model.ID{project}, auth.OrgAdmin)
+	steps.Auth += time.Since(t)
 	if err != nil {
 		report.Errors = append(report.Errors, StageError{Project: project, Stage: StageAuth, Code: code(err)})
 		return
 	}
-	if w.scheduler != nil {
-		read, err := w.app.Auth.AuthorizeSystem(ctx, org, []model.ID{project}, auth.Read)
-		if err != nil {
-			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageAuth, Code: code(err)})
-		} else if w.scheduleRules(ctx, read, admin, project, lease, report) {
+	if kind != passWork && w.scheduler != nil {
+		t = time.Now()
+		end := w.rules(ctx, admin, org, project, lease, report, &steps)
+		steps.Rules += time.Since(t)
+		if end {
 			return
 		}
 	}
+	if kind == passRules {
+		return
+	}
 	if w.output != nil {
+		t = time.Now()
 		out, err := w.output.Flush(ctx, admin, lease, w.cfg.OutputLimit)
+		steps.Outputs += time.Since(t)
 		report.Finalized += len(out.Finalized)
 		if w.stop(ctx, project, StageOutputs, err, report) {
 			return
@@ -577,34 +789,47 @@ func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease
 	}
 	scopes := ProducerScopes{authority: w.app.Auth, org: org, project: project, clock: w.cfg.Clock}
 	for _, producer := range w.cfg.Producers {
+		t = time.Now()
 		n, err := producer.Produce(ctx, scopes, lease)
+		steps.Produce += time.Since(t)
 		report.Produced += n
 		if w.stop(ctx, project, StageProduce, err, report) {
 			return
 		}
 	}
+	t = time.Now()
 	consumed, err := w.consumer.Consume(ctx, admin, lease, w.cfg.ConsumeLimit)
+	steps.Consume += time.Since(t)
 	report.Consumed += len(consumed.Applied)
 	if w.stop(ctx, project, StageConsume, err, report) {
 		return
 	}
 	if w.cfg.Routing != nil {
+		t = time.Now()
 		n, err := w.submitConditions(ctx, admin, project, lease, report)
+		steps.Submit += time.Since(t)
 		report.Submitted += n
 		if w.stop(ctx, project, StageNotify, err, report) {
 			return
 		}
+		t = time.Now()
 		n, err = w.submitIncidents(ctx, admin, project, lease, report)
+		steps.Submit += time.Since(t)
 		report.Submitted += n
 		if w.stop(ctx, project, StageNotify, err, report) {
 			return
 		}
 	}
-	if err = w.syncModes(ctx, admin, lease); w.stop(ctx, project, StageCutover, err, report) {
+	t = time.Now()
+	err = w.syncModes(ctx, admin, lease)
+	steps.Cutover += time.Since(t)
+	if w.stop(ctx, project, StageCutover, err, report) {
 		return
 	}
 	if w.delivery != nil {
+		t = time.Now()
 		sent, err := w.delivery.RunOnce(ctx, admin, w.cfg.Clock.Now(), lease)
+		steps.Outbox += time.Since(t)
 		report.Attempted += len(sent.Accepted) + len(sent.Retried) + len(sent.Unknown) + len(sent.Failed)
 		w.stop(ctx, project, StageDelivery, err, report)
 		for _, e := range sent.Errors {
@@ -613,9 +838,20 @@ func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease
 	}
 }
 
+// rules runs the rule step of one project and reports whether the pass must end. The scope is the read
+// scope of the worker principal; a refusal is a stage error of the project and the pass goes on.
+func (w *Workers) rules(ctx context.Context, admin auth.Scope, org, project model.ID, lease replica.FenceToken, report *PassReport, steps *StepTimes) bool {
+	read, err := w.app.Auth.AuthorizeSystem(ctx, org, []model.ID{project}, auth.Read)
+	if err != nil {
+		report.Errors = append(report.Errors, StageError{Project: project, Stage: StageAuth, Code: code(err)})
+		return false
+	}
+	return w.scheduleRules(ctx, read, admin, project, lease, report, steps)
+}
+
 // scheduleRules runs the scheduler for the project's next MaxRules rules and
 // reports whether the pass must end.
-func (w *Workers) scheduleRules(ctx context.Context, read, admin auth.Scope, project model.ID, lease replica.FenceToken, report *PassReport) bool {
+func (w *Workers) scheduleRules(ctx context.Context, read, admin auth.Scope, project model.ID, lease replica.FenceToken, report *PassReport, steps *StepTimes) bool {
 	all, err := w.cfg.Rules.Rules(ctx, read, project)
 	if w.stop(ctx, project, StageRules, err, report) {
 		return true
@@ -626,14 +862,18 @@ func (w *Workers) scheduleRules(ctx context.Context, read, admin auth.Scope, pro
 		return false
 	}
 	count := min(n, w.cfg.MaxRules)
+	w.cursorMu.Lock()
 	start := w.ruleNext[project] % n
 	w.ruleNext[project] = (start + count) % n
+	w.cursorMu.Unlock()
 	for i := range count {
 		// A rule of another project is refused by the scheduler (Invalid) before any
 		// read or commit: the scopes name exactly this project.
 		rule := all[(start+i)%n]
 		run, err := w.scheduler.RunOnce(ctx, read, admin, rule, lease)
 		report.Evaluated += len(run.Committed)
+		steps.Evaluate += run.Evaluate
+		steps.Commit += run.Commit
 		if w.stop(ctx, project, StageRules, err, report) {
 			return true
 		}

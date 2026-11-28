@@ -23,6 +23,10 @@ func bookTable(book model.Book) int {
 		return tableGroupingIssues
 	case model.BookJobPositions:
 		return tableJobPositions
+	case model.BookRuleBooks:
+		return tableRuleBooks
+	case model.BookRuleOutputs:
+		return tableRuleOutputs
 	}
 	return -1
 }

@@ -136,7 +136,8 @@ const AcksHeader = "start_us,sched_us,latency_us,late_us,status,project,records,
 //	digest                 golden class only: hex sha256 of the canonical JSON of every project's value, "" otherwise
 //	req                    the X-Gate-Request header value (16 hex) the server's hooks key on
 //	golden                 golden class only: the id of the fixed golden query (the validator compares digests per id), "" otherwise
-const QueriesHeader = "start_us,latency_us,status,worker,class,lang,projects,window_s,pages,rows,bytes,peak_mem,server_us,cached,completeness,returned,limit_reached,code,digest,req,golden"
+//	queue_us               the largest stats.queue_wait_ns / 1000 of the projects: the time the request waited for query admission
+const QueriesHeader = "start_us,latency_us,status,worker,class,lang,projects,window_s,pages,rows,bytes,peak_mem,server_us,cached,completeness,returned,limit_reached,code,digest,req,golden,queue_us"
 
 // Config is the estate: orgs, projects, the metric cardinality and the seed. The estate is the seed's alone.
 type Config struct {

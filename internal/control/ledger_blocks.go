@@ -61,17 +61,38 @@ type blockRow struct {
 // blockStore is the blocks of one series table and the dictionary of the quota keys.
 type blockStore struct {
 	b, tiers *bolt.Bucket
+	// ordReads and blockReads count the reads this transaction made of the dictionary and of the blocks in the bolt file (tests).
+	ordReads, blockReads int
+	// gets counts the lookups of a series' record this transaction asked of the blocks (tests).
+	gets int
+	// ords is the dictionary entries this transaction read and blocks the blocks it read (the bytes a bolt read of this transaction
+	// answered, nil for a block the file does not have), so that the records of one series under its quota keys, and the records of
+	// the series of one block, cost one read of the file each. The bytes stay what the transaction read: a block this transaction
+	// writes (foldBlock) is dropped from the cache, and a transaction that replaces the tables (wipe) builds new stores (refresh).
+	ords   map[string]uint32
+	blocks map[uint32][]byte
 }
 
 // ordOf is the number of a quota key in the dictionary.
 func (s *blockStore) ordOf(tier []byte) (uint32, bool) {
+	if ord, ok := s.ords[string(tier)]; ok {
+		return ord, true
+	}
 	var buf [128]byte
+	s.ordReads++
 	raw := s.tiers.Get(append(append(buf[:0], 't'), tier...))
 	if raw == nil {
 		return 0, false
 	}
 	v, n := binary.Uvarint(raw)
-	return uint32(v), n > 0
+	if n <= 0 {
+		return 0, false
+	}
+	if s.ords == nil {
+		s.ords = map[string]uint32{}
+	}
+	s.ords[string(tier)] = uint32(v)
+	return uint32(v), true
 }
 
 func (s *blockStore) nameOf(ord uint32) []byte {
@@ -143,12 +164,22 @@ func blockFind(raw, id []byte, ord uint32) uint64 {
 
 // get is the value of a logical record: the count as eight bytes, nil when the series has none under the quota key.
 func (s *blockStore) get(key []byte) []byte {
+	s.gets++
 	tier, id := splitSeriesKeyBytes(key)
 	ord, ok := s.ordOf(tier)
 	if !ok {
 		return nil
 	}
-	raw := s.b.Get(blockKey(blockOfID(id)))
+	blk := blockOfID(id)
+	raw, cached := s.blocks[blk]
+	if !cached {
+		s.blockReads++
+		raw = s.b.Get(blockKey(blk))
+		if s.blocks == nil {
+			s.blocks = map[uint32][]byte{}
+		}
+		s.blocks[blk] = raw
+	}
 	if raw == nil {
 		return nil
 	}
@@ -279,6 +310,7 @@ func (s *blockStore) foldBlock(b uint32, ents []ovEnt) (int, error) {
 	}
 	if len(rows) == 0 {
 		if raw != nil {
+			delete(s.blocks, b)
 			return 0, s.b.Delete(key)
 		}
 		return 0, nil
@@ -286,6 +318,7 @@ func (s *blockStore) foldBlock(b uint32, ents []ovEnt) (int, error) {
 	enc := encodeBlock(rows)
 	ovCounters.blocks.Add(1)
 	ovCounters.blockBytes.Add(uint64(len(enc)))
+	delete(s.blocks, b) // the bytes cached under the block are the ones it had
 	return len(enc), s.b.Put(key, enc)
 }
 

@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,IssueHold,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,IssueHold,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,RuleLedgerMark,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
@@ -192,6 +192,11 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"AppendAudit": "writerAuditAppend",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
+		// The leader's handler of the admission transitions a voter handed it (admission_remote.go): the same two writers as
+		// ReserveAdmission and FinalizeAdmission, in the leader's own rounds; neither changes AuthorityRevision.
+		"serveAdmission": "writerFinalizeAdmission + writerReserveAdmission",
+		// The mark of the rule ledger (D108, rule_ledger.go): one OIDC key, no access state, no books named.
+		"ensureRuleLedger": "writerRuleLedgerMark",
 		// The dispatchers themselves: updateAs and updateAsGuardedChecked are dropped below, update is
 		// the one unguarded entry to replicatedUpdate. A function that commits through
 		// replicatedUpdate directly shows up here and fails until it is reviewed.
@@ -287,8 +292,10 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 	// nothing that no writer uses.
 	used := map[writer]bool{}
 	for _, class := range got {
-		if strings.HasPrefix(class, "writer") {
-			used[writer(strings.TrimPrefix(class, "writer"))] = true
+		for _, part := range strings.Split(class, " + ") { // a function that commits two writers (serveAdmission) is both
+			if strings.HasPrefix(part, "writer") {
+				used[writer(strings.TrimPrefix(part, "writer"))] = true
+			}
 		}
 	}
 	for w := range nonAuthorityWriters {

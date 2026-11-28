@@ -9,7 +9,6 @@ import (
 	"github.com/arynyklas/soundpost/internal/query/regexcompat"
 	"github.com/arynyklas/soundpost/internal/query/value"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -263,6 +262,6 @@ func sortedFields(fields map[string]model.Scalar) []TypedField {
 	for n, v := range fields {
 		out = append(out, TypedField{Name: n, Value: v})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b TypedField) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }

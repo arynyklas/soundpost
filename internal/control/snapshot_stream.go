@@ -337,6 +337,18 @@ func snapshotState(tx *bolt.Tx) ([]byte, error) {
 			out = append(out, settlementRaw...)
 			settlementDone = true
 		}
+		if l.rules && ruleRoot(name) {
+			// The rule facts a file keeps in the ledger (D108) stand where the blob holds their null.
+			next(name)
+			table := tableRuleBooks
+			if name == "RuleOutputs" {
+				table = tableRuleOutputs
+			}
+			if out, err = l.appendBooks(out, table); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		switch name {
 		case "Reservations":
 			booksSeen++

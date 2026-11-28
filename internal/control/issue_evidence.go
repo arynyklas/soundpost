@@ -764,6 +764,13 @@ func validIssueShape(scope auth.Scope, c IssueCommand) error {
 }
 
 func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
+	return applyIssueBookOn(scope, st, cmd, bounded, nil)
+}
+
+// applyIssueBookOn is applyIssueBook over the issues src holds: nil is the issues of the state st (the whole-state
+// funnel); the sparse plan gives the records of the ledger, so that the commit reads and writes the issues it
+// names and nothing else of the project.
+func applyIssueBookOn(scope auth.Scope, st *State, cmd Command, bounded bool, src issueSource) (Effect, error) {
 	if len(cmd.Payload) > maxIssuePayload {
 		return Effect{}, model.Fail(model.TooLarge)
 	}
@@ -796,31 +803,33 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 	if book.Revision != c.ExpectedRevision {
 		return Effect{}, issueRevisionConflict(book.Revision)
 	}
-	issues := projectIssues(st, org, c.Project)
+	if src == nil {
+		src = newStateIssues(st, org, c.Project)
+	}
 	explanations := make(map[string]json.RawMessage, len(book.Explanations))
 	for k, v := range book.Explanations {
 		explanations[k] = v
 	}
-	// The project-wide occurrence index of the issues this command leaves alone.
-	changed := make(map[model.ID]bool, len(c.Records))
+	// The issues this command writes by record key. The occurrence index of the rest of the project is not built:
+	// an occurrence a written issue newly accounts for is looked up in the others when it is first met (one
+	// occurrence, one issue holds for what was committed before, so the ones an issue already held need no look).
+	changedKeys := make(map[string]bool, len(c.Records))
 	for _, r := range c.Records {
-		changed[r.Issue.ID] = true
+		changedKeys[model.ReleaseScopeKey(org, c.Project, r.Issue.ID)] = true
 	}
 	held := map[model.ID]model.ID{}
-	for _, gi := range issues {
-		if changed[gi.ID] {
-			continue
-		}
-		issueHeldIDs(gi, func(id model.ID) bool {
-			held[id] = gi.ID
-			return true
-		})
-	}
+	nextIssues := make([]model.GroupingIssue, 0, len(c.Records))
+	issueKeys := make([]string, 0, len(c.Records))
+	created := 0
 	affected := make([]model.ID, 0, len(c.Records))
 	for _, r := range c.Records {
 		next := normalizeIssue(r.Issue)
 		key := model.ReleaseScopeKey(org, c.Project, next.ID)
-		prior, exists := issues[key]
+		prior, exists, err := src.get(key)
+		if err != nil {
+			return Effect{}, err
+		}
+		var had map[model.ID]bool
 		if exists {
 			prior = normalizeIssue(prior)
 			if next.Revision != prior.Revision+1 {
@@ -832,6 +841,11 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 			if err := verifyIssueCompaction(prior, next); err != nil {
 				return Effect{}, err
 			}
+			had = map[model.ID]bool{}
+			issueHeldIDs(prior, func(id model.ID) bool {
+				had[id] = true
+				return true
+			})
 		} else {
 			if next.Revision != 1 {
 				return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
@@ -841,21 +855,41 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 			if next.Compacted != nil || next.LateCompacted != nil {
 				return Effect{}, model.Fail(model.Invalid)
 			}
-			if len(issues) >= maxIssuesPerProject {
+			n, err := src.size()
+			if err != nil {
+				return Effect{}, err
+			}
+			if n+created >= maxIssuesPerProject {
 				return Effect{}, model.Fail(model.Quota)
 			}
+			created++
 		}
+		var lookup error
 		conflict := !issueHeldIDs(next, func(id model.ID) bool {
-			if holder, taken := held[id]; taken && holder != next.ID {
-				return false
+			if holder, taken := held[id]; taken {
+				return holder == next.ID
+			}
+			if !had[id] {
+				other, found, err := src.holder(id, changedKeys)
+				if err != nil {
+					lookup = err
+					return false
+				}
+				if found && other != next.ID {
+					return false
+				}
 			}
 			held[id] = next.ID
 			return true
 		})
+		if lookup != nil {
+			return Effect{}, lookup
+		}
 		if conflict {
 			return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
 		}
-		issues[key] = next
+		nextIssues = append(nextIssues, next)
+		issueKeys = append(issueKeys, key)
 		expl, err := issueExplanations(r.Explanations)
 		if err != nil {
 			return Effect{}, err
@@ -874,10 +908,35 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 	for _, e := range book.Effects {
 		seenEffects[e.ID] = true
 	}
+	// holds says whether the issue accounts for the occurrence: a written issue by what this command gave it, any
+	// other by its record (read when an effect names it).
+	holds := func(issue, occurrence model.ID) (bool, error) {
+		if holder, ok := held[occurrence]; ok {
+			return holder == issue, nil
+		}
+		key := model.ReleaseScopeKey(org, c.Project, issue)
+		if changedKeys[key] {
+			return false, nil
+		}
+		gi, ok, err := src.get(key)
+		if err != nil || !ok {
+			return false, err
+		}
+		found := false
+		issueHeldIDs(gi, func(id model.ID) bool {
+			found = id == occurrence
+			return !found
+		})
+		return found, nil
+	}
 	for _, e := range c.Effects {
 		// An effect belongs to an issue of this project and an occurrence that issue
 		// holds; its ID derives from the occurrence, so it is minted once.
-		if seenEffects[e.ID] || held[e.Occurrence] != e.Issue {
+		ok, err := holds(e.Issue, e.Occurrence)
+		if err != nil {
+			return Effect{}, err
+		}
+		if seenEffects[e.ID] || !ok {
 			return Effect{}, model.Fail(model.Invalid)
 		}
 		seenEffects[e.ID] = true
@@ -948,23 +1007,24 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	total := len(rawBook)
-	for _, gi := range issues {
-		raw, err := json.Marshal(gi)
+	raws := make([][]byte, len(nextIssues))
+	for i, gi := range nextIssues {
+		raw, err := marshalIssue(gi)
 		if err != nil {
 			return Effect{}, model.Fail(model.Invalid)
 		}
+		raws[i] = raw
 		total += len(raw)
 	}
-	if total > maxIssueProjectBytes {
+	rest, err := src.otherBytes(changedKeys)
+	if err != nil {
+		return Effect{}, err
+	}
+	if total+rest > maxIssueProjectBytes {
 		return Effect{}, model.Fail(model.Quota)
 	}
-	if st.GroupingIssues == nil {
-		st.GroupingIssues = map[string]model.GroupingIssue{}
-	}
-	for key, gi := range issues {
-		if changed[gi.ID] {
-			st.GroupingIssues[key] = gi
-		}
+	for i, gi := range nextIssues {
+		src.put(issueKeys[i], gi, raws[i])
 	}
 	if st.IssueBooks == nil {
 		st.IssueBooks = map[string]json.RawMessage{}
@@ -1074,12 +1134,13 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 		return Result{}, model.Fail(model.Unsupported)
 	}
 	var out Result
+	bounded := s.BoundedRules()
 	// A lifecycle commit writes the project's issue book, the issues it changed and the command's record:
 	// those are committed as the records they are, without the whole state (sparse.go). The grouping
 	// migration, a project a finished deletion covers and anything the plan cannot judge go through the
 	// whole-state funnel.
 	handled, err := s.sparseUpdate(ctx, func(core *State, l *ledgerTx) ([]patchOp, error) {
-		return planIssueCommit(scope, cmd, operation, handler, core, l, &out)
+		return planIssueCommit(scope, cmd, operation, bounded, core, l, &out)
 	})
 	if handled {
 		return out, err
@@ -1116,7 +1177,7 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 // on a state that holds the project's issue book and issues and nothing the command writes besides, and what
 // it left is written as records: the book, the issues that changed, the audit rows it appended and the
 // command's own record.
-func planIssueCommit(scope auth.Scope, cmd Command, operation string, handler Handler, core *State, l *ledgerTx, out *Result) ([]patchOp, error) {
+func planIssueCommit(scope auth.Scope, cmd Command, operation string, bounded bool, core *State, l *ledgerTx, out *Result) ([]patchOp, error) {
 	var head struct {
 		Project model.ID `json:"project"`
 	}
@@ -1135,25 +1196,11 @@ func planIssueCommit(scope auth.Scope, cmd Command, operation string, handler Ha
 		ov.IssueBooks[key] = before
 	}
 	ov.Audits = nil
-	// The project's issues are the records under its key prefix; held keeps the bytes each was read as, to tell
-	// the ones the handler changed.
-	issues, held := map[string]model.GroupingIssue{}, map[string][]byte{}
-	var corrupt bool
-	l.each(tableGroupingIssues, []byte(org.String()+":"+head.Project.String()+":"), func(k, v []byte) bool {
-		var gi model.GroupingIssue
-		if json.Unmarshal(v, &gi) != nil {
-			corrupt = true
-			return false
-		}
-		if gi.Org == org && gi.Project == head.Project {
-			issues[string(k)], held[string(k)] = gi, bytes.Clone(v)
-		}
-		return true
-	})
-	if corrupt {
-		return nil, model.Fail(model.Corrupt)
-	}
-	ov.GroupingIssues = issues
+	// The plan reads the issues the command names (src decodes each of them once) and holds the others as the
+	// records they are: what it needs of those is a count, their size and whether one of them holds an
+	// occurrence, none of which decodes or encodes them (issueSource).
+	src := newLedgerIssues(l, org, head.Project)
+	ov.GroupingIssues = nil
 	binding := scope.PrincipalID().String() + ":" + scope.OrgID().String() + ":" + cmd.Kind
 	id := cmd.CommandID.String()
 	if recorded := l.t[tableCommands].Get([]byte(id)); recorded != nil {
@@ -1170,7 +1217,7 @@ func planIssueCommit(scope auth.Scope, cmd Command, operation string, handler Ha
 		*out = v
 		return nil, nil
 	}
-	effect, err := handler(scope, &ov, cmd)
+	effect, err := applyIssueBookOn(scope, &ov, cmd, bounded, src)
 	if err != nil {
 		return nil, err
 	}
@@ -1181,17 +1228,14 @@ func planIssueCommit(scope auth.Scope, cmd Command, operation string, handler Ha
 	} else if !ok && before != nil {
 		return nil, errSparseFallback
 	}
-	for k := range held {
-		if _, ok := issues[k]; !ok {
-			return nil, errSparseFallback
-		}
+	written := make([]string, 0, len(src.written))
+	for k := range src.written {
+		written = append(written, k)
 	}
-	for k, gi := range issues {
-		raw, err := json.Marshal(gi)
-		if err != nil {
-			return nil, model.Fail(model.Invalid)
-		}
-		if prev, ok := held[k]; ok && bytes.Equal(prev, raw) {
+	sort.Strings(written)
+	for _, k := range written {
+		raw := src.written[k]
+		if prev, ok := src.prior[k]; ok && bytes.Equal(prev, raw) {
 			continue
 		}
 		ops = append(ops, patchOp{Op: opSet, Path: []string{"GroupingIssues", k}, Value: raw})

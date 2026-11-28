@@ -1163,7 +1163,7 @@ func pruneSettledDeliveries(st *State, org, project model.ID) error {
 // looked up; a delivery of another project is indistinguishable from an absent
 // one.
 func (s *Store) Delivery(ctx context.Context, scope auth.Scope, project, id model.ID, now model.UnixNano) (out DeliveryRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
+	err = s.viewCoreOf(ctx, deliveryReadMembers, func(st State) error {
 		if e := ruleReadScope(scope, st, project); e != nil {
 			return e
 		}
@@ -1178,6 +1178,10 @@ func (s *Store) Delivery(ctx context.Context, scope auth.Scope, project, id mode
 	})
 	return
 }
+
+// deliveryReadMembers are the members Delivery reads: what a shared reader reads of the state (the scope, the retirements, the deletions, the
+// destinations in the organizations' settings), the delivery books, the cutover books and the restore marker (OIDC). It decodes none of the others.
+var deliveryReadMembers = readOnlyMembers | memberSetOf("DeliveryBooks", "CutoverBooks", "OIDC")
 
 // Deliveries lists one project's deliveries in (eligible, ID) order, optionally
 // only those in one phase (all when phase is empty). limit <= 0 means every

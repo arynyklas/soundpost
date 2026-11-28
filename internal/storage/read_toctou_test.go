@@ -38,6 +38,13 @@ func (v *toctouView) didFlip() bool {
 	defer v.mu.Unlock()
 	return v.flipped
 }
+
+// flipNow is a Begin that commits now: every later call sees the new predicates.
+func (v *toctouView) flipNow(next ...model.DeletePredicate) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.calls, v.flipAt, v.preds, v.next, v.flipped = 0, 0, next, nil, true
+}
 func (v *toctouView) ActiveDeletions(_ context.Context, org model.ID, _ []model.ID) ([]model.DeletePredicate, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -232,7 +239,10 @@ func drainScan(t *testing.T, env *toctouEnv, req ScanRequest, next ...model.Dele
 		t.Fatal(err)
 	}
 	defer it.Close()
-	env.view.arm(scanFetchCalls, next...)
+	// The first chunk of a scan filters with the predicates the Scan read; the deletion commits after that
+	// read and before the release barrier, which reads them again (the barrier is the first fetch of the
+	// Next) and must rebuild the page. A deletion that commits after the barrier's read is after the release.
+	env.view.flipNow(next...)
 	var got []model.ID
 	for {
 		page, err := it.Next(context.Background())

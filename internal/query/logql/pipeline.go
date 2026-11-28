@@ -65,11 +65,7 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 	}()
 	fieldBytes := int64(0)
 	for _, f := range record.Fields {
-		raw, e := f.Value.MarshalJSON()
-		if e != nil {
-			return result, model.Fail(model.Corrupt)
-		}
-		fieldBytes += int64(len(raw) + len(f.Name))
+		fieldBytes += int64(f.Value.JSONLen() + len(f.Name))
 	}
 	originalBytes := int64(0)
 	for _, labels := range []model.Labels{record.StreamLabels, record.StructuredMetadata} {
@@ -301,23 +297,34 @@ func RunLogRow(ctx context.Context, plan PipelinePlan, row scan.LogRow, account 
 		if err := account.Check(ctx); err != nil {
 			return PipelineResult{}, err
 		}
-		raw, err := v.MarshalJSON()
-		if err != nil {
-			return PipelineResult{}, model.Fail(model.Corrupt)
-		}
-		cost := int64(len(raw)) * 4
-		if err = account.Reserve(cost); err != nil {
+		cost := int64(v.JSONLen()) * 4
+		if err := account.Reserve(cost); err != nil {
 			return PipelineResult{}, err
 		}
 		held += cost
-		text := string(raw)
-		if len(raw) > 0 && raw[0] == '"' {
-			if json.Unmarshal(raw, &text) != nil {
+		text, plain := v.PlainText()
+		if !plain {
+			raw, err := v.MarshalJSON()
+			if err != nil {
 				return PipelineResult{}, model.Fail(model.Corrupt)
+			}
+			text = v.Text()
+			if len(raw) > 0 && raw[0] == '"' {
+				if json.Unmarshal(raw, &text) != nil {
+					return PipelineResult{}, model.Fail(model.Corrupt)
+				}
 			}
 		}
 		record.StructuredMetadata = append(record.StructuredMetadata, model.Label{Name: name, Value: text})
 	}
-	sort.Slice(record.StructuredMetadata, func(i, j int) bool { return record.StructuredMetadata[i].Name < record.StructuredMetadata[j].Name })
+	if ls := record.StructuredMetadata; len(ls) > 16 {
+		sort.Slice(ls, func(i, j int) bool { return ls[i].Name < ls[j].Name })
+	} else {
+		for i := 1; i < len(ls); i++ { // a few entries: no closure, no swapper
+			for j := i; j > 0 && ls[j].Name < ls[j-1].Name; j-- {
+				ls[j], ls[j-1] = ls[j-1], ls[j]
+			}
+		}
+	}
 	return RunPipeline(ctx, plan, record, account)
 }

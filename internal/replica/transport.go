@@ -156,6 +156,10 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.serveProposal(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, callPath) {
+		t.serveCall(w, r)
+		return
+	}
 	if r.URL.Path == layoutPath {
 		t.serveLayout(w, r)
 		return

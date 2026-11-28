@@ -357,8 +357,19 @@ func storeRuleBook(st *State, key string, b RuleBook) error {
 	return nil
 }
 
+// loadRuleOutput reads the outbox entry id of a state that holds the outbox as a member of the blob, under its ID.
 func loadRuleOutput(st *State, id model.ID) (RuleOutput, bool, error) {
-	raw, ok := st.RuleOutputs[id.String()]
+	return loadRuleOutputAt(st, id.String())
+}
+
+// loadRuleOutputOf reads the outbox entry id of the rule book names: under its ID in a state that holds the outbox in
+// the blob, under the key of the ledger (ruleOutputKey) in one that keeps it there.
+func loadRuleOutputOf(st *State, book *RuleBook, id model.ID) (RuleOutput, bool, error) {
+	return loadRuleOutputAt(st, ruleOutputKeyIn(st, book.Org, book.Project, book.Rule, id))
+}
+
+func loadRuleOutputAt(st *State, key string) (RuleOutput, bool, error) {
+	raw, ok := st.RuleOutputs[key]
 	if !ok {
 		return RuleOutput{}, false, nil
 	}
@@ -377,8 +388,13 @@ func storeRuleOutput(st *State, o RuleOutput) error {
 	if st.RuleOutputs == nil {
 		st.RuleOutputs = map[string]json.RawMessage{}
 	}
-	st.RuleOutputs[o.ID.String()] = raw
+	st.RuleOutputs[ruleOutputKeyIn(st, o.Org, o.Project, o.Rule, o.ID)] = raw
 	return nil
+}
+
+// dropRuleOutput removes an outbox entry from st.
+func dropRuleOutput(st *State, o RuleOutput) {
+	delete(st.RuleOutputs, ruleOutputKeyIn(st, o.Org, o.Project, o.Rule, o.ID))
 }
 
 func validRuleCursors(in []model.Cursor) bool {
@@ -573,7 +589,7 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 		}
 	}
 	for _, o := range e.Outputs {
-		if _, ok, err := loadRuleOutput(st, o.ID); err != nil {
+		if _, ok, err := loadRuleOutputOf(st, book, o.ID); err != nil {
 			return Effect{}, err
 		} else if ok {
 			return Effect{}, ruleFault(model.Conflict, "rule_output_exists")
@@ -630,7 +646,7 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 	// Promote the staged outputs of this identity in the same transition and drop
 	// the orphans of an abandoned one.
 	for _, o := range orphans {
-		delete(st.RuleOutputs, o.ID.String())
+		dropRuleOutput(st, o)
 	}
 	for i := range staged {
 		staged[i].Phase, staged[i].Created = RulePhasePending, revision
@@ -794,7 +810,7 @@ func applyRuleStageArm(st *State, book *RuleBook, s RuleStageApply) (Effect, err
 			}
 			continue
 		}
-		if _, ok, err := loadRuleOutput(st, intent.ID); err != nil {
+		if _, ok, err := loadRuleOutputOf(st, book, intent.ID); err != nil {
 			return Effect{}, err
 		} else if ok {
 			return Effect{}, ruleFault(model.Conflict, "rule_output_exists")
@@ -806,7 +822,7 @@ func applyRuleStageArm(st *State, book *RuleBook, s RuleStageApply) (Effect, err
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	for _, o := range orphans {
-		delete(st.RuleOutputs, o.ID.String())
+		dropRuleOutput(st, o)
 	}
 	for _, out := range fresh {
 		if err := storeRuleOutput(st, out); err != nil {
@@ -843,7 +859,7 @@ func pruneRuleOutputs(st *State, book *RuleBook) error {
 		return settled[i].ID.String() < settled[j].ID.String()
 	})
 	for _, o := range settled[:len(settled)-maxRuleSettledOutputs] {
-		delete(st.RuleOutputs, o.ID.String())
+		dropRuleOutput(st, o)
 	}
 	return nil
 }
@@ -893,7 +909,7 @@ func applyRuleOutputArm(st *State, book *RuleBook, u RuleOutputApply) (Effect, e
 	if u.Output == (model.ID{}) {
 		return Effect{}, model.Fail(model.Invalid)
 	}
-	out, found, err := loadRuleOutput(st, u.Output)
+	out, found, err := loadRuleOutputOf(st, book, u.Output)
 	if err != nil {
 		return Effect{}, err
 	}
@@ -1256,7 +1272,15 @@ func ruleOutputsOf(st model.ReadOnlyControl, org, project, rule model.ID, phase 
 	// at the first output that needs them, not once per output.
 	var predicates []model.DeletePredicate
 	asked := false
-	for _, key := range st.BookKeys(model.BookRuleOutputs, "") {
+	prefix := ""
+	if rl, ok := st.(interface{ RuleLedger() bool }); ok && rl.RuleLedger() {
+		// The ledger keeps the outbox of a rule as one run of keys, of a project as another: the read is those, not the whole table.
+		prefix = org.String() + ":" + project.String() + ":"
+		if rule != (model.ID{}) {
+			prefix = ruleOutputPrefix(org, project, rule)
+		}
+	}
+	for _, key := range st.BookKeys(model.BookRuleOutputs, prefix) {
 		raw, ok := st.BookRecord(model.BookRuleOutputs, key)
 		if !ok {
 			continue

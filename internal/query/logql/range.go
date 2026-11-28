@@ -281,21 +281,18 @@ func evaluateRange(ctx context.Context, p RangePlan, rows rangeRows, frame Frame
 		}
 		r.labels.prepare(unwrap, p)
 		scratch := r.labels.scratch
-		if e = a.Reserve(scratch); e != nil {
-			a.Release(r.bytes)
-			return result, e
-		}
-		held += scratch
 		cost := int64(192)
 		g := groups[r.labels.key]
 		if g == nil {
 			cost += r.labels.newGroup
 		}
-		if e = a.Reserve(cost); e != nil {
+		// One charge for the row's scratch and its accumulation: the peak is the same as with two, and a
+		// row cost four calls on the account (two locks each) where it now costs two.
+		if e = a.Reserve(scratch + cost); e != nil {
 			a.Release(r.bytes)
 			return result, e
 		}
-		held += cost
+		held += scratch + cost
 		if g == nil {
 			g = &rangeGroup{labels: value.CloneLabels(r.labels.grouped)}
 			groups[r.labels.key] = g
@@ -310,9 +307,8 @@ func evaluateRange(ctx context.Context, p RangePlan, rows rangeRows, frame Frame
 		} else if p.Function == "bytes_rate" || p.Function == "bytes_over_time" {
 			v = float64(r.lineLen)
 		}
-		g.points = append(g.points, rangePoint{at: r.at, v: v, n: uint64(r.multiplicity), id: r.id, hash: r.hash})
-		a.Release(r.bytes)
-		a.Release(scratch)
+		g.points = appendDoubling(g.points, rangePoint{at: r.at, v: v, n: uint64(r.multiplicity), id: r.id, hash: r.hash})
+		a.Release(r.bytes + scratch)
 		held -= scratch
 	}
 	if p.Function == "absent_over_time" {

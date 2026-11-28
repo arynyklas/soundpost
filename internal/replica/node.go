@@ -339,6 +339,8 @@ type Group struct {
 	cadenceWake   chan struct{}
 	cadenceCuts   atomic.Uint64 // cuts the cadence loop completed
 	cadenceLong   atomic.Int64  // nanoseconds the longest of them took
+	cadenceBusy   atomic.Bool   // a cut is running (CadencePending)
+	transfers     atomic.Uint64 // leadership transfers the placement (balance.go) has started
 	// tail is the run of entries below the in-memory log that a cadence cut retained for a member that is behind
 	// (tail.go); raft reads it through snapshotSource, everything else in the group sees the log as compacted.
 	tail logTail
@@ -348,6 +350,8 @@ type Group struct {
 	bal    balanceState
 	// phases are the cumulative times the group spent in the stages of its pipeline (phases.go).
 	phases phaseCounters
+	// lane traces where the time of a proposal goes on the leader (queue, encode, persist, commit, apply) and what the stage's persists cost (proposals.go).
+	lane   laneTrace
 	domain *FailDomain
 	// soloRead is the cursor a read of this group answers while the group is a single voter that
 	// leads: such a leader has nobody to confirm its leadership with, and every command it
@@ -364,6 +368,8 @@ type Group struct {
 	// transportView is the membership the transport addresses (members and those being retired), published with membersView,
 	// so that a batch of heartbeats can prove its sender without the group lock.
 	transportView atomic.Pointer[Members]
+	// calls are the handlers of the calls a member makes to this one as the leader (HandleCall), by name.
+	calls sync.Map
 }
 
 func Open(c Config) (*Group, error) {
@@ -693,6 +699,15 @@ func (g *Group) publishMembers() {
 func (g *Group) CommittedMembers() Members { return *g.membersView.Load() }
 func (g *Group) Propose(ctx context.Context, e Entry) (CommittedEntry, error) {
 	return g.propose(ctx, e, nil)
+}
+
+// Leader is the member this one follows as the leader of the group (0: none known) and whether that is this member.
+// It takes g.mu for one status read, which is only ever held for memory work.
+func (g *Group) Leader() (leader uint64, self bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	s := g.raw.BasicStatus()
+	return s.Lead, s.Lead == g.id && s.RaftState == raft.StateLeader
 }
 
 // proposerLocked is the Proposer of member id as the group's configuration lists it, including a

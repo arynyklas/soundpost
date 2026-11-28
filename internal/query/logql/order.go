@@ -349,9 +349,15 @@ func mergeBounded(ctx context.Context, inputs []EntryIterator, order LogOrder, b
 	return m, nil
 }
 
-// labelString renders labels as Prometheus does: {name="value", name2="value2"}.
+// labelString renders labels as Prometheus does: {name="value", name2="value2"}. The result is built in one
+// allocation sized for the plain case; a value that needs escapes takes strconv.Quote, as it always did.
 func labelString(ls model.Labels) string {
+	n := 2
+	for _, l := range ls {
+		n += len(l.Name) + len(l.Value) + 5
+	}
 	var b strings.Builder
+	b.Grow(n)
 	b.WriteByte('{')
 	for i, l := range ls {
 		if i > 0 {
@@ -359,10 +365,27 @@ func labelString(ls model.Labels) string {
 		}
 		b.WriteString(l.Name)
 		b.WriteByte('=')
-		b.WriteString(strconv.Quote(l.Value))
+		if plainQuoted(l.Value) {
+			b.WriteByte('"')
+			b.WriteString(l.Value)
+			b.WriteByte('"')
+		} else {
+			b.WriteString(strconv.Quote(l.Value))
+		}
 	}
 	b.WriteByte('}')
 	return b.String()
+}
+
+// plainQuoted reports whether strconv.Quote(v) is v between double quotes: printable ASCII without a quote or
+// a backslash.
+func plainQuoted(v string) bool {
+	for i := range len(v) {
+		if c := v[i]; c < 0x20 || c > 0x7e || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // compareLogEncounter orders records of one stream and timestamp by identity.

@@ -66,10 +66,8 @@ type slotMachine struct {
 	engine    *Engine
 	slot      uint16
 	authority ReplicatedAuthority
-	// snaps is the group's snapshot store (UseSnapshotStore); cut is the window table of the last
-	// compact cut. Both are read and written under engine.mu.
+	// snaps is the group's snapshot store (UseSnapshotStore), read and written under engine.mu.
 	snaps *replica.SnapshotStore
-	cut   *cutTable
 }
 type slotSnapshot struct {
 	Version     uint16            `json:"version"`
@@ -564,6 +562,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	for slot, group := range opened {
 		if group != nil {
 			r.groups[slot] = group
+			group.HandleCall(appendCall, e.serveAppend)
 			id := e.group(uint16(slot))
 			if _, taken := r.owners[id]; !taken { // the first slot of an identifier wins, as a scan by slot did
 				r.owners[id] = group
@@ -946,20 +945,6 @@ func (m *slotMachine) UseSnapshotStore(s *replica.SnapshotStore) {
 	m.engine.mu.Unlock()
 }
 
-// CompactSnapshot is the state a locally cut snapshot carries in its envelope (replica.CompactMachine):
-// the window table. The history itself is in the snapshot's window files (PinFiles). The table is derived
-// without the engine lock (windowTableForCut): the group of the slot is held by the cut, and so is its index.
-func (m *slotMachine) CompactSnapshot() ([]byte, error) {
-	e := m.engine
-	table, application, err := e.windowTableForCut(m.slot)
-	if err != nil {
-		return nil, err
-	}
-	e.mu.Lock()
-	m.cut = &cutTable{application: application, windows: table}
-	e.mu.Unlock()
-	return json.Marshal(slotSnapshotV2{Version: 2, Identity: e.identity, Slot: m.slot, Application: model.Uint64(application), Span: model.Uint64(snapshotWindow), Windows: refsOf(table)})
-}
 func (m *slotMachine) VerifySnapshot(raw []byte) error {
 	if stateVersion(raw) == 2 {
 		return m.verifyCompact(raw)

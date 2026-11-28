@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -59,6 +60,18 @@ func (s *Store) SetMemberLayoutQuery(query func(context.Context, replica.Member)
 	s.memberLayoutQuery.Store(&query)
 }
 
+// SetMemberRuleLedgerQuery installs the live question to one member whether its RUNNING binary reads the rule books and the
+// rule outbox as records of the ledger (D108): nil when it answers that it does, an error for every other outcome. It is asked
+// of a member only once the installation carries the mark (model.RuleLedgerKey); without one nobody answers (fail closed).
+// Passing nil removes it.
+func (s *Store) SetMemberRuleLedgerQuery(query func(context.Context, replica.Member) error) {
+	if query == nil {
+		s.memberRuleLedgerQuery.Store(nil)
+		return
+	}
+	s.memberRuleLedgerQuery.Store(&query)
+}
+
 // indexesContracted reports whether any organization of the installation is contracted
 // (`soundpost upgrade contract-indexes` ran, or the organization was created after it). From that
 // point a member whose binary does not read the contracted layout reports the ledgers and replays it
@@ -68,24 +81,39 @@ func (s *Store) SetMemberLayoutQuery(query func(context.Context, replica.Member)
 // that is a moment behind answers false at worst for a transition that has just committed; a stored
 // state that cannot be read is an error (the guards refuse).
 func (s *Store) indexesContracted(ctx context.Context) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
+	contracted, _, err := s.layoutMarks(ctx)
+	return contracted, err
+}
+
+// layoutMarks is indexesContracted and, beside it, whether the stored state carries the mark of the rule ledger (D108,
+// model.RuleLedgerKey): from then on a member must also read the rule facts as records. It reads the state of this node the same way.
+func (s *Store) layoutMarks(ctx context.Context) (contracted, rules bool, err error) {
+	if err = ctx.Err(); err != nil {
+		return false, false, err
 	}
-	contracted := false
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err = s.db.View(func(tx *bolt.Tx) error {
 		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
 		if raw == nil {
 			return model.Fail(model.Corrupt)
 		}
 		contracted = bytes.Contains(raw, []byte(`"`+model.IndexesContractedKey+`"`))
+		rules = contracted && bytes.Contains(raw, ruleLedgerMark)
 		return nil
 	})
-	return contracted, err
+	return contracted, rules, err
 }
 
-// memberReadsLayout asks the member the live question; without a query nobody answers (fail closed).
-func (s *Store) memberReadsLayout(ctx context.Context, m replica.Member) bool {
+// memberReadsLayout asks the member the live question (and, when rules says the installation carries the mark of the rule
+// ledger, the one about it); without a query nobody answers (fail closed).
+func (s *Store) memberReadsLayout(ctx context.Context, m replica.Member, rules bool) bool {
 	query := s.memberLayoutQuery.Load()
+	if query == nil || (*query)(ctx, m) != nil {
+		return false
+	}
+	if !rules {
+		return true
+	}
+	query = s.memberRuleLedgerQuery.Load()
 	return query != nil && (*query)(ctx, m) == nil
 }
 
@@ -110,29 +138,43 @@ func (s *Store) CheckLearnerLayout(ctx context.Context, m replica.Member) error 
 }
 
 func (s *Store) checkMemberLayout(ctx context.Context, m replica.Member, notYetRunningIsAdmitted bool) error {
-	contracted, err := s.indexesContracted(ctx)
+	contracted, rules, err := s.layoutMarks(ctx)
 	if err != nil {
 		return err
 	}
 	if !contracted {
 		return nil
 	}
-	query := s.memberLayoutQuery.Load()
-	if query == nil {
-		return LayoutIncompatible(m)
+	asks := []*atomic.Pointer[func(context.Context, replica.Member) error]{&s.memberLayoutQuery}
+	if rules {
+		// The installation keeps the rule facts in the ledger (D108): a binary that reads the contracted layout and not that one
+		// (every build before the move, protocol 9) holds empty rule books and cannot verify the ledger digest; it is refused
+		// as the previous release is after the contraction.
+		asks = append(asks, &s.memberRuleLedgerQuery)
 	}
-	switch err = (*query)(ctx, m); {
-	case err == nil, notYetRunningIsAdmitted && errors.Is(err, replica.ErrMemberNotRunning):
-		return nil
+	for _, ask := range asks {
+		query := ask.Load()
+		if query == nil {
+			return LayoutIncompatible(m)
+		}
+		switch err = (*query)(ctx, m); {
+		case err == nil:
+		case notYetRunningIsAdmitted && errors.Is(err, replica.ErrMemberNotRunning):
+			return nil
+		default:
+			return LayoutIncompatible(m)
+		}
 	}
-	return LayoutIncompatible(m)
+	return nil
 }
 
 // MembersIncompatible names, as "layout_incompatible:<identity>" in the order of members, every one of
-// them whose running binary cannot read the contracted layout; none while no organization is
-// contracted. A state that cannot be read answers nothing (a report, not a gate).
+// them whose running binary cannot read the contracted layout (and, once the installation carries the mark of the rule
+// ledger, the rule facts as records); none while no organization is contracted. A state that cannot be read answers
+// nothing (a report, not a gate).
 func (s *Store) MembersIncompatible(ctx context.Context, members []replica.Member) []string {
-	if contracted, err := s.indexesContracted(ctx); err != nil || !contracted {
+	contracted, rules, err := s.layoutMarks(ctx)
+	if err != nil || !contracted {
 		return nil
 	}
 	reads := make([]bool, len(members))
@@ -141,7 +183,7 @@ func (s *Store) MembersIncompatible(ctx context.Context, members []replica.Membe
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reads[i] = s.memberReadsLayout(ctx, m)
+			reads[i] = s.memberReadsLayout(ctx, m, rules)
 		}()
 	}
 	wg.Wait()

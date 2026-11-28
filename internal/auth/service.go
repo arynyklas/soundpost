@@ -75,6 +75,26 @@ func (s *Service) viewCore(ctx context.Context, fn func(model.ControlState) erro
 	return s.store.View(model.WithoutBooks(ctx), fn)
 }
 
+// MemberViewer is optionally implemented by a ControlStore that reads some members of the state only
+// (control.Store.ViewMembers): a read of the named members has ViewCore's barrier and revision, and a commit
+// that changed none of them costs it nothing.
+type MemberViewer interface {
+	ViewMembers(ctx context.Context, names []string, fn func(model.ControlState) error) error
+}
+
+// credentialMembers are the members the authentication of a request reads: the server tokens, the sessions and the users.
+var credentialMembers = []string{"ServerTokens", "Sessions", "Users"}
+
+// viewCredentials is viewCore for a caller that reads credentialMembers only (the other members come empty).
+func (s *Service) viewCredentials(ctx context.Context, fn func(model.ControlState) error) error {
+	if v, ok := s.store.(CoreViewer); ok && v.SharesViewOf(s.store) {
+		if m, ok := s.store.(MemberViewer); ok {
+			return m.ViewMembers(ctx, credentialMembers, fn)
+		}
+	}
+	return s.viewCore(ctx, fn)
+}
+
 // viewAdmission is viewCore that also gives the reader the reservation rows.
 func (s *Service) viewAdmission(ctx context.Context, fn func(model.ControlState, AdmissionReader) error) error {
 	if v, ok := s.store.(CoreViewer); ok && v.SharesViewOf(s.store) {
@@ -454,7 +474,7 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {
 	var out Credential
-	e := s.viewCore(ctx, func(st model.ControlState) error {
+	e := s.viewCredentials(ctx, func(st model.ControlState) error {
 		if tokenRecord, ok := st.ServerTokens[s.serverTokenDigest(token)]; ok {
 			user, exists := st.Users[tokenRecord.Principal.String()]
 			if !exists || user.Disabled || tokenRecord.Revoked || tokenRecord.Expires <= s.now().Unix() {
@@ -475,7 +495,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Credential, e
 }
 func (s *Service) Session(ctx context.Context, token string) (Session, error) {
 	var out Session
-	e := s.viewCore(ctx, func(st model.ControlState) error {
+	e := s.viewCredentials(ctx, func(st model.ControlState) error {
 		v, ok := st.Sessions[hashToken(token)]
 		if !ok || v.Expires <= s.now().Unix() || st.Users[v.User.String()].ID == (model.ID{}) || st.Users[v.User.String()].Disabled {
 			return model.Fail(model.Unauthenticated)

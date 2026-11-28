@@ -188,13 +188,6 @@ type windowSidecar struct {
 	Cancelled []CancellationEvidence `json:"cancelled"`
 }
 
-// cutTable remembers the window table of the last compact cut so PinFiles and the ledger of the
-// same CreateSnapshot see the table the state was written from.
-type cutTable struct {
-	application uint64
-	windows     []windowRecord
-}
-
 func winName(n uint64) string { return fmt.Sprintf("win-%08d.cmd", n) }
 func evName(n uint64) string  { return fmt.Sprintf("win-%08d.evd", n) }
 
@@ -302,6 +295,10 @@ func (b *windowBuilder) write(p []byte) error {
 // windowCommandsDerived counts the commands read into a window record (a cut, a check or a
 // restore re-derives a window from them): the measure of how much history a cut reads.
 var windowCommandsDerived atomic.Uint64
+
+// windowBytesStaged counts the bytes cuts wrote into their staging directory (window files and evidence files): with the bytes the
+// snapshot store then copied from it (replica.SnapshotBytesCopied) the measure of what a cut writes for its windows.
+var windowBytesStaged atomic.Uint64
 
 // add appends the command stored at the next index.
 func (b *windowBuilder) add(raw []byte) error {
@@ -437,22 +434,52 @@ type windowCache struct {
 	rec   windowRecord       // the record at the last finish
 	side  []byte             // the evidence file at the last finish
 	cps   []windowCheckpoint // oldest first
+	// sealed is the last window of the slot the cache derived to its end: the window that sealed, kept until the next one does, so that the
+	// cut or the settlement pass that finds it sealed takes its record from the cache, and the cut writes its file from the previous
+	// snapshot's file and the commands added since, as for any cut of an open window.
+	sealed sealedWindow
 }
 
-// deriveWindow is computeWindowFrom without a sink for the window n of slot (count commands from first). With keep the derivation is the
-// slot's cache: the last window of the slot is extended, not derived again. The caller holds cutMu shared and no read transaction: the
-// commands are read through fetchedCommands.
-func (e *Engine) deriveWindow(slot uint16, n, first, count, part uint64, keep bool) (windowRecord, error) {
+// sealedWindow is the state of a window the cache derived to its end.
+type sealedWindow struct {
+	ok    bool
+	epoch uint64
+	part  uint64
+	rec   windowRecord
+	side  []byte
+	cps   []windowCheckpoint
+}
+
+// matches reports whether this is the derivation of exactly the window of the record under the epoch.
+func (s *sealedWindow) matches(epoch uint64, want windowRecord) bool {
+	return s.ok && s.epoch == epoch && s.rec.fits(want.N, want.First, want.Count) && s.rec.File == want.File && s.rec.Ev == want.Ev
+}
+
+// deriveWindow is computeWindowFrom without a sink for the window n of slot (count commands from first). The window the slot is filling
+// (open: it holds the commands up to the slot's last) is the slot's cache, extended by the commands added since the cut before; a window
+// that has sealed (sealed: it is full) is taken from the cache when the cache holds it, finished by the commands it still lacked, and
+// derived from the commands only when it does not (a restart, an erasure). The derivation passes the cut gate, which bounds how many
+// of them the 64 slots of an engine run at once. The caller holds cutMu shared and no read transaction: the commands are read through
+// fetchedCommands.
+func (e *Engine) deriveWindow(slot uint16, n, first, count, part uint64, open, sealed bool) (windowRecord, error) {
 	src := e.fetchedCommands(slot)
-	if !keep {
+	defer e.cutGate.enter()()
+	c := &e.windows[slot]
+	epoch, end := e.cutEpoch.Load(), first+count
+	c.mu.Lock()
+	if c.sealed.ok && c.sealed.epoch == epoch && c.sealed.part == part && c.sealed.rec.fits(n, first, count) {
+		rec := c.sealed.rec
+		c.mu.Unlock()
+		return rec, nil
+	}
+	holds := c.b != nil && c.epoch == epoch && c.part == part && c.b.rec.N == n && c.b.rec.First == first && c.b.next <= end
+	if !open && !holds {
+		c.mu.Unlock()
 		rec, _, err := computeWindowFrom(src, n, first, count, part, nil, nil)
 		return rec, err
 	}
-	c := &e.windows[slot]
-	c.mu.Lock()
 	defer c.mu.Unlock()
-	epoch, end := e.cutEpoch.Load(), first+count
-	if c.b == nil || c.epoch != epoch || c.b.rec.N != n || c.b.rec.First != first || c.part != part || c.b.next > end {
+	if !holds {
 		b, err := newWindowBuilder(n, first, nil)
 		if err != nil {
 			return windowRecord{}, err
@@ -476,6 +503,10 @@ func (e *Engine) deriveWindow(slot uint16, n, first, count, part uint64, keep bo
 	c.cps = append(c.cps, windowCheckpoint{count: count, file: rec.File})
 	if len(c.cps) > windowCheckpoints {
 		c.cps = append(c.cps[:0], c.cps[len(c.cps)-windowCheckpoints:]...)
+	}
+	if sealed {
+		c.sealed = sealedWindow{ok: true, epoch: epoch, part: part, rec: rec, side: side, cps: c.cps}
+		c.b, c.rec, c.side, c.cps = nil, windowRecord{}, nil, nil
 	}
 	return rec, nil
 }
@@ -516,7 +547,7 @@ func (r windowRecord) fits(n, first, count uint64) bool {
 // derived from the commands (and persisted when persist is set); the open window is always derived. It reads the
 // stored commands through fetchedCommands (short read transactions, the payload log outside them) and takes no engine lock: the caller holds cutMu shared (the commands
 // below app change only by erasure, which takes it exclusively) and no engine lock, and passes the index of
-// the slot it read under mu (windowTableForCut, SettleCandidatesFor).
+// the slot it read under mu (windowTableAt, SettleCandidatesFor).
 func (e *Engine) windowTableOf(slot uint16, app uint64, persist, sealedOnly bool, from uint64) ([]windowRecord, error) {
 	span := snapshotWindow
 	// The persisted records are read in one short transaction; the windows that have none are derived after it, the payload log read
@@ -557,7 +588,7 @@ func (e *Engine) windowTableOf(slot uint16, app uint64, persist, sealedOnly bool
 			out = append(out, rec)
 			continue
 		}
-		rec, err := e.deriveWindow(slot, n, first, count, e.windowPartSpan(span), first+span > app)
+		rec, err := e.deriveWindow(slot, n, first, count, e.windowPartSpan(span), first+span > app, sealed)
 		if err != nil {
 			return nil, err
 		}
@@ -587,25 +618,23 @@ func (e *Engine) windowTableOf(slot uint16, app uint64, persist, sealedOnly bool
 	return out, nil
 }
 
-// windowTableForCut is the window table of a snapshot cut, and holds e.mu only for a moment: deriving the
-// open window decodes every command in it (a second of CPU at the single-host load, 2,048 commands of 10 KB), and
-// e.mu is the lock every append of every slot passes, so a cut that derived it under e.mu stopped the whole
-// engine, and the 64 cuts that fell together stopped it for a minute (L2w20Admission19). The slot's own index
-// cannot move while the cut holds the lock of the slot's group (the group applies under it), and the one writer
-// that rewrites stored commands, erasure, takes cutMu exclusively; the derivation holds it shared. The caller
-// holds no engine lock.
-func (e *Engine) windowTableForCut(slot uint16) (table []windowRecord, application uint64, err error) {
+// windowTableAt is the window table of the first application commands of slot, for a snapshot cut pinned at that index
+// (pinnedSlotCut), and holds e.mu only for a moment: deriving the open window decodes every command in it (a second of CPU at the
+// single-host load, 2,048 commands of 10 KB), and e.mu is the lock every append of every slot passes, so a cut that derived
+// it under e.mu stopped the whole engine, and the 64 cuts that fell together stopped it for a minute (L2w20Admission19). The
+// slot's group may go on applying while the table is derived (the cut holds neither its locks nor e.mu): the commands the
+// table names are those at or below application, which a command applied later does not change, and the one writer that
+// rewrites stored commands, erasure, takes cutMu exclusively; the derivation holds it shared. The caller holds no engine lock.
+func (e *Engine) windowTableAt(slot uint16, application uint64) ([]windowRecord, error) {
 	e.cutMu.RLock()
 	defer e.cutMu.RUnlock()
 	e.mu.Lock()
-	if e.failed || e.closed {
-		e.mu.Unlock()
-		return nil, 0, model.Fail(model.Unavailable)
-	}
-	application = e.indexes[slot]
+	unusable := e.failed || e.closed
 	e.mu.Unlock()
-	table, err = e.windowTableOf(slot, application, true, false, 0)
-	return table, application, err
+	if unusable {
+		return nil, model.Fail(model.Unavailable)
+	}
+	return e.windowTableOf(slot, application, true, false, 0)
 }
 
 // dropWindowTx forgets the sealed-window record of the window holding the command at index: the
@@ -769,14 +798,42 @@ func readSidecar(snapshot replica.Snapshot, ref windowRef) (windowSidecar, error
 	return sc, nil
 }
 
+// windowSyncChunk is how many bytes of a window file a cut writes before it syncs them: one fsync of the 50 MB a window file grows to queued
+// the raft journals of every group, which fsync the same disk, behind a burst of that many dirty pages (fsync probe 1 ms idle, 20-163 ms
+// during the cuts: latgrow-report). The file is the same bytes; what is written when changes.
+var windowSyncChunk = 4 << 20
+
+// chunkSyncWriter writes to f and syncs it after every windowSyncChunk bytes; before, when set, runs ahead of each of those syncs.
+type chunkSyncWriter struct {
+	f       *os.File
+	pending int
+	before  func() error
+}
+
+func (w *chunkSyncWriter) Write(p []byte) (int, error) {
+	n, err := w.f.Write(p)
+	w.pending += n
+	if err == nil && w.pending >= windowSyncChunk {
+		w.pending = 0
+		if w.before != nil {
+			if err = w.before(); err != nil {
+				return n, err
+			}
+		}
+		err = w.f.Sync()
+	}
+	return n, err
+}
+
 // writeWindowFiles materialises one window's two files into dir and verifies them against the
 // record the compact state was written from.
-func writeWindowFiles(src commandSource, want windowRecord, dir string) error {
+func (e *Engine) writeWindowFiles(src commandSource, want windowRecord, dir string) error {
 	f, err := os.OpenFile(filepath.Join(dir, winName(want.N)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-	bw := bufio.NewWriterSize(f, 256<<10)
+	cw := &chunkSyncWriter{f: f, before: func() error { return e.trip("window_stage_sync") }}
+	bw := bufio.NewWriterSize(cw, 256<<10)
 	got, side, err := computeWindowFrom(src, want.N, want.First, want.Count, 0, bw, nil)
 	if err == nil {
 		err = bw.Flush()
@@ -804,6 +861,9 @@ func writeWindowFiles(src commandSource, want windowRecord, dir string) error {
 	if ce := ev.Close(); err == nil {
 		err = ce
 	}
+	if err == nil {
+		windowBytesStaged.Add(want.File.Size + uint64(len(side)))
+	}
 	return err
 }
 
@@ -818,9 +878,16 @@ func (e *Engine) writeWindowFilesFromPrior(src commandSource, slot uint16, want 
 	}
 	c := &e.windows[slot]
 	c.mu.Lock()
-	valid := c.b != nil && c.epoch == e.cutEpoch.Load() && c.rec.N == want.N && c.rec.First == want.First && c.rec.Count == want.Count && c.rec.File == want.File && c.rec.Ev == want.Ev
-	side := c.side
-	cps := append([]windowCheckpoint(nil), c.cps...)
+	epoch := e.cutEpoch.Load()
+	var side []byte
+	var cps []windowCheckpoint
+	valid := false
+	switch {
+	case c.sealed.matches(epoch, want):
+		valid, side, cps = true, c.sealed.side, append(cps, c.sealed.cps...)
+	case c.b != nil && c.epoch == epoch && c.rec.fits(want.N, want.First, want.Count) && c.rec.File == want.File && c.rec.Ev == want.Ev:
+		valid, side, cps = true, c.side, append(cps, c.cps...)
+	}
 	c.mu.Unlock()
 	if !valid {
 		return false, nil
@@ -849,7 +916,8 @@ func (e *Engine) writeWindowFilesFromPrior(src commandSource, slot uint16, want 
 	if err != nil {
 		return false, err
 	}
-	bw := bufio.NewWriterSize(f, 256<<10)
+	cw := &chunkSyncWriter{f: f, before: func() error { return e.trip("window_stage_sync") }}
+	bw := bufio.NewWriterSize(cw, 256<<10)
 	h := sha256.New()
 	if n, err := io.CopyN(io.MultiWriter(bw, h), in, int64(have.Size)); err != nil || uint64(n) != have.Size || model.Hash(h.Sum(nil)) != have.SHA256 {
 		f.Close()
@@ -898,5 +966,6 @@ func (e *Engine) writeWindowFilesFromPrior(src commandSource, slot uint16, want 
 	if err != nil {
 		return fail(err)
 	}
+	windowBytesStaged.Add(size + uint64(len(side)))
 	return true, nil
 }

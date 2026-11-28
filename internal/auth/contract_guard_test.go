@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 	"github.com/arynyklas/soundpost/internal/smokecluster"
@@ -223,6 +224,23 @@ func TestMembershipReportNamesAControlMemberThatCannotReadTheContractedLayout(t 
 	}
 	cluster.App(2).LimitLiveLayoutForTest(false)
 	contractNow(t, leader, c, "report test")
+	// A voter reports from its own control state, so a follower is asked only once it has applied the contraction: until then it
+	// reads the expanded layout and lists nothing (the loop below passes for it either way).
+	for _, id := range []uint64{2, 3} {
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			contracted := false
+			_ = cluster.App(id).Control.View(context.Background(), func(st control.State) error {
+				contracted = st.Orgs[org.String()].IndexesContracted()
+				return nil
+			})
+			if contracted {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("voter %d did not apply the contraction in 30 s", id)
+			}
+		}
+	}
 	for _, id := range []uint64{1, 2, 3} {
 		if got := controlReasons(t, cluster, id); len(got) != 0 {
 			t.Fatalf("voter %d with every member answering: %v", id, got)

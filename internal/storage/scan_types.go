@@ -26,6 +26,12 @@ type ScanRequest struct {
 	// read whole. It is a read optimization, never a visibility rule: rows the
 	// caller still needs are the ones above its own checkpoint.
 	After []model.Cursor
+	// MaxPageRows lets a scan that reads on until the end release larger pages: the first page holds up to
+	// 128 rows and each next page pageRowsGrowth times more, up to MaxPageRows (at most MaxScanPageRows).
+	// Every page costs one quorum barrier, one index seek and one transaction, so a reader of a day of
+	// rows paid them every 128 rows; a larger page is the same barrier before the same rows are released.
+	// Zero keeps pages of 128 rows.
+	MaxPageRows int
 }
 type MatchOp uint8
 
@@ -153,6 +159,14 @@ var _ interface {
 } = (*Engine)(nil)
 
 const pageRows = 128
+
+// MaxScanPageRows is the most a ScanRequest.MaxPageRows may ask for: eight chunks of pageRows, and with the
+// distinct pages of a chunk held to pageByteLimit, the memory of one released page stays what a 128-row
+// page of the same data costs a few times over, not a day of rows.
+const MaxScanPageRows = 1024
+
+// pageRowsGrowth is how many times more rows each page of a scan with MaxPageRows holds than the one before.
+const pageRowsGrowth = 4
 const pageByteLimit = 4 << 20
 const liveCapacity = 64
 

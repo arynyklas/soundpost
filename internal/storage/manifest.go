@@ -407,6 +407,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 				}
 			}
 		}
+		e.scanPages.refsChanged(uint64(tx.ID())) // the scans' decoded pages judged before this commit are looked up again
 		if err = rows.SetMany(tblPages, kvs); err != nil {
 			return err
 		}

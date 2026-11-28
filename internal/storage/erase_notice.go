@@ -92,6 +92,16 @@ func (e *Engine) ControlStatePatchReady(control []replica.Member) bool {
 	return e.declaredByAll(statePatchProtocol, control)
 }
 
+// ControlCompactAdmissionReady is ControlStatePatchReady for the compact admission ops (compactAdmissionProtocol,
+// control.Store.SetCompactAdmissionGate): every member of the control group's configuration, and of the slot-0 group's, declared at
+// least 10. The same reading rules: local replicated state only, evaluated at every use, false without replication.
+func (e *Engine) ControlCompactAdmissionReady(control []replica.Member) bool {
+	if len(control) == 0 {
+		return false
+	}
+	return e.declaredByAll(compactAdmissionProtocol, control)
+}
+
 // ControlLegacyStatePatchReady is ControlStatePatchReady for the first protocol of the state patch
 // (legacyStatePatchProtocol): every member declared at least 5, so a command may be proposed as a patch
 // that names the digest every release computes (control.Store.SetLegacyStatePatchGate). Control uses

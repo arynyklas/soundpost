@@ -156,6 +156,11 @@ func (scope Scope) ValidateSourceState(st model.ControlState, project, source mo
 	if e := scope.service.checkSource(st, *scope.sourceCredential, admission); e != nil {
 		return e
 	}
+	if scope.claimed {
+		if src, ok := st.Sources[source.String()]; !ok || src.Org != scope.org || src.Project != project {
+			return model.Fail(model.Forbidden)
+		}
+	}
 	if admission && st.Orgs[scope.org.String()].Epoch != scope.epoch {
 		return model.Fail(model.Stale)
 	}

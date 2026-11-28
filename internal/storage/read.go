@@ -3,10 +3,8 @@
 package storage
 
 import (
-	"bytes"
 	"container/list"
 	"context"
-	"encoding/binary"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
@@ -14,6 +12,7 @@ import (
 	"reflect"
 	"regexp"
 	"sync"
+	"sync/atomic"
 )
 
 type compiledMatcher struct {
@@ -44,6 +43,18 @@ type rowIterator struct {
 	// partialShown is set once a page carrying Partial was returned, so the flag of a read whose
 	// answering shards held no matching row is still delivered, once, at the end.
 	partialShown bool
+	// slotHeld is true while the iterator owns one scan slot; closeLocked returns it exactly once.
+	slotHeld bool
+	// rows is the most rows the next page holds. It starts at pageRows and grows by pageRowsGrowth after every
+	// page the iterator releases, up to maxRows (ScanRequest.MaxPageRows): every page costs one release
+	// barrier, so a scan that reads on pays it once per many rows, and a reader that stops early has asked
+	// for no more than a page or two beyond what it used.
+	rows, maxRows int
+	// startPreds are the deletion predicates the Scan read last, for the first chunk (haveStartPreds until it
+	// takes them); certifiedEnd is set when the barrier at the end of the rows certified the cut.
+	startPreds     []model.DeletePredicate
+	haveStartPreds bool
+	certifiedEnd   bool
 }
 
 // visibleThrough is the cut as a lookup: a row is visible when its origin index is within the mark of
@@ -64,8 +75,8 @@ func visibleThrough(marks []model.Cursor) map[model.ID]uint64 {
 // walk that kept only the current page read, hashed and decoded a page once per alternation: 786 page
 // reads for the 8 pages of a scan of 8 batches over the same times, and at the Queries gate 19,500 reads
 // of the pages of one project's 24 h. The same pages are read again by the next scan of the same
-// window, which at that gate is ten queries a second over 190 pages a project. A chunk is one read
-// transaction under the engine lock; a page the chunk meets for the first time is looked up again in
+// window, which at that gate is ten queries a second over 190 pages a project. A chunk is built from one
+// bolt read transaction with the engine lock released (read_build.go); a page the chunk meets for the first time is looked up again in
 // that transaction and judged by the same checks as a page that was never seen, and its decode is
 // reused only when the stored page is the one that was decoded, in the same place (the content hash of
 // its reference, which any rewrite of the page, erasure included, changes, and its location, which a
@@ -74,11 +85,21 @@ func visibleThrough(marks []model.Cursor) map[model.ID]uint64 {
 // dropped from the cache in the same transaction (deleteBatchIndex): no decoded copy of erased bytes
 // outlives the erasure. The cache is for readers of this engine only and is never persisted.
 type scanPageCache struct {
-	mu    sync.Mutex
-	seq   uint64 // the last chunk begun
-	byID  map[model.ID]*list.Element
-	lru   list.List // of *cachedPage, front = used last
-	bytes uint64    // encoded bytes of the cached pages
+	mu   sync.Mutex
+	seq  uint64 // the last chunk begun
+	byID map[model.ID]*list.Element
+	// scanSlots and liveSlots are the iterator budgets of the engine (scan_slots.go); they live here
+	// because the cache is the engine's zero-value-ready read state.
+	scanSlots, liveSlots slotPool
+	// refLookups counts the page references the scans looked up in the row store (a test and the diagnostics read it).
+	refLookups atomic.Uint64
+	lru        list.List // of *cachedPage, front = used last
+	bytes      uint64    // encoded bytes of the cached pages
+	// dropped is the highest write transaction that dropped a page: a chunk whose snapshot is older
+	// (bolt numbers a read transaction by the last commit it sees) may hold the page's old bytes.
+	dropped uint64
+	// rebound is the highest write transaction that changed the reference of a page (refsChanged, drop).
+	rebound uint64
 }
 type cachedPage struct {
 	id        model.ID
@@ -89,9 +110,15 @@ type cachedPage struct {
 	hot       bool       // the page is held in the row itself
 	log       string     // the payload log reference of a page stored there
 	seq       uint64     // the chunk that last looked the page up and judged it
+	snap      uint64     // the snapshot (bolt transaction id) the reference was last judged in
 	resources bool       // the decode carries the resource columns
 	payload   bool       // the decode carries the payload columns
-	page      Page
+	// What a reader's scope is judged against, as the reference gives it (the checks of a first sight).
+	org, project, source model.ID
+	kind, subject        model.Kind
+	restricted           bool
+	ns                   []byte // the index namespace of the page (pageNamespace)
+	page                 Page
 }
 
 // storedAs reports whether the page is stored as the reference says, in the same bytes and in the same
@@ -105,6 +132,10 @@ func (c *cachedPage) storedAs(ref pageRef) bool {
 // three times its encoded size in memory.
 const scanPageCacheBytes = 256 << 20
 
+// scanPageLoadHook, when set (tests), runs before a scan's chunk reads a page that is not in the cache:
+// a test that asserts the decode of a scan never holds the engine lock stalls the read here.
+var scanPageLoadHook atomic.Pointer[func()]
+
 // begin numbers the chunk that starts.
 func (c *scanPageCache) begin() uint64 {
 	c.mu.Lock()
@@ -112,46 +143,71 @@ func (c *scanPageCache) begin() uint64 {
 	c.seq++
 	return c.seq
 }
-func (c *scanPageCache) get(id model.ID) (cachedPage, bool) {
+
+// get returns the cached page. fresh reports that its stored reference needs no new look-up in the
+// chunk's snapshot: no commit that changed the reference of a page (a flush or a compaction publishing
+// the manifest, an erasure dropping the page) lies after the older of the snapshot the entry was last
+// judged in and this one, so the reference the entry was decoded from is the one this snapshot holds.
+func (c *scanPageCache) get(id model.ID, snapshot uint64) (page cachedPage, ok, fresh bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	el, ok := c.byID[id]
 	if !ok {
-		return cachedPage{}, false
+		return cachedPage{}, false, false
 	}
 	c.lru.MoveToFront(el)
-	return *el.Value.(*cachedPage), true
+	page = *el.Value.(*cachedPage)
+	return page, true, c.rebound <= min(page.snap, snapshot)
 }
 
-// touch records that chunk seq looked the page up in its transaction and found it unchanged.
-func (c *scanPageCache) touch(id model.ID, seq uint64) {
+// touch records that chunk seq looked the page up in its snapshot and found it unchanged.
+func (c *scanPageCache) touch(id model.ID, seq, snapshot uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if el, ok := c.byID[id]; ok {
-		el.Value.(*cachedPage).seq = seq
+		p := el.Value.(*cachedPage)
+		p.seq, p.snap = seq, max(p.snap, snapshot)
 	}
 }
-func (c *scanPageCache) put(id model.ID, seq uint64, ref pageRef, resources, payload bool, page Page) {
+
+// put keeps a page a chunk decoded in the read transaction snapshot, unless an erasure dropped pages in a
+// transaction the snapshot does not see: the page may be one of them, and a decoded copy of erased bytes
+// must not outlive the erasure.
+func (c *scanPageCache) put(id model.ID, seq, snapshot uint64, ref pageRef, resources, payload bool, page Page) {
 	if page.Bytes > scanPageCacheBytes/4 {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if snapshot < c.dropped {
+		return
+	}
 	c.removeLocked(id)
 	if c.byID == nil {
 		c.byID = make(map[model.ID]*list.Element)
 	}
-	c.byID[id] = c.lru.PushFront(&cachedPage{id: id, length: uint64(ref.Length), hash: ref.Hash, segment: ref.Segment, offset: ref.Offset, hot: len(ref.Hot) > 0, log: string(ref.Log), seq: seq, resources: resources, payload: payload, page: page})
+	c.byID[id] = c.lru.PushFront(&cachedPage{id: id, length: uint64(ref.Length), hash: ref.Hash, segment: ref.Segment, offset: ref.Offset, hot: len(ref.Hot) > 0, log: string(ref.Log), seq: seq, snap: snapshot, org: ref.Org, project: ref.Project, source: ref.Source, kind: ref.Kind, subject: ref.Subject, restricted: ref.Restricted, ns: pageNamespace(ref.Org, ref.Project, ref.Kind, ref.Restricted, ref.Source, ref.Subject), resources: resources, payload: payload, page: page})
 	c.bytes += page.Bytes
 	for c.bytes > scanPageCacheBytes {
 		c.removeLocked(c.lru.Back().Value.(*cachedPage).id)
 	}
 }
 
-// drop forgets a page whose stored bytes are gone.
-func (c *scanPageCache) drop(id model.ID) {
+// refsChanged records that write transaction tx changes the stored reference of pages that exist (a
+// manifest publication moving them between the row, the log and segments): an entry judged in a snapshot
+// before it is looked up again.
+func (c *scanPageCache) refsChanged(tx uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.rebound = max(c.rebound, tx)
+}
+
+// drop forgets a page whose stored bytes are gone; tx is the write transaction that removes them.
+func (c *scanPageCache) drop(id model.ID, tx uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropped = max(c.dropped, tx)
+	c.rebound = max(c.rebound, tx)
 	c.removeLocked(id)
 }
 func (c *scanPageCache) removeLocked(id model.ID) {
@@ -325,7 +381,7 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 	if err := e.authorizeRead(ctx, scope, req.Projects, req.Signal); err != nil {
 		return nil, err
 	}
-	if !req.Signal.Valid() || req.End < req.Start {
+	if !req.Signal.Valid() || req.End < req.Start || req.MaxPageRows < 0 || req.MaxPageRows > MaxScanPageRows {
 		return nil, model.Fail(model.Invalid)
 	}
 	for _, f := range req.Projection {
@@ -363,6 +419,17 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 	if err != nil {
 		return nil, err
 	}
+	// A slot is taken before e.mu: the wait is bounded by ctx only and never holds the engine lock. It is
+	// held by the iterator (closeLocked returns it) or returned here on every early exit.
+	if err = e.scanPages.scanSlots.acquire(ctx, ScanSlots); err != nil {
+		return nil, err
+	}
+	slot := true
+	defer func() {
+		if slot {
+			e.scanPages.scanSlots.release()
+		}
+	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -371,11 +438,9 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 	if ctx.Err() != nil {
 		return nil, model.Fail(model.Cancelled)
 	}
-	if _, err = e.finishReadDeletions(scope.OrgID(), req.Projects, control); err != nil {
+	startPreds, err := e.finishReadDeletions(scope.OrgID(), req.Projects, control)
+	if err != nil {
 		return nil, err
-	}
-	if e.storageStats.ActiveIterators >= 32 {
-		return nil, model.Fail(model.TooLarge)
 	}
 	term := postingTerm(req.Selectors, req.Signal)
 	if term != "" {
@@ -383,9 +448,10 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 			prefixes[i] = termPrefix(prefix, term)
 		}
 	}
-	it := &rowIterator{e: e, scope: scope, req: req, prefixes: prefixes, marks: marks, visible: visibleThrough(marks), after: after, matchers: ms, ctx: ctx, posting: term, partial: partial}
+	it := &rowIterator{e: e, scope: scope, req: req, prefixes: prefixes, marks: marks, visible: visibleThrough(marks), after: after, matchers: ms, ctx: ctx, posting: term, partial: partial, slotHeld: true, rows: pageRows, maxRows: max(pageRows, req.MaxPageRows), startPreds: startPreds, haveStartPreds: true}
 	e.scans[it] = struct{}{}
 	e.storageStats.ActiveIterators++
+	slot = false // the iterator owns the slot now; closeLocked returns it once
 	it.stop = context.AfterFunc(ctx, func() { e.mu.Lock(); defer e.mu.Unlock(); it.terminal = model.Fail(model.Cancelled); it.closeLocked() })
 	return it, nil
 }
@@ -407,6 +473,10 @@ func (e *Engine) Stats() StorageStats {
 func (it *rowIterator) Watermarks() []model.Cursor {
 	it.e.mu.Lock()
 	defer it.e.mu.Unlock()
+	if it.closed && it.terminal == io.EOF && it.certifiedEnd {
+		// The barrier at the end of the rows certified this cut, and nothing has been read since.
+		return append([]model.Cursor(nil), it.marks...)
+	}
 	if _, err := it.certifyLocked(it.ctx, true); err != nil {
 		return nil
 	}
@@ -435,6 +505,10 @@ func (it *rowIterator) closeLocked() {
 	it.visible = nil
 	delete(it.e.scans, it)
 	it.e.storageStats.ActiveIterators--
+	if it.slotHeld {
+		it.slotHeld = false
+		it.e.scanPages.scanSlots.release()
+	}
 }
 func (it *rowIterator) releaseLocked() {
 	if it.page.Len() > 0 {
@@ -466,174 +540,43 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 		it.closeLocked()
 		return Page{}, it.terminal
 	}
-	// A chunk below starts with one authority read that also returns the deletion predicates it
-	// filters with, so this one is only the check a Next with no chunk left to build is judged by
-	// before its barrier: when a chunk is built it would be replaced at once by the chunk's own
-	// read, which fails with the same error and closes the iterator the same way.
-	if it.partition >= len(it.prefixes) {
-		if _, err := it.authorizeLocked(ctx, false); err != nil {
-			it.terminal = err
-			it.closeLocked()
-			return Page{}, err
-		}
-	}
+	// The barrier at the end of the rows reads the authority itself and judges with the same error, so a
+	// Next with no chunk left to build makes no read of its own before it.
 	for it.partition < len(it.prefixes) {
 		// Predicates are fetched fresh when a chunk starts (the authority read already ends in the
 		// deletion read, so there is no second one); the release barrier then fetches them again
 		// and the chunk is rebuilt if they differ. The read waits on the control state with e.mu
 		// released and is judged again under it (authorizeLocked) before the chunk reads the data.
-		delPreds, err := it.authorizeLocked(ctx, false)
+		var delPreds []model.DeletePredicate
+		if it.haveStartPreds {
+			// The first chunk filters with the predicates the Scan has just read: the barrier below reads
+			// them again and rebuilds the page if they differ, so a deletion that began since is caught.
+			delPreds, it.startPreds, it.haveStartPreds = it.startPreds, nil, false
+		} else {
+			var err error
+			if delPreds, err = it.authorizeLocked(ctx, false); err != nil {
+				it.terminal = err
+				it.closeLocked()
+				return Page{}, err
+			}
+		}
+		startPartition, startLast := it.partition, append([]byte(nil), it.last...)
+		// The chunk is built from a snapshot with e.mu released (read_build.go): one scan's decode no
+		// longer stops another scan or an append. What the lock kept out is judged by the release
+		// barrier below and by the checks buildUnlocked makes when it comes back.
+		res, err := it.buildUnlocked(&chunkJob{ctx: ctx, itCtx: it.ctx, scope: it.scope, req: it.req, prefix: it.prefixes[it.partition], posting: it.posting, last: startLast, visible: it.visible, after: it.after, matchers: it.matchers, delPreds: delPreds, rows: it.rows})
 		if err != nil {
 			it.terminal = err
 			it.closeLocked()
 			return Page{}, err
 		}
-		prefix := it.prefixes[it.partition]
-		var selected Page
-		var current model.ID
-		var decoded Page
-		var chunkBytes uint64
-		startPartition, startLast := it.partition, append([]byte(nil), it.last...)
-		seq := e.scanPages.begin()
-		err = e.db.View(func(tx *bolt.Tx) error {
-			e.storageStats.IndexLookups++
-			name := "scan_time"
-			if it.posting != "" {
-				name = "scan_postings"
-			}
-			rows, err := rowsOf(tx)
-			if err != nil {
-				return err
-			}
-			c, err := openOrderedCursor(tx, name)
-			if err != nil {
-				return err
-			}
-			start := append(append([]byte(nil), prefix...), timeKey(it.req.Start)...)
-			var k, v []byte
-			if len(it.last) > 0 {
-				k, v = c.Seek(it.last)
-				if bytes.Equal(k, it.last) {
-					k, v = c.Next()
-				}
-			} else {
-				k, v = c.Seek(start)
-			}
-			for ; samePrefix(k, prefix); k, v = c.Next() {
-				if ctx.Err() != nil || it.ctx.Err() != nil {
-					return model.Fail(model.Cancelled)
-				}
-				if len(k) != len(prefix)+50 || !validIndexValue(k, v) {
-					return model.Fail(model.Corrupt)
-				}
-				suffix := k[len(prefix):]
-				at := model.UnixNano(binary.BigEndian.Uint64(suffix) ^ 1<<63)
-				if at >= it.req.End {
-					it.partition++
-					it.last = nil
-					return nil
-				}
-				var group model.ID
-				copy(group[:], suffix[24:40])
-				originIndex := binary.BigEndian.Uint64(suffix[40:48])
-				if through, ok := it.after[group]; ok && originIndex <= through {
-					it.last = append(it.last[:0], k...)
-					continue
-				}
-				if through, ok := it.visible[group]; !ok || originIndex > through {
-					it.last = append(it.last[:0], k...)
-					continue
-				}
-				if selected.Len() >= pageRows {
-					// The chunk is full and this row is left for the next one. The bound is on the rows
-					// the chunk holds, not on the stored rows of the pages they come from: counting the
-					// latter closed a chunk at every alternation between two pages.
-					return nil
-				}
-				var id model.ID
-				copy(id[:], v[:16])
-				if id != current {
-					// A chunk spans batches, because every release costs a quorum
-					// barrier. It stays within the page bounds (128 rows, 4 MiB):
-					// it is closed before this batch's page when its bytes could
-					// not fit, and this row is then left for the next chunk.
-					doesNotFit := func(length uint64) bool {
-						return selected.Len() > 0 && chunkBytes+length > pageByteLimit
-					}
-					resources, payload := scanColumns(it.req)
-					if entityPredicateActive(delPreds) && (it.req.Signal == model.Replay || it.req.Signal == model.Profile) {
-						payload = true
-					}
-					if it.scope.Permission() == profilesRead && partitionedSubject(it.req.Signal) {
-						payload = true
-					}
-					if seen, ok := e.scanPages.get(id); ok && seen.seq == seq {
-						// Verified and decoded earlier in this chunk (the rows of pages that
-						// overlap in time alternate in the index): the same checks, the same
-						// chunk bounds, without reading, hashing and decoding the page again.
-						if doesNotFit(seen.length) {
-							return nil
-						}
-						decoded = seen.page
-					} else {
-						raw := rows.Get(tblPages, id[:])
-						if raw == nil {
-							return model.Fail(model.Corrupt)
-						}
-						ref, err := parsePageRef(raw)
-						if err != nil {
-							return err
-						}
-						if ref.Org != it.scope.OrgID() || ref.Kind != it.req.Signal || !it.scope.AllowsProject(ref.Project) || ref.Restricted != (it.scope.Permission() == auth.RawRead) || ref.Restricted && !it.scope.AllowsSource(ref.Source) || !allowsSubject(it.scope, ref.Kind, ref.Subject) {
-							return model.Fail(model.Forbidden)
-						}
-						expected := pageNamespace(ref.Org, ref.Project, ref.Kind, ref.Restricted, ref.Source, ref.Subject)
-						if it.posting != "" {
-							expected = termPrefix(expected, it.posting)
-						}
-						if !bytes.Equal(expected, prefix) {
-							return model.Fail(model.Corrupt)
-						}
-						if doesNotFit(uint64(ref.Length)) {
-							return nil
-						}
-						if ok && seen.storedAs(ref) && (seen.resources || !resources) && (seen.payload || !payload) {
-							// Decoded by an earlier chunk and stored unchanged since.
-							decoded = seen.page
-							e.scanPages.touch(id, seq)
-						} else {
-							decoded, err = e.readPageColumns(ref, resources, payload)
-							if err != nil {
-								return err
-							}
-							e.scanPages.put(id, seq, ref, resources, payload, decoded)
-						}
-					}
-					current = id
-					chunkBytes += decoded.Bytes
-				}
-				it.last = append(it.last[:0], k...)
-				row := int(binary.BigEndian.Uint16(v[16:18]))
-				if row >= decoded.Len() {
-					return model.Fail(model.Corrupt)
-				}
-				origin := decoded.Origins[row]
-				if decoded.Times[row] != at || !bytes.Equal(decoded.IDs[row][:], suffix[8:24]) || origin.Group != group || uint64(origin.Index) != originIndex {
-					return model.Fail(model.Corrupt)
-				}
-				if !coveredRow(delPreds, it.scope.OrgID(), it.req.Signal, decoded, row) && matchesRow(it.matchers, decoded, row, it.req.Signal) {
-					appendPageRow(&selected, decoded, row)
-				}
-			}
+		if res.done {
 			it.partition++
 			it.last = nil
-			return nil
-		})
-		if err != nil {
-			it.terminal = err
-			it.closeLocked()
-			return Page{}, err
+		} else {
+			it.last = append(it.last[:0], res.last...)
 		}
+		selected, chunkBytes := res.selected, res.chunkBytes
 		if selected.Len() > 0 {
 			certified, err := it.certifyLocked(ctx, false)
 			if err != nil {
@@ -656,6 +599,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			it.partialShown = it.partial
 			selected.Bytes = chunkBytes
 			it.page = selected
+			it.rows = min(it.rows*pageRowsGrowth, it.maxRows)
 			e.storageStats.BorrowedPages++
 			return it.page, nil
 		}
@@ -671,6 +615,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 		it.partialShown = true
 		return Page{Partial: true}, nil
 	}
+	it.certifiedEnd = true
 	it.terminal = io.EOF
 	it.closeLocked()
 	return Page{}, io.EOF

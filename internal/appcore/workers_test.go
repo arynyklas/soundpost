@@ -401,7 +401,11 @@ func TestWorkersRunStopsOnCancelWithoutLeakingGoroutines(t *testing.T) {
 	done := make(chan struct{})
 	go func() { w.Run(ctx); close(done) }()
 	deadline := time.Now().Add(30 * time.Second)
-	for passes.Load() < 2 && time.Now().Before(deadline) {
+	// Two loops pass at the same time, so two passes say nothing of the rule loop's first one: wait for its evaluation as well.
+	for time.Now().Before(deadline) {
+		if _, found := n.book(rule); found && passes.Load() >= 2 {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if passes.Load() < 2 {

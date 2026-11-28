@@ -54,6 +54,18 @@ const (
 	opSet    = "set"   // the value at the path becomes Value (created when absent)
 	opDelete = "del"   // the member at the path is removed (nothing, when it is absent)
 	opArray  = "array" // the first Cut rows of the array at the path are dropped, Value's rows are appended
+	// opReserve and opFinalize are the compact forms of the two writes every admission makes (compact_admission.go, D104): the
+	// reservation of a batch with the records it implies, and the settling of a reservation by its receipt. They address
+	// [Reservations, id] and are proposed only when every member declared the protocol that knows them.
+	opReserve  = "rsv"
+	opFinalize = "fin"
+	// opSettle is the derived form of a settlement (compact_settle.go, D104): the windows and the reservation rows a settlement
+	// command drops; every voter derives the charge it folds from the rows it holds. It addresses [settlement, stl].
+	opSettle = "stl"
+	// opRecord is a delta of one record of the job books or of the grouping issues (record_delta.go, D108): the members the update
+	// changed, the rows it appended to an array, and the digest of the record it leaves. It addresses [JobBooks|GroupingIssues, key]
+	// and is proposed only when every member declared the protocol that knows it (the compact admission gate).
+	opRecord = "rec"
 )
 
 // patchOp is one change. Path addresses a member from the root of the state; its segments are the
@@ -540,6 +552,10 @@ func validatePatch(p statePatch) error {
 			return model.Fail(model.Invalid)
 		}
 		switch op.Op {
+		case opReserve, opFinalize, opSettle, opRecord:
+			if len(op.Value) == 0 || op.Cut != 0 {
+				return model.Fail(model.Invalid)
+			}
 		case opSet:
 			if len(op.Value) == 0 || op.Cut != 0 {
 				return model.Fail(model.Invalid)
@@ -651,6 +667,24 @@ func (s *Store) StatePatch() bool {
 	return gate != nil && (*gate)()
 }
 
+// SetCompactAdmissionGate installs the function that says whether every member of the control group declared the protocol that
+// applies the compact admission ops (storage.Engine.ControlCompactAdmissionReady, D104). Without it, or while it reads false, the
+// admission rounds write the records one by one, which every release applies. Passing nil removes the gate.
+func (s *Store) SetCompactAdmissionGate(ready func() bool) {
+	if ready == nil {
+		s.compactAdmissionGate.Store(nil)
+		return
+	}
+	s.compactAdmissionGate.Store(&ready)
+}
+
+// compactAdmission reports whether an admission round proposes the compact ops: the gate says so and the group applies state
+// patches at all.
+func (s *Store) compactAdmission() bool {
+	gate := s.compactAdmissionGate.Load()
+	return gate != nil && (*gate)() && s.StatePatch()
+}
+
 // SetLegacyStatePatchGate installs the function that says whether every member of the replica group
 // declared the first protocol of the state patch (storage.Engine.ControlLegacyStatePatchReady): the
 // previous release is one of them. Such a group proposes a patch only while the admission ledger holds
@@ -711,7 +745,7 @@ func (m *replicatedControl) verifyCurrentPatch(p statePatch) error {
 		layout := ledgerLayout(ctrl)
 		blobOps, ledgerOps := p.Ops, []patchOp(nil)
 		if layout {
-			blobOps, ledgerOps = splitLedgerOps(p.Ops)
+			blobOps, ledgerOps = splitLedgerOps(p.Ops, ctrl.Get(ledgerRulesKey) != nil)
 		}
 		if len(ledgerOps) != 0 {
 			l, err := openLedger(tx)

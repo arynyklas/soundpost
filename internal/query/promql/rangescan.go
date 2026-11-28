@@ -194,6 +194,12 @@ func (s *evaluationState) sharedScan(sel, node, window *Node, at model.UnixNano,
 	return e
 }
 
+// sharedGapFactor bounds the gap between the windows of consecutive steps that a shared read still covers, as a
+// multiple of the width of a window: the union then holds at most that many times the rows the steps read, one
+// scan instead of one per step. Windows further apart than that are read the per-step way, where the rows are
+// the steps' own.
+const sharedGapFactor = 8
+
 // buildShared reads the union of the selector's windows over the scope's grid.
 // Any irregularity (an error, a quota failure, data the per-step path would
 // reject) leaves the entry dead: the per-step path then meets and reports it at
@@ -216,10 +222,11 @@ func (s *evaluationState) buildShared(e *rangeEntry, sc *rangeScope, sel, node, 
 	if err != nil {
 		return
 	}
-	// The windows of consecutive steps must touch, or the union would read data no
-	// step does. A selector with a fixed time (@) has one window for all steps.
+	// The windows of consecutive steps must touch, or be close enough that the union costs less than a scan
+	// per step (sharedGapFactor): a union that read data no step does would charge for it. A selector with a
+	// fixed time (@) has one window for all steps.
 	span, err := checkedSub(first.through, first.from)
-	if err != nil || firstTime != lastTime && sc.step > span {
+	if err != nil || firstTime != lastTime && sc.step/sharedGapFactor > span {
 		return
 	}
 	e.from, e.through = min(first.from, last.from), max(first.through, last.through)

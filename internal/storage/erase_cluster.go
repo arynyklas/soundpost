@@ -116,8 +116,17 @@ const (
 	// instance scope carry a precondition on the records they read, not on the revision of the whole state),
 	// so that command is proposed only once every member declared at least 9, in a contracted installation.
 	statePatchProtocol uint64 = 9
+	// compactAdmissionProtocol is the declaration of a binary that also applies the compact admission ops of control (rsv, fin and
+	// chs: internal/control/compact_admission.go and compact_settle.go, D104): the reservation of a batch with its key and series
+	// counts as one op, its settling by the receipt's cursor as another, and the series counts a settlement command folds as a
+	// third, where the previous protocols write each record as an op of its own. A binary that declared 9 does not know the three
+	// ops and stops applying a command that carries one, so an admission round proposes them only once every member of the
+	// control group declared at least this (ControlCompactAdmissionReady, in a contracted installation, which is where a round
+	// runs at all); until then it writes the plain ops, which every protocol applies. The state patch itself stays on protocol 9: a
+	// group whose members declared 9 keeps its patches.
+	compactAdmissionProtocol uint64 = 10
 	// declaredProtocol is the version this binary declares.
-	declaredProtocol = statePatchProtocol
+	declaredProtocol = compactAdmissionProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced
 	// snapshot before it stops expecting it (and refuses it if it still arrives).
 	noticeGrace = 2 * time.Minute

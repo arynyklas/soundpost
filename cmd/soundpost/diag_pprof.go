@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/diagstat"
+	"github.com/arynyklas/soundpost/internal/ingest"
 )
 
 // A diagnostic build (-tags soundpost_diag) serves the Go profiles (CPU, heap, goroutine and, with SOUNDPOST_DIAG_BLOCK set, block and
@@ -30,6 +31,7 @@ func init() {
 		runtime.SetBlockProfileRate(10_000) // one blocking event per 10 µs of blocked time on average
 		runtime.SetMutexProfileFraction(5)
 	}
+	diagstat.Register("ingest", ingest.PhaseStats)
 	http.HandleFunc("/debug/soundpost", func(w http.ResponseWriter, _ *http.Request) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)

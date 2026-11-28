@@ -231,6 +231,12 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 		group := a.Control.ReplicaGroup()
 		return group != nil && a.Storage.ControlStatePatchReady(group.CommittedMembers().Nodes)
 	})
+	// The compact admission ops (D104: control.Store.SetCompactAdmissionGate) are proposed once every member of the control group
+	// declared protocol 10; until then an admission round writes each record as an op of its own, which protocol 9 applies.
+	a.Control.SetCompactAdmissionGate(func() bool {
+		group := a.Control.ReplicaGroup()
+		return group != nil && a.Storage.ControlCompactAdmissionReady(group.CommittedMembers().Nodes)
+	})
 	a.Control.SetLegacyStatePatchGate(func() bool {
 		group := a.Control.ReplicaGroup()
 		return group != nil && a.Storage.ControlLegacyStatePatchReady(group.CommittedMembers().Nodes)
@@ -241,7 +247,7 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	// previous release does not implement the question, so a member that does not answer, for any
 	// reason, is named and the step is refused.
 	if options != nil {
-		options.transport.SetLayoutSupport(func() (uint64, bool) { return model.IndexLayoutVersion, !lifecycle.layoutRefused.Load() })
+		options.transport.SetLayoutSupport(func() (uint64, bool) { return model.RuleLedgerLayoutVersion, !lifecycle.layoutRefused.Load() })
 	}
 	self := cfg.ID
 	// readsLayout is the live question to one member: nil when its running binary answers that it reads
@@ -258,6 +264,18 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 		return qerr
 	}
 	a.Control.SetMemberLayoutQuery(readsLayout)
+	// D108: once the installation carries the mark of the rule ledger, the layout question is asked a second time with the
+	// answer of a binary that reads the rule facts as records (a build before the move answers IndexLayoutVersion).
+	a.Control.SetMemberRuleLedgerQuery(func(ctx context.Context, m replica.Member) error {
+		if options == nil {
+			return model.Fail(model.Unavailable)
+		}
+		got, qerr := options.transport.QueryLayout(ctx, m)
+		if qerr == nil && got < model.RuleLedgerLayoutVersion {
+			qerr = model.Fail(model.Unsupported)
+		}
+		return qerr
+	})
 	a.Control.SetLayoutSupportGate(func() []string {
 		group := a.Control.ReplicaGroup()
 		if group == nil || len(group.Status().Members.Nodes) == 0 {

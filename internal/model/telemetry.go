@@ -76,6 +76,15 @@ func (s Scalar) MarshalJSON() ([]byte, error) {
 	}
 	return []byte(s.raw), nil
 }
+
+// JSONLen is len(MarshalJSON()) without making the copy.
+func (s Scalar) JSONLen() int {
+	if s.raw == "" {
+		return len("null")
+	}
+	return len(s.raw)
+}
+
 func (s *Scalar) UnmarshalJSON(b []byte) error {
 	var v any
 	d := json.NewDecoder(bytes.NewReader(b))
@@ -114,6 +123,26 @@ func (s Scalar) Text() string {
 		return "null"
 	}
 	return s.raw
+}
+
+// PlainText is the text of a string scalar whose JSON form needs no unescaping (no backslash, no quote or
+// control character inside, valid UTF-8): the string Text returns, as a view of the scalar and without the
+// decode. ok is false for every other scalar.
+func (s Scalar) PlainText() (text string, ok bool) {
+	r := s.raw
+	if len(r) < 2 || r[0] != '"' || r[len(r)-1] != '"' {
+		return "", false
+	}
+	body := r[1 : len(r)-1]
+	for i := range len(body) {
+		if c := body[i]; c < 0x20 || c == '\\' || c == '"' {
+			return "", false
+		}
+	}
+	if !utf8.ValidString(body) {
+		return "", false
+	}
+	return body, true
 }
 
 type Resource struct {

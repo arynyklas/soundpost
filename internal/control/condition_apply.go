@@ -121,6 +121,19 @@ func loadCondition(st *State, key string) (ConditionRecord, bool, error) {
 	return r, true, nil
 }
 
+// loadConditionRO is loadCondition against a read-only control state: it reads the one record, not the books.
+func loadConditionRO(ro model.ReadOnlyControl, key string) (ConditionRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookConditions, key)
+	if !ok {
+		return ConditionRecord{}, false, nil
+	}
+	var r ConditionRecord
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return ConditionRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return r, true, nil
+}
+
 func applyCondition(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
 	var c ConditionCommand
 	if err := strictPayload(cmd.Payload, &c); err != nil {
@@ -202,12 +215,12 @@ func applyCondition(scope auth.Scope, st *State, cmd Command, bounded bool) (Eff
 // control read. The scope is checked before the condition is looked up; a
 // project the scope does not name is indistinguishable from an absent one.
 func (s *Store) Condition(ctx context.Context, scope auth.Scope, project, condition model.ID) (out ConditionRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadCondition(&st, conditionKey(scope.OrgID(), project, condition))
+		out, found, e = loadConditionRO(st, conditionKey(scope.OrgID(), project, condition))
 		return e
 	})
 	return

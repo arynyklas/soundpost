@@ -13,6 +13,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // Control is the consumer-owned view of the C05 control authority; *control.Store
@@ -312,13 +313,14 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, project model.ID
 	org := scope.OrgID()
 	id := derive("apply", org[:], project[:], next.Condition[:], u64(uint64(expected)), digest[:])
 	for range maxRevisionRetries {
-		var revision model.Revision
-		if err = s.control.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := control.RevisionOf(ctx, s.control)
+		if err != nil {
 			return State{}, err
 		}
 		_, err = s.control.Transact(ctx, scope, control.Command{CommandID: id, ExpectedRevision: revision, Kind: string(control.KindApplyCondition), Payload: payload})
 		var f *model.Fault
 		if errors.As(err, &f) && f.Code == model.Conflict && f.SafeDetail == string(model.Conflict) {
+			staleretry.Note(staleretry.Conditions)
 			continue // the revision moved; the command conflicted with nothing
 		}
 		if err != nil {

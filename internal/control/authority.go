@@ -164,6 +164,11 @@ const (
 	// it back (ExpireControlLog already treats its rows as non-authority). The guard masks
 	// Audits and requires every existing row byte for byte unchanged and none removed.
 	writerAuditAppend writer = "AuditAppend"
+	// writerRuleLedgerMark: the one command that marks the installation as keeping the rule books and the rule outbox in the
+	// ledger (rule_ledger.go, ensureRuleLedger). It writes the key model.RuleLedgerKey of st.OIDC and nothing else; every voter
+	// moves the two members out of its blob when it applies it, and the state a reader sees is the same before and after. The
+	// key authenticates nobody and no access decision reads it.
+	writerRuleLedgerMark writer = "RuleLedgerMark"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -188,6 +193,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerSweepExpired:        "expired pending login, elevation and session records (already refused everywhere)",
 	writerPendingLogin:        "a pending OIDC login record added or consumed (authenticates nobody; no access state)",
 	writerAuditAppend:         "appended audit rows only (evidence, never read back by an access decision)",
+	writerRuleLedgerMark:      "the rule-ledger mark (D108): one OIDC key naming the revision of the move; the rule books keep their content, no access state changes",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -249,6 +255,7 @@ var bookFreeWriters = map[writer]bool{
 	writerSweepExpired:        true,
 	writerPendingLogin:        true,
 	writerAuditAppend:         true,
+	writerRuleLedgerMark:      true,
 }
 
 // commandFreeWriters are the writers whose transition neither reads nor writes the applied-command log

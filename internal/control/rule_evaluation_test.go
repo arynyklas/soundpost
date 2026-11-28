@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -726,7 +727,12 @@ func bulkConditions(group byte, from, n int) []control.RuleOutputIntent {
 func (f *ruleFx) rawState() (outputs map[string]json.RawMessage, books map[string]json.RawMessage) {
 	f.t.Helper()
 	if err := f.store.View(f.ctx, func(st control.State) error {
-		outputs, books = st.RuleOutputs, st.RuleBooks
+		books = st.RuleBooks
+		outputs = make(map[string]json.RawMessage, len(st.RuleOutputs))
+		for key, raw := range st.RuleOutputs {
+			// An installation that keeps the rule facts in the ledger keys an output by its rule and ID (D108): the ID is the last part.
+			outputs[key[strings.LastIndex(key, ":")+1:]] = raw
+		}
 		return nil
 	}); err != nil {
 		f.t.Fatal(err)

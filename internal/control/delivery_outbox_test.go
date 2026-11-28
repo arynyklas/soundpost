@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -1553,4 +1554,50 @@ func TestDeliveryOutboxSurvivesRestartAndSnapshotImport(t *testing.T) {
 	if _, err = send(store, svc, cred, model.NewID(), control.KindCompleteDelivery, control.DeliveryCommand{Operation: control.DeliveryOpComplete, Lease: &lease, Complete: &c}); code(err) != model.Stale {
 		t.Fatalf("the pre-restart lease completed after restart: %v", err)
 	}
+}
+
+// Delivery reads the one record and what its hold depends on; Deliveries reads the whole state. The two must answer the same for every delivery,
+// whatever stops it: a missing or disabled destination, a deletion that is closing or complete, a claim, an age past the maximum.
+func TestDeliveryOfOneRecordAnswersAsTheListOfTheProject(t *testing.T) {
+	f := newDelFx(t)
+	disabled := model.ID{0xd2}
+	gone := model.ID{0xd9}
+	f.setDestination(disabled, true)
+	ok := f.intent(1)
+	missing := f.intent(2, withRecipient(&gone))
+	off := f.intent(3, withRecipient(&disabled))
+	inside := f.intent(4, withOrigin(10, 50))
+	f.mustEnqueue(0, ok, missing, off, inside)
+	f.setDestination(disabled, false)
+	same := func(stage string) {
+		t.Helper()
+		for _, now := range []model.UnixNano{0, 200, 1000, control.DeliveryMaxAge + 1000} {
+			list, err := f.store.Deliveries(f.ctx, f.adminScope(), f.project, "", now, 0)
+			if err != nil || len(list) != 4 {
+				t.Fatalf("%s: list at %d: %d records, %v", stage, now, len(list), err)
+			}
+			for _, want := range list {
+				got := f.recAt(want.ID, now)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s: delivery %s at %d: one-record read\n %+v\nlist\n %+v", stage, want.ID, now, got, want)
+				}
+			}
+		}
+	}
+	same("enqueued")
+	lease := f.lease()
+	f.mustClaim(lease, 200, 100, 10)
+	same("claimed")
+	id, _, err := f.del(control.DeleteScope{Mode: model.DeleteHistoricalRange, Projects: []model.ID{f.project}, Signals: []model.Kind{model.Metric}, Start: 0, End: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("deletion closing")
+	if _, err = f.store.RecordBarriers(f.ctx, id, cursors(model.DeleteSlots)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.CompleteDeletion(f.ctx, id, model.UnixNano(f.now.UnixNano()), nil); err != nil {
+		t.Fatal(err)
+	}
+	same("deletion complete")
 }

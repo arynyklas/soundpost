@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"github.com/arynyklas/soundpost/internal/model"
-	"io"
 	"reflect"
 	"sort"
 	"unsafe"
@@ -118,13 +117,16 @@ type columnArena struct {
 	used   int
 }
 type columnDecoder struct {
-	*bytes.Reader
 	raw       []byte
+	pos       int
 	dict      []string
 	remaining int
 	batchSize int
 	arenas    map[reflect.Type]*columnArena
 }
+
+// Len is the bytes of the column not read yet.
+func (r *columnDecoder) Len() int { return len(r.raw) - r.pos }
 
 // Native pointer/slice graphs borrow typed column arenas. Decoding a metric
 // page does not allocate one MetricPoint (or scalar pointer) per row.
@@ -149,10 +151,11 @@ func (r *columnDecoder) reserve(t reflect.Type, n int) reflect.Value {
 	return a.values.Slice3(start, a.used, a.used)
 }
 func (r *columnDecoder) u() (uint64, error) {
-	n, err := binary.ReadUvarint(r.Reader)
-	if err != nil {
+	n, k := binary.Uvarint(r.raw[r.pos:])
+	if k <= 0 {
 		return 0, model.Fail(model.Corrupt)
 	}
+	r.pos += k
 	return n, nil
 }
 func (r *columnDecoder) text() (string, error) {
@@ -174,11 +177,8 @@ func (r *columnDecoder) text() (string, error) {
 	if err != nil || size > uint64(r.Len()) {
 		return "", model.Fail(model.Corrupt)
 	}
-	start := len(r.raw) - r.Len()
-	s := string(r.raw[start : start+int(size)])
-	if _, err = r.Seek(int64(size), io.SeekCurrent); err != nil {
-		return "", model.Fail(model.Corrupt)
-	}
+	s := string(r.raw[r.pos : r.pos+int(size)])
+	r.pos += int(size)
 	r.dict = append(r.dict, s)
 	return s, nil
 }
@@ -191,6 +191,10 @@ func (r *columnDecoder) value(v reflect.Value) error {
 		s, err := r.text()
 		if err != nil {
 			return err
+		}
+		if sc, ok := model.ScalarFromCanonical(s); ok {
+			v.Set(reflect.ValueOf(sc))
+			return nil
 		}
 		return json.Unmarshal([]byte(s), v.Addr().Interface())
 	}
@@ -233,11 +237,13 @@ func (r *columnDecoder) value(v reflect.Value) error {
 	case reflect.Array:
 		if v.Type().Elem().Kind() == reflect.Uint8 {
 			// IDs, cursors and hashes are byte arrays reached through addressable slice
-			// elements; reading straight into the array keeps a page of them at a fixed
+			// elements; copying straight into the array keeps a page of them at a fixed
 			// number of allocations (v.Slice(...).Bytes() allocated once per element).
-			if _, err := io.ReadFull(r.Reader, unsafe.Slice((*byte)(v.Addr().UnsafePointer()), v.Len())); err != nil {
+			if r.Len() < v.Len() {
 				return model.Fail(model.Corrupt)
 			}
+			copy(unsafe.Slice((*byte)(v.Addr().UnsafePointer()), v.Len()), r.raw[r.pos:])
+			r.pos += v.Len()
 			return nil
 		}
 		for i := range v.Len() {
@@ -309,7 +315,7 @@ func encodeColumn(v any) ([]byte, error) {
 	return w.Bytes(), nil
 }
 func decodeColumn(b []byte, v any) error {
-	r := columnDecoder{Reader: bytes.NewReader(b), raw: b, remaining: pageByteLimit}
+	r := columnDecoder{raw: b, remaining: pageByteLimit}
 	if err := r.value(reflect.ValueOf(v).Elem()); err != nil {
 		return err
 	}

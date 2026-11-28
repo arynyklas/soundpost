@@ -181,6 +181,8 @@ func (t *MTLS) Stats() map[string]any {
 	}
 	out["read_calls"], out["read_rounds"], out["read_gave_up"] = reads, rounds, gaveUp
 	out["read_wait_ms_total"], out["read_wait_ms_max"] = readNS/1e6, readMax/1e6
+	out["call_errors"] = callErrorCounts()
+	out["forward_refused_early"], out["forward_bodies_read"] = proposalsRefusedEarly.Load(), proposalBodiesRead.Load()
 	t.counters.Range(func(k, v any) bool {
 		p := v.(*peerCounters)
 		peer := map[string]any{

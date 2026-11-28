@@ -30,6 +30,7 @@ type committedEvent struct {
 }
 type changeIterator struct {
 	e                *Engine
+	slotHeld         bool // the iterator owns one live slot (scan_slots.go); closeLocked returns it once
 	scope            auth.Scope
 	req              SubscribeRequest
 	matchers         []compiledMatcher
@@ -98,6 +99,16 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	if err != nil {
 		return nil, err
 	}
+	// A live slot comes from the live budget, never from the scan budget, and is taken before e.mu.
+	if err = e.scanPages.liveSlots.acquire(ctx, LiveSlots); err != nil {
+		return nil, err
+	}
+	slot := true
+	defer func() {
+		if slot {
+			e.scanPages.liveSlots.release()
+		}
+	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -108,9 +119,6 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	}
 	if _, err = e.finishReadDeletions(scope.OrgID(), req.Projects, control); err != nil {
 		return nil, err
-	}
-	if e.storageStats.ActiveIterators >= 32 {
-		return nil, model.Fail(model.TooLarge)
 	}
 	req.Projects = append([]model.ID(nil), req.Projects...)
 	req.Selectors = append([]Matcher(nil), req.Selectors...)
@@ -164,6 +172,8 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	}
 	e.subscribers[it] = struct{}{}
 	e.storageStats.ActiveIterators++
+	slot = false
+	it.slotHeld = true
 	it.stop = context.AfterFunc(ctx, func() { _ = it.Close() })
 	return it, nil
 }
@@ -440,6 +450,10 @@ func (it *changeIterator) closeLocked() {
 	it.req.After = nil
 	delete(it.e.subscribers, it)
 	it.e.storageStats.ActiveIterators--
+	if it.slotHeld {
+		it.slotHeld = false
+		it.e.scanPages.liveSlots.release()
+	}
 drain:
 	for {
 		select {

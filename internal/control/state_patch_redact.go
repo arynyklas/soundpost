@@ -111,6 +111,30 @@ func (l *liveBooks) value(field, key string) (json.RawMessage, bool, error) {
 // apply (state_raw.go editMember) refuses such a splice so that the voter decodes and the encoder
 // omits the member, as every other voter's does.
 func redactPatch(rules State, live *liveBooks, p statePatch, payload []byte) (replacement []byte, changed bool, err error) {
+	if expanded, err := expandCompact(p.Ops); err != nil {
+		return nil, false, err
+	} else if len(expanded) != len(p.Ops) {
+		p.Ops = expanded // the records of a reservation are read as the plain ops it stands for (compact_admission.go)
+	}
+	// A rec op (record_delta.go) is history: it adds rows to the record the voter holds. The retained commands of a record are all
+	// written as the plain record the committed state holds (a delete when it holds none), so that a voter that replays the
+	// rewritten log reaches it at every one of them and no erased row stays in a delta.
+	recs, converted, err := expandRecords(p.Ops, func(key string) bool { return keyCoveredByDeletion(rules, key) }, live.value)
+	if err != nil {
+		return nil, false, err
+	}
+	p.Ops = recs
+	untouched := func() ([]byte, bool, error) {
+		if !converted {
+			return payload, false, nil
+		}
+		p.Base = ""
+		replacement, err := json.Marshal(statePatchCommand{StatePatch: p})
+		if err != nil {
+			return nil, false, model.Fail(model.Invalid)
+		}
+		return replacement, true, nil
+	}
 	type candidate struct {
 		op         int
 		field, key string
@@ -157,7 +181,7 @@ func redactPatch(rules State, live *liveBooks, p statePatch, payload []byte) (re
 		}
 	}
 	if len(candidates) == 0 {
-		return payload, false, nil
+		return untouched()
 	}
 	raw, err := json.Marshal(fragments)
 	if err != nil {
@@ -237,7 +261,7 @@ func redactPatch(rules State, live *liveBooks, p statePatch, payload []byte) (re
 		changed = true
 	}
 	if !changed {
-		return payload, false, nil
+		return untouched()
 	}
 	// A voter that applies the rewritten command is behind and holds records the pass erased: its
 	// bytes are not the ones the proposer read, so the rewritten patch no longer names them.

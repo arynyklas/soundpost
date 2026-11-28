@@ -845,6 +845,7 @@ func eventuallyQuery(site *installSite, fx *installFixture, l *distLedger, limit
 				if got.Failure == nil && got.Completeness == query.CompletenessComplete && got.Value != nil && got.Value.Type == query.ValueVector && len(got.Value.Vector) == 1 && got.Value.Vector[0].Sample.Float != nil {
 					if math.Float64frombits(uint64(*got.Value.Vector[0].Sample.Float)) == want {
 						result.Projects[0].Stats.ElapsedNS = 0
+						result.Projects[0].Stats.QueueWaitNS = 0
 						return json.Marshal(result)
 					}
 					last = "wrong_value"
@@ -881,6 +882,10 @@ type processCluster struct {
 	// nodeBinary overrides binary for the members listed (the mixed-release test starts some voters on
 	// the previous release); a member without an entry runs binary. Guarded by mu.
 	nodeBinary map[uint64]string
+
+	// diagAddr names, per member, the loopback address a diagnostic build serves /debug/soundpost on
+	// (SOUNDPOST_DIAG_PPROF); a member without an entry gets none. Guarded by mu.
+	diagAddr map[uint64]string
 }
 
 func newProcessCluster(binary, release, work string, report map[string]any) (distCluster, error) {
@@ -1016,6 +1021,11 @@ func (c *processCluster) start(ids ...uint64) error {
 		cmd := exec.Command(c.binaryOf(id), "serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.root, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id])
 		cmd.Stdout, cmd.Stderr = c.logs[id], c.logs[id]
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		c.mu.Lock()
+		if a := c.diagAddr[id]; a != "" {
+			cmd.Env = append(cmd.Env, "SOUNDPOST_DIAG_PPROF="+a)
+		}
+		c.mu.Unlock()
 		if err := cmd.Start(); err != nil {
 			return err
 		}

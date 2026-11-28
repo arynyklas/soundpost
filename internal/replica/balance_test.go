@@ -36,7 +36,7 @@ func termSum(c *asyncCluster, groups int) (sum uint64) {
 // appends were for two followers. With the placement every group ends up led by its preferred member (the seed
 // modulo the voters: nine groups over three members is three each), by a handful of transfers and no more.
 func TestLeadershipIsSharedOutEvenlyAndStaysPut(t *testing.T) {
-	shareOut(t, 0)
+	shareOut(t, 0, 0)
 }
 
 // The same on a machine that is busy: the campaigns take longer than balance.settled plus the stagger, so the first
@@ -44,12 +44,35 @@ func TestLeadershipIsSharedOutEvenlyAndStaysPut(t *testing.T) {
 // the campaigns are still going on. "Every group led by member 1 at one moment" is not a state this ever reaches, and
 // the placement does not depend on where the groups started.
 func TestLeadershipIsSharedOutEvenlyWhenTheCampaignsAreSlow(t *testing.T) {
-	shareOut(t, 100*time.Millisecond)
+	shareOut(t, 100*time.Millisecond, 0)
 }
 
-// shareOut starts nine groups with member 1 campaigning for each, pause apart, and holds the placement to the
-// preferred members, exactly, and to as many term changes as the moves need.
-func shareOut(t *testing.T, pause time.Duration) {
+// The same when the machine stalls for a moment once the groups are led (member 1 cut off for longer than the longest
+// election timeout, which is what a process that is not scheduled for that long looks like to the others): the others
+// elect leaders of their own, and the groups that member 1 gets back to are led by whoever won. Each of those elections
+// is a new term, nine of them before the first group is moved, and none of them is a move.
+func TestLeadershipIsSharedOutEvenlyWhenTheFirstMemberIsCutOffForAWhile(t *testing.T) {
+	shareOut(t, 0, 400*time.Millisecond)
+}
+
+// transfers is how many leadership transfers the placement of the nine groups has started, on any member.
+func transfers(c *asyncCluster, groups int) (sum uint64) {
+	for i := range groups {
+		for n := range 3 {
+			if g := c.groups[n][i]; g != nil {
+				sum += g.LeaderTransfers()
+			}
+		}
+	}
+	return sum
+}
+
+// shareOut starts nine groups with member 1 campaigning for each, pause apart, cuts member 1 off for cutOff once every
+// group is led, and holds the placement to the preferred members, exactly, and to the transfers it takes: a group is
+// handed over at most once, whoever led it (its preferred member never gives it away), and a transfer that did not
+// take is tried again a few times at most. What it does not count is elections: they change terms too, as many as a
+// loaded machine makes, and none of them is a move.
+func shareOut(t *testing.T, pause, cutOff time.Duration) {
 	t.Helper()
 	quickBalance(t)
 	const groups = 9
@@ -60,26 +83,22 @@ func shareOut(t *testing.T, pause time.Duration) {
 		}
 		time.Sleep(pause)
 	}
-	// Every group is led once; the term it was first seen led in is where its moves count from (a group may already
-	// be on its way to its preferred member, so no state that holds for all groups at one moment is waited for).
-	first := make([]uint64, groups)
-	await(t, 10*time.Second, "every group has a leader", func() bool {
-		led := true
-		for i := range groups {
-			if first[i] != 0 {
-				continue
+	if cutOff > 0 {
+		await(t, 10*time.Second, "every group has a leader", func() bool {
+			for i := range groups {
+				if c.leader(i) == 0 {
+					return false
+				}
 			}
-			if s := c.groups[0][i].Status(); s.Leader != 0 {
-				first[i] = s.Term
-			} else {
-				led = false
-			}
-		}
-		return led
-	})
-	var before uint64
-	for _, term := range first {
-		before += term
+			return true
+		})
+		c.wire.mu.Lock()
+		c.wire.down[1] = true
+		c.wire.mu.Unlock()
+		time.Sleep(cutOff)
+		c.wire.mu.Lock()
+		c.wire.down[1] = false
+		c.wire.mu.Unlock()
 	}
 	// Every group led by its preferred member: nine groups over three members is three each. A count of three
 	// per member is not enough, it is also reached on the way, with the wrong groups.
@@ -98,9 +117,13 @@ func shareOut(t *testing.T, pause time.Duration) {
 	if now := termSum(c, groups); now != terms {
 		t.Fatalf("leadership kept moving after it was placed: the terms of the groups grew by %d in 3 s", now-terms)
 	}
-	// Six of the nine groups moved, once each, and a move is one term: a placement that oscillates or retries shows here.
-	if moved := terms - before; moved > 9 {
-		t.Fatalf("the groups changed term %d times to move six of them once each", moved)
+	moves := transfers(c, groups)
+	t.Logf("%d transfers placed %d groups (terms now %d)", moves, groups, terms)
+	if moves == 0 {
+		t.Fatal("nine groups started by one member were placed without a single leadership transfer: the count is not counting")
+	}
+	if moves > groups+3 {
+		t.Fatalf("%d leadership transfers to place %d groups, want at most one each and 3 that did not take", moves, groups)
 	}
 }
 

@@ -41,6 +41,7 @@ type voterMesh struct {
 	stop    chan struct{}
 	wg      sync.WaitGroup
 	once    sync.Once
+	calls   atomic.Int32 // a callMode: how the leader calls of the voters fail
 }
 
 func newVoterMesh() *voterMesh {
@@ -109,6 +110,39 @@ func (t voterTransport) ForwardPropose(ctx context.Context, _ model.ID, entry re
 		return replica.CommittedEntry{}, replica.ErrUnavailable
 	}
 	return leader.Propose(ctx, entry)
+}
+
+// CallLeader hands a call to the leader's handler, as the mTLS transport does (replica.Group.ServeCall is the leader's half).
+func (t voterTransport) CallLeader(ctx context.Context, _ model.ID, name string, body []byte) ([]byte, error) {
+	t.mesh.mu.Lock()
+	if t.mesh.blocked[t.node] {
+		t.mesh.mu.Unlock()
+		return nil, replica.ErrUnavailable
+	}
+	groups := make(map[uint64]*replica.Group, len(t.mesh.groups))
+	for id, g := range t.mesh.groups {
+		groups[id] = g
+	}
+	t.mesh.mu.Unlock()
+	for id, g := range groups {
+		if st := g.Status(); st.Leader == id && st.ID == id && id != t.node {
+			t.mesh.mu.Lock()
+			up := !t.mesh.blocked[id]
+			t.mesh.mu.Unlock()
+			if up {
+				switch callMode(t.mesh.calls.Load()) {
+				case callRefused:
+					return nil, fmt.Errorf("%w: connection refused", replica.ErrNoLeader) // nothing was sent
+				case callAnswerLost:
+					// The leader ran the handler and committed what it committed; the connection dropped before the answer came back.
+					_, _ = g.ServeCall(ctx, t.node, name, body)
+					return nil, fmt.Errorf("%w: connection reset", replica.ErrCallOutcomeUnknown)
+				}
+				return g.ServeCall(ctx, t.node, name, body)
+			}
+		}
+	}
+	return nil, replica.ErrUnavailable
 }
 
 func (m *voterMesh) deliver(to uint64, q <-chan voterMsg) {
@@ -258,6 +292,7 @@ func forceStatePatchGate(s *control.Store) {
 // an answer it fails closed and a lagging voter would never be sent its snapshot.
 func answerLayoutQuestion(s *control.Store) {
 	s.SetMemberLayoutQuery(func(context.Context, replica.Member) error { return nil })
+	s.SetMemberRuleLedgerQuery(func(context.Context, replica.Member) error { return nil }) // and reads the rule facts as records (D108)
 }
 
 // newControlVotersOn opens the voters on net (nil: the in-process mesh).

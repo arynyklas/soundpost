@@ -320,3 +320,121 @@ func TestGroupsWithDifferentSharesCutAtDifferentCommands(t *testing.T) {
 		t.Fatalf("a group at 768/1024 of a 20 command bound cut %d times at 12 commands", got)
 	}
 }
+
+// A share places where a group's FIRST cut falls, so that the groups of a node, loaded alike, do not cut together; every cut
+// after it is due at the whole bounds. A share that lasted would cut a group at its share of the bound for as long as it
+// runs, which is more cuts, and more of the work a cut costs, than the bound the cadence names (the 64 data groups of a
+// node cut at an average of three quarters of it), and it keeps the journal a restart replays below the bound only by paying
+// for it on every cut.
+func TestStaggerIsTheShareOfTheFirstCutOnly(t *testing.T) {
+	g := &Group{cadence: Cadence{Commands: 2048, Bytes: 16 << 20, Stagger: StaggerBase / 2}}
+	g.sinceCommands = 1024
+	if !g.cutDue() {
+		t.Fatal("the first cut of a group of share 512/1024 is due at half the command bound")
+	}
+	g.sinceCommands, g.sinceBytes = 0, 8<<20
+	if !g.cutDue() {
+		t.Fatal("the first cut of a group of share 512/1024 is due at half the byte bound")
+	}
+	g.cadenceCuts.Store(1) // its first cut completed
+	g.sinceCommands, g.sinceBytes = 1024, 8<<20
+	if g.cutDue() {
+		t.Fatal("after its first cut a group is due at the whole bound, not at its share")
+	}
+	g.sinceCommands, g.sinceBytes = 2047, 16<<20-1
+	if g.cutDue() {
+		t.Fatal("a group is not due short of the whole bounds")
+	}
+	if g.sinceCommands = 2048; !g.cutDue() {
+		t.Fatal("a group is due at the whole command bound")
+	}
+	if g.sinceCommands, g.sinceBytes = 0, 16<<20; !g.cutDue() {
+		t.Fatal("a group is due at the whole byte bound")
+	}
+}
+
+func sinceCommandsOf(g *Group) uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.sinceCommands
+}
+
+// The same on a running group: the first cut falls at its share of the bound, the next one a whole bound later.
+func TestStaggeredGroupCutsAtTheWholeBoundAfterItsFirstCut(t *testing.T) {
+	g, m := openBounded(t, Config{Cadence: Cadence{Commands: 20, Stagger: StaggerBase / 2}})
+	puts := 0
+	put := func() { putWhole(t, g, m, puts); puts++ }
+	waitCuts := func(want uint64, what string) {
+		t.Helper()
+		for deadline := time.Now().Add(30 * time.Second); g.CadenceCuts() < want; time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %d cuts after %d commands, want %d", what, g.CadenceCuts(), puts, want)
+			}
+		}
+	}
+	for range 12 { // past 10, the share of 20
+		put()
+	}
+	waitCuts(1, "a group at 512/1024 of a bound of 20 commands")
+	// What was applied while that cut ran counts toward the next one. Up to 15 since it is short of the bound of 20 and
+	// past the share, 10, that the first cut fell at.
+	for sinceCommandsOf(g) < 15 {
+		put()
+	}
+	time.Sleep(500 * time.Millisecond)
+	if cuts := g.CadenceCuts(); cuts != 1 {
+		t.Fatalf("the group cut %d times after %d commands, with %d since its first cut: after the first cut it is due at the whole bound of 20, not at its share of 10", cuts, puts, sinceCommandsOf(g))
+	}
+	for sinceCommandsOf(g) < 20 && g.CadenceCuts() < 2 {
+		put()
+	}
+	waitCuts(2, "a group at the whole bound of 20 commands since its first cut")
+}
+
+// A reader of CadenceCuts that wants every cut the commands it has appended called for must be able to tell a cut that is
+// slow from one that is not coming: CadencePending is true from the command that reached the bound, through the cut,
+// until the moment the cut is counted (never a moment of neither, or the reader sees the count before it moves).
+func TestCadencePendingCoversTheCutFromTheBoundUntilItIsCounted(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once, released sync.Once
+	free := func() { released.Do(func() { close(release) }) }
+	g, m := openBounded(t, Config{Cadence: Cadence{Commands: 4}, Fault: func(at string) error {
+		if at == "snapshot_cut" {
+			once.Do(func() { close(entered); <-release })
+		}
+		return nil
+	}})
+	t.Cleanup(free) // a failed check must not leave Close waiting for the held cut (cleanups run last in, first out)
+	if g.CadencePending() {
+		t.Fatal("pending with no command applied but the election's")
+	}
+	putWhole(t, g, m, 0)
+	if g.CadencePending() {
+		t.Fatalf("pending with %d of 4 commands applied", sinceCommandsOf(g))
+	}
+	for sinceCommandsOf(g) < 4 {
+		putWhole(t, g, m, 1)
+	}
+	if !g.CadencePending() {
+		t.Fatal("not pending when the command that reached the bound was answered")
+	}
+	select { // the cut is running, held inside the snapshot
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the cut the bound called for never began")
+	}
+	if !g.CadencePending() || g.CadenceCuts() != 0 {
+		t.Fatalf("a running cut: pending %v, cuts %d", g.CadencePending(), g.CadenceCuts())
+	}
+	free()
+	deadline := time.Now().Add(30 * time.Second)
+	for g.CadencePending() {
+		if time.Now().After(deadline) {
+			t.Fatal("the cut never ended")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if cuts := g.CadenceCuts(); cuts != 1 {
+		t.Fatalf("no longer pending with %d cuts counted, want 1", cuts)
+	}
+}

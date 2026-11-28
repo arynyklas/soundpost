@@ -50,8 +50,8 @@ func ledgerOnlyPatch(p *statePatch) bool {
 		if len(op.Path) == 0 {
 			return false
 		}
-		if ledgerRoot(op.Path[0]) {
-			if bookRoot(op.Path[0]) {
+		if ledgerRoot(op.Path[0]) || ruleRoot(op.Path[0]) {
+			if bookRoot(op.Path[0]) || ruleRoot(op.Path[0]) {
 				books = true
 			} else {
 				admission = true

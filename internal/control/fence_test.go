@@ -77,6 +77,12 @@ func newFenceFxWith(t *testing.T, bindRetention, patch bool) *fenceFx {
 	if patch {
 		f.store.SetStatePatchGate(func() bool { return true })
 	}
+	if os.Getenv("SOUNDPOST_TEST_RULE_LEDGER") != "" {
+		// Every fixture runs as a group whose members all declared protocol 10 (D108): the rule facts move into the ledger at the
+		// first rule command, and the suites of the rule writers and of the erasure run on that layout.
+		f.store.SetStatePatchGate(func() bool { return true })
+		f.store.SetCompactAdmissionGate(func() bool { return true })
+	}
 	t.Cleanup(func() { f.store.Close() })
 	if f.svc, err = auth.NewService(auth.AuthDependencies{Control: f.store, Now: func() time.Time { return f.now }}); err != nil {
 		t.Fatal(err)

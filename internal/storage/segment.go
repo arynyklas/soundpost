@@ -13,7 +13,22 @@ import (
 )
 
 func (e *Engine) readPage(ref pageRef) (Page, error) { return e.readPageColumns(ref, true, true) }
+
+// readPageColumns is loadPageColumns for a caller that holds e.mu: it counts the read in the engine's
+// statistics, which that lock guards.
 func (e *Engine) readPageColumns(ref pageRef, resources, payload bool) (Page, error) {
+	p, err := e.loadPageColumns(ref, resources, payload)
+	if err != nil {
+		return Page{}, err
+	}
+	e.storageStats.PagesRead++
+	e.storageStats.BytesRead += p.Bytes
+	return p, nil
+}
+
+// loadPageColumns reads, verifies and decodes the page a reference names (Page.Bytes is the encoded bytes
+// it read). It touches no state that e.mu guards, so a reader may call it with the lock released.
+func (e *Engine) loadPageColumns(ref pageRef, resources, payload bool) (Page, error) {
 	var data []byte
 	if ref.Segment == "" {
 		data = ref.Hot
@@ -77,8 +92,6 @@ func (e *Engine) readPageColumns(ref pageRef, resources, payload bool) (Page, er
 			}
 		}
 	}
-	e.storageStats.PagesRead++
-	e.storageStats.BytesRead += uint64(len(data))
 	return p, nil
 }
 func (e *Engine) writeSegment(ctx context.Context, refs []pageRef) ([]pageRef, SegmentManifest, error) {

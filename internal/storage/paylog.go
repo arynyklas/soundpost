@@ -96,6 +96,8 @@ type payloadLog struct {
 	reads map[uint32]payloadFile
 
 	nreads atomic.Int64 // records read (read); a test and the diagnostic build count what a start reads
+
+	blocks blockCache // the index blocks scans read (block_cache.go)
 }
 
 func payloadFileName(seq uint32) string { return fmt.Sprintf("%08d.spl", seq) }
@@ -455,10 +457,14 @@ func storedFromDBCold(db *bolt.DB, v []byte) []byte {
 func storedTx(tx *bolt.Tx, v []byte) []byte { return storedFromDB(tx.DB(), v) }
 
 // owePayloadScrub records, in the transaction that replaced or deleted a value, that the record its reference named still holds
-// the old bytes.
+// the old bytes. The block of an index run that the record held is forgotten at once (block_cache.go): no copy of the old
+// bytes outlives the transaction that owes their zeroing.
 func owePayloadScrub(tx *bolt.Tx, old []byte) error {
 	if !isPayloadRef(old) {
 		return nil
+	}
+	if l, ok := payloadLogs.Load(tx.DB()); ok {
+		l.(*payloadLog).blocks.forget(old, uint64(tx.ID()))
 	}
 	b, err := tx.CreateBucketIfNotExists([]byte(payloadScrubBucket))
 	if err != nil {

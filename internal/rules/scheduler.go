@@ -5,10 +5,12 @@ package rules
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/staleretry"
 )
 
 // DefaultMaxBackfill bounds how many late grid points one scheduling pass
@@ -108,6 +110,9 @@ type RunReport struct {
 	// Committed lists the scheduled times committed by this pass (including those
 	// that were already committed and returned verbatim).
 	Committed []model.UnixNano
+	// Evaluate and Commit are the wall time spent evaluating the due points and committing them (the
+	// commit includes its revision retries), summed over the points of the pass.
+	Evaluate, Commit time.Duration
 }
 
 const maxCommitAttempts = 3
@@ -136,7 +141,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, readScope, commitScope auth.Sco
 		report.MissedRecorded = true
 	}
 	for _, at := range report.Plan.Due {
-		if err = s.commitAt(ctx, readScope, commitScope, rule, at, lease); err != nil {
+		if err = s.commitAt(ctx, readScope, commitScope, rule, at, lease, &report); err != nil {
 			return report, err
 		}
 		report.Committed = append(report.Committed, at)
@@ -147,15 +152,20 @@ func (s *Scheduler) RunOnce(ctx context.Context, readScope, commitScope auth.Sco
 // commitAt evaluates and commits one grid point. A lost race (another evaluator
 // committed first, or the state moved) is resolved by evaluating again, which
 // returns whatever was committed first, verbatim.
-func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Scope, rule Rule, at model.UnixNano, lease replica.FenceToken) error {
+func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Scope, rule Rule, at model.UnixNano, lease replica.FenceToken, report *RunReport) error {
 	begun := gateBegin()
 	var last error
 	for range maxCommitAttempts {
+		t0 := time.Now()
 		ev, err := s.evaluator.Evaluate(ctx, readScope, rule, at, lease)
+		t1 := time.Now()
+		report.Evaluate += t1.Sub(t0)
 		if err != nil {
 			return err
 		}
-		if _, last = s.committer.Commit(ctx, commitScope, ev, lease); last == nil {
+		_, last = s.committer.Commit(ctx, commitScope, ev, lease)
+		report.Commit += time.Since(t1)
+		if last == nil {
 			gateCommitted(ev, begun)
 			return nil
 		}
@@ -163,6 +173,7 @@ func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Sc
 		if !errors.As(last, &fault) || fault.Code != model.Conflict {
 			return last
 		}
+		staleretry.Note(staleretry.Rules)
 	}
 	return last
 }

@@ -118,6 +118,12 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e = c.BindAdmissionOwner(engine); e != nil {
 		return fail(e)
 	}
+	if e = c.BindAdmissionScopes(a); e != nil {
+		return fail(e)
+	}
+	if e = engine.BindAppendScopes(a); e != nil {
+		return fail(e)
+	}
 	if e = a.BindSourceBarrier(engine); e != nil {
 		return fail(e)
 	}

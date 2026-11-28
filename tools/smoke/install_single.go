@@ -1050,10 +1050,11 @@ func queryInstalled(site *installSite, fx *installFixture) ([]byte, error) {
 	if sample.Float == nil || math.Float64frombits(uint64(*sample.Float)) != 42.5 {
 		return nil, &smokeFailure{Stage: "query", Code: "wrong_value"}
 	}
-	// The answer is compared byte for byte after the restart except for the one field that
-	// measures this particular execution.
+	// The answer is compared byte for byte after the restart except for the two fields that
+	// measure this particular execution (its run time and the time it waited for admission).
 	for i := range result.Projects {
 		result.Projects[i].Stats.ElapsedNS = 0
+		result.Projects[i].Stats.QueueWaitNS = 0
 	}
 	return json.Marshal(result)
 }

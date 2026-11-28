@@ -11,6 +11,8 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/policy"
 	"io"
+	"sync/atomic"
+	"time"
 )
 
 type Batch = model.Batch
@@ -45,6 +47,8 @@ type Service struct {
 	quota    Quota
 	appender Appender
 	replay   ReplayGate
+	// inFlight is how many ingest requests the process is working on (Enter).
+	inFlight atomic.Int64
 }
 
 // ReplayGate is the closed-format check for one replay chunk (the chain and
@@ -129,9 +133,54 @@ func Decode(r io.Reader, encoding string) (Batch, error) {
 	return b, nil
 }
 func (s *Service) ResolveSource(ctx context.Context, c SourceCredential, b Batch) (SourceGrant, error) {
-	return s.policy.ResolveSource(ctx, c, b.Project, b.Source, b.PolicyRevision)
+	from := time.Now()
+	g, e := s.policy.ResolveSource(ctx, c, b.Project, b.Source, b.PolicyRevision)
+	phaseTimes.resolve.add(from)
+	return g, e
 }
+
+// maxInFlight bounds the ingest requests a process works on at once, counted from the first byte of a request, before the
+// credential is checked and before the body is read: a refused request costs a counter and a 503. A batch is admitted in steps
+// that each wait for a round of a group (the reservation, the append of its slot, the finalization), so the time of one is the
+// length of the queues of those rounds; work that is let in without a bound makes every queue longer for all of it, and a caller
+// that gave up after its own budget and asked again adds its batch to the queues while the first is still in them (14,000
+// goroutines and 36 s of p95 at 1750 records a second when the cluster was past what it could commit).
+//
+// The number: a node takes a third of the batches (6.3 records each), 263 a second at 5,000 records a second, so by Little's
+// law a request that is answered in the 0.5 s of the target has 130 in flight, and 512 is 4 times that: it is reached only when
+// the answer time of the node has passed 1.9 s, which is where the queues are growing and more work only lengthens them. At
+// 1,750 records a second a node has 46 in flight at the target. A sender that is refused waits what the refusal says
+// (Retry-After, which the SDKs and the load generator honor, with their exponential backoff and jitter) and tries again, so a
+// refusal does not make more work for the process.
+const maxInFlight = 512
+
+// Enter counts one ingest request in; ok is false when maxInFlight are in progress already (the request is refused as a
+// timeout, 503 with Retry-After, and is not counted). Every request that entered calls Leave.
+func (s *Service) Enter() (ok bool) {
+	n := s.inFlight.Add(1)
+	if n > maxInFlight {
+		s.inFlight.Add(-1)
+		outcomes.bounded.Add(1)
+		return false
+	}
+	for {
+		m := outcomes.inFlightMax.Load()
+		if n <= m || outcomes.inFlightMax.CompareAndSwap(m, n) {
+			return true
+		}
+	}
+}
+
+// Leave counts a request that entered out.
+func (s *Service) Leave() { s.inFlight.Add(-1) }
+
 func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, error) {
+	r, e := s.admit(ctx, g, b)
+	noteOutcome(e)
+	return r, e
+}
+
+func (s *Service) admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, error) {
 	n, e := policy.Normalize(g, b)
 	if e != nil {
 		return Receipt{}, e
@@ -161,16 +210,25 @@ func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, e
 	// and stored-chunk checks) does so before the reservation, so a refused
 	// forged batch never leaves a charged reservation behind.
 	if p, ok := s.appender.(Preflighter); ok {
-		if e = p.Preflight(ctx, scope, n); e != nil {
+		from := time.Now()
+		e = p.Preflight(ctx, scope, n)
+		phaseTimes.preflight.add(from)
+		if e != nil {
 			return Receipt{}, e
 		}
 	}
+	reserveFrom := time.Now()
 	reservation, e := s.quota.ReserveAdmission(ctx, scope, n)
+	phaseTimes.reserve.add(reserveFrom)
 	if e != nil {
 		return Receipt{}, e
 	}
 	n.Reservation = reservation
+	// The checks that follow (the append's) have to see the reservation this request just made: they make their own barrier.
+	model.InvalidateReadShare(ctx)
+	appendFrom := time.Now()
 	r, e := s.appender.Append(ctx, scope, n)
+	phaseTimes.appendTime.add(appendFrom)
 	if e != nil {
 		return Receipt{}, e
 	}
@@ -179,15 +237,22 @@ func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, e
 	// batch whose reservation control already holds as consumed at this receipt's cursor (or whose
 	// settled window it answers as consumed) has nothing left to finalize.
 	if reservation.State == "consumed" && reservation.Cursor != nil && *reservation.Cursor == r.Cursor {
-		if e = g.Revalidate(ctx); e != nil {
+		if e = g.Revalidate(model.WithoutReadShare(ctx)); e != nil {
 			return Receipt{}, e
 		}
 		return r, nil
 	}
-	if e = s.quota.FinalizeAdmission(ctx, scope, model.FinalizeAdmission{ReservationID: reservation.ID, Cursor: r.Cursor}); e != nil {
+	finalizeFrom := time.Now()
+	e = s.quota.FinalizeAdmission(ctx, scope, model.FinalizeAdmission{ReservationID: reservation.ID, Cursor: r.Cursor})
+	phaseTimes.finalize.add(finalizeFrom)
+	if e != nil {
+		noteFinalizeFailed(e)
 		return Receipt{}, model.Fail(model.Unavailable)
 	}
-	if e = g.Revalidate(ctx); e != nil {
+	revalidateFrom := time.Now()
+	e = g.Revalidate(model.WithoutReadShare(ctx))
+	phaseTimes.revalidate.add(revalidateFrom)
+	if e != nil {
 		return Receipt{}, e
 	}
 	return r, nil

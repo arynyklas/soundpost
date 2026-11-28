@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/diagstat"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query/logql"
 	"github.com/arynyklas/soundpost/internal/query/profile"
@@ -76,6 +77,17 @@ func New(scanner Scanner, policy Revalidator, profiles Registry, limits Limits, 
 	for _, option := range options {
 		option(e)
 	}
+	diagstat.Register("query_admission", func() map[string]any {
+		u := e.Usage()
+		s := u.Admission
+		return map[string]any{
+			"active": u.ActiveQueries, "queued": u.QueuedQueries, "admitted": s.Admitted, "queued_total": s.Queued,
+			"blocked_global": s.BlockedGlobal, "blocked_org": s.BlockedOrg, "blocked_principal": s.BlockedPrincipal,
+			"refused_full": s.RefusedFull, "timed_out": s.TimedOut, "cancelled": s.Cancelled,
+			"queue_wait_sum_ns": s.QueueWaitSumNS, "queue_wait_max_ns": s.QueueWaitMaxNS,
+			"memory_peak": u.MemoryPeak, "open_iterators": u.OpenIterators,
+		}
+	})
 	return e, nil
 }
 
@@ -88,12 +100,13 @@ type Usage struct {
 	OpenIterators                int64
 	LeakedBytes                  int64
 	OverReleasedBytes            int64
+	Admission                    AdmissionStats
 }
 
 func (e *Engine) Usage() Usage {
 	st := e.sched.state()
 	used, peak := e.pool.snapshot()
-	return Usage{ActiveQueries: st.Active, QueuedQueries: st.Queued, MemoryUsed: used, MemoryPeak: peak, OpenIterators: e.openIterators.Load(), LeakedBytes: e.leakedBytes.Load(), OverReleasedBytes: e.overReleased.Load()}
+	return Usage{ActiveQueries: st.Active, QueuedQueries: st.Queued, Admission: st.Stats, MemoryUsed: used, MemoryPeak: peak, OpenIterators: e.openIterators.Load(), LeakedBytes: e.leakedBytes.Load(), OverReleasedBytes: e.overReleased.Load()}
 }
 
 // Profiles is the registry the engine resolves every request against: each
@@ -319,6 +332,8 @@ type session struct {
 	timer   context.CancelFunc
 	closeMu sync.Once
 	wire    atomic.Int64
+	// queueWait is how long the query waited for admission (scheduler.Acquire).
+	queueWait time.Duration
 }
 
 func (e *Engine) deleteGeneration(ctx context.Context, scope auth.Scope, projects []model.ID) (uint64, error) {
@@ -351,16 +366,18 @@ func (e *Engine) verify(ctx context.Context, scope auth.Scope, projects []model.
 }
 
 func (e *Engine) begin(ctx context.Context, scope auth.Scope, projects []model.ID, timeout time.Duration, memory int64) (*session, error) {
+	queued := time.Now()
 	release, err := e.sched.Acquire(ctx, scope.OrgID(), scope.PrincipalID())
 	if err != nil {
 		return nil, err
 	}
+	waited := time.Since(queued) // admission queue wait, reported in every project's Stats
 	gen, err := e.deleteGeneration(ctx, scope, projects)
 	if err != nil {
 		release()
 		return nil, err
 	}
-	s := &session{e: e, scope: scope, org: scope.OrgID(), project: projects, gen: gen, release: release, acct: newQueryAccount(e.pool, memory)}
+	s := &session{e: e, scope: scope, org: scope.OrgID(), project: projects, gen: gen, release: release, acct: newQueryAccount(e.pool, memory), queueWait: waited}
 	timed, timer := context.WithTimeout(ctx, timeout)
 	s.timer = timer
 	s.ctx, s.cancel = context.WithCancelCause(timed)
@@ -770,6 +787,7 @@ func (p pinnedLogs) Select(ctx context.Context, r scan.LogSelection) (scan.LogIt
 func (rn *run) project(ctx context.Context, project model.ID, plan projectPlan, pre []syntax.Diagnostic) (pr ProjectResult, err error) {
 	started := time.Now()
 	acct := &projectAccount{q: rn.s.acct}
+	defer acct.flush()
 	stats := &scanStats{}
 	scanner := &trackedScanner{inner: rn.e.scanner, open: &rn.e.openIterators, stats: stats}
 	var res value.Result
@@ -836,7 +854,7 @@ func (rn *run) project(ctx context.Context, project model.ID, plan projectPlan, 
 		Stats: Stats{
 			ScansStarted: model.Uint64(stats.scans.Load()), PagesRead: model.Uint64(stats.pages.Load()), RowsRead: model.Uint64(stats.rows.Load()), BytesRead: model.Uint64(stats.bytes.Load()),
 			SeriesReturned: model.Uint64(counts.series), SamplesReturned: model.Uint64(counts.samples), LogsReturned: model.Uint64(counts.logs),
-			PeakMemoryBytes: model.Uint64(acct.peakBytes()), ElapsedNS: model.Int64(time.Since(started)), LimitReached: limited,
+			PeakMemoryBytes: model.Uint64(acct.peakBytes()), ElapsedNS: model.Int64(time.Since(started)), QueueWaitNS: model.Int64(rn.s.queueWait), LimitReached: limited,
 		},
 	}
 	return pr, nil
