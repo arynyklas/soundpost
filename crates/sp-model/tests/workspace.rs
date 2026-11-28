@@ -20,5 +20,8 @@ fn workspace_lints_forbid_unsafe() {
             }
         }
     }
-    assert!(found, "[workspace.lints.rust] must set unsafe_code = \"forbid\"");
+    assert!(
+        found,
+        "[workspace.lints.rust] must set unsafe_code = \"forbid\""
+    );
 }
