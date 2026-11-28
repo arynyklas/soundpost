@@ -1,0 +1,507 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package control
+
+import (
+	"context"
+	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/arynyklas/soundpost/internal/model"
+)
+
+func openAuthorityStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if err = s.EnableSingle(context.Background(), filepath.Join(dir, "raft-control")); err != nil {
+		t.Fatal(err)
+	}
+	return s, dir
+}
+
+func revisions(t *testing.T, s *Store) (revision, authority model.Revision) {
+	t.Helper()
+	st, err := s.localState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Revision, st.AuthorityRevision
+}
+
+func sortedKeys[K ~string, V any](m map[K]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, string(k))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
+// content, so adding or moving a writer is a change a reviewer has to look at in this file too.
+func TestAuthorityClassificationTablesAreExact(t *testing.T) {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,IssueHold,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,RuleLedgerMark,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
+		t.Fatalf("non-authority writers: %s, want %s", got, want)
+	}
+	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
+		t.Fatalf("non-authority kinds: %s, want %s", got, want)
+	}
+	if got, want := strings.Join(sortedKeys(retentionKinds), ","), "BeginFence,CompleteFence,DeleteScope,PolicyChange,RecordEvidenceGap"; got != want {
+		t.Fatalf("retention kinds: %s, want %s", got, want)
+	}
+	for kind := range retentionKinds {
+		if _, keeps := nonAuthorityKinds[kind]; keeps {
+			t.Fatalf("retention kind %s is also classified non-authority", kind)
+		}
+	}
+	// retentionKinds is exactly what BindRetention registers.
+	s, _ := openAuthorityStore(t)
+	if err := s.BindRetention(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(sortedKeys(s.handlers), ","), strings.Join(sortedKeys(retentionKinds), ","); got != want {
+		t.Fatalf("BindRetention registers %s, retentionKinds is %s", got, want)
+	}
+}
+
+// Every CommandKind constant is explicitly classified either way, so a new kind cannot appear
+// without an entry. (An unlisted kind still bumps and stays strict: this test makes the omission
+// visible instead of silent.)
+func TestEveryCommandKindIsClassified(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "types.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []CommandKind
+	ast.Inspect(file, func(n ast.Node) bool {
+		if vs, ok := n.(*ast.ValueSpec); ok {
+			if id, ok := vs.Type.(*ast.Ident); ok && id.Name == "CommandKind" {
+				for _, v := range vs.Values {
+					if lit, ok := v.(*ast.BasicLit); ok {
+						kinds = append(kinds, CommandKind(strings.Trim(lit.Value, `"`)))
+					}
+				}
+			}
+		}
+		return true
+	})
+	if len(kinds) < 18 {
+		t.Fatalf("parsed %d kinds from types.go", len(kinds))
+	}
+	authority := map[CommandKind]bool{KindCreateOrg: true, KindGrant: true, KindPolicyChange: true, KindBeginFence: true, KindCompleteFence: true, KindReserveAdmission: true, KindFinalizeAdmission: true, KindDeleteScope: true, KindAudit: true, KindRecordEvidenceGap: true}
+	for _, kind := range kinds {
+		_, keeps := nonAuthorityKinds[kind]
+		if keeps == authority[kind] {
+			t.Errorf("kind %s: classification %v does not match the reviewed table (authority=%v)", kind, keeps, authority[kind])
+		}
+		if transactBumps(string(kind)) == keeps {
+			t.Errorf("kind %s: transactBumps disagrees with nonAuthorityKinds", kind)
+		}
+	}
+	if !transactBumps("BrandNewKindNobodyClassified") {
+		t.Fatal("an unclassified kind must bump")
+	}
+}
+
+// Every function of this package that commits a control transition is listed here with its class.
+// A new writer fails this test until it is classified by a reviewer. Writers of other packages call
+// the exported Update, which always bumps, so they are authority writers by construction.
+func TestEveryControlWriterIsClassified(t *testing.T) {
+	want := map[string]string{
+		// Authority (bump) that stays installation-wide: ImportDeletions re-installs tombstones of any
+		// number of organizations from the restore authority; settleScrub appends one audit per
+		// operation of every organization whose erasure the one control.db file scrub covered; an evidence
+		// gap is keyed by a hash and bound by the backup attestation; the rest is not about one organization.
+		"ImportDeletions":               "bump",
+		"settleScrub":                   "bump",
+		"RecordEvidenceGap":             "bump",
+		"InitializeBearerHashKey":       "bump",
+		"RedactRetainedControlCommands": "writerRedactNoop",
+		"CancelArtifact":                "bump",
+		"healFencedArtifactIntents":     "bump", // retires a published intent under a verified GC fence: artifact readability changes
+		"healLegacyAuthority":           "bump",
+		"Update":                        "bump",
+		// The retention-class transitions of ONE organization (F-10.05-2 residual): the deletion saga steps
+		// of the worker, the physical cleanup record and the delete generation advance commit through
+		// updateOrgRetention / updateOperation, which verify that only the organization's own rows
+		// changed (verifyOrgTransition, orgRetention) and move its own authority revision.
+		"RecordBarriers":          "orgRetention",
+		"CompleteDeletion":        "orgRetention",
+		"FailDeletion":            "orgRetention",
+		"RecordPhysicalCleanup":   "orgRetention",
+		"AdvanceDeleteGeneration": "orgRetention",
+		"updateOrgRetention":      "orgScoped:orgRetention",
+		"updateOperation":         "orgScoped:orgRetention",
+		// Dispatch by Command kind (nonAuthorityKinds); a retention kind of an organization commits through
+		// the per-organization writer, every other kind through update. Transact calls it after its
+		// read-first replay check.
+		"transactCommit": "orgScoped:orgRetention + by kind",
+		// Non-authority (updateAs with a writer on nonAuthorityWriters).
+		"ReserveAdmission":    "writerReserveAdmission",
+		"FinalizeAdmission":   "writerFinalizeAdmission",
+		"CancelAdmission":     "writerCancelAdmission",
+		"ReconcileAdmissions": "writerReconcileAdmissions",
+		"SettleAdmissions":    "writerSettleAdmissions",
+		"ReserveArtifact":     "writerReserveArtifact",
+		"PublishArtifact":     "writerPublishArtifact",
+		"TransactIssues":      "writerTransactIssues",
+		"TransactJobs":        "writerTransactJobs",
+		"UpdateReplayIndex":   "writerReplayIndex",
+		// An organization's admin command (10.05, F-10.05-2): the per-organization writer, guarded like
+		// the writers above (verifyOrgTransition: the organization's own record, appended audit rows and
+		// added commands, anything else bumps the installation-wide revision); it moves the
+		// organization's own authority revision. updateOrgScoped is the one place that commits it: it
+		// goes through replicatedUpdate itself.
+		"UpdateOrgAuthority": "orgScoped:classAdmin",
+		"updateOrgScoped":    "replicated",
+		// A login that adds a session record and consumes the one-time factor it presented
+		// (10.29): see writerSessionCreate for why neither can change who may read; every
+		// other user field, Logout and Bootstrap keep bumping.
+		"UpdateSessionCreate": "writerSessionCreate",
+		// Reference / Unreference ledger bookkeeping (10.29): see writerArtifactLedger; the GC
+		// fence and the retire transition keep bumping.
+		"UpdateArtifactReferences": "writerArtifactLedger",
+		// The holds of the issue producer (artifacts HoldIssues / SettleIssues): the same ledger
+		// bookkeeping, decided by the workflow of an issue, so with the grouping issues in the
+		// state (writerIssueHold).
+		"UpdateIssueHolds": "writerIssueHold",
+		// The control log expiry (retention.go): expired audit rows and applied-command rows only
+		// (writerExpireControlLog says why that cannot change authority).
+		"ExpireControlLog": "writerExpireControlLog",
+		// The auth sweep of expired pending logins, elevations and sessions
+		// (writerSweepExpired).
+		"UpdateSweepExpired": "writerSweepExpired",
+		// OIDC start / callback pending-login record (writerPendingLogin) and the audit-only
+		// commit of ElevatedScope (writerAuditAppend). Elevate (the elevation record is an
+		// access grant) and every other auth writer keep the unclassified Update and bump.
+		"UpdatePendingLogin": "writerPendingLogin",
+		"UpdateAuditAppend":  "writerAuditAppend",
+		// The audit delta path (D49): the whole-state fallback of one audit row is the same writer.
+		"AppendAudit": "writerAuditAppend",
+		// A voter's own attestation record (attest.go): evidence about its files only.
+		"syncAttestation": "writerAttestControl",
+		// The leader's handler of the admission transitions a voter handed it (admission_remote.go): the same two writers as
+		// ReserveAdmission and FinalizeAdmission, in the leader's own rounds; neither changes AuthorityRevision.
+		"serveAdmission": "writerFinalizeAdmission + writerReserveAdmission",
+		// The mark of the rule ledger (D108, rule_ledger.go): one OIDC key, no access state, no books named.
+		"ensureRuleLedger": "writerRuleLedgerMark",
+		// The dispatchers themselves: updateAs and updateAsGuardedChecked are dropped below, update is
+		// the one unguarded entry to replicatedUpdate. A function that commits through
+		// replicatedUpdate directly shows up here and fails until it is reviewed.
+		"update":   "replicated",
+		"updateAs": "dispatcher",
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob: %v", err)
+	}
+	got := map[string]string{}
+	fset := token.NewFileSet()
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			record := func(class string) { // a function that commits through two classes of writer says so
+				if old, dup := got[fn.Name.Name]; dup && old != class {
+					class = old + " + " + class
+				}
+				got[fn.Name.Name] = class
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || len(call.Args) < 2 {
+					return true
+				}
+				// Our writers take a context first, whatever the caller names it or builds it from; a
+				// call that starts with a function literal is something else (bolt's db.Update).
+				if _, literal := call.Args[0].(*ast.FuncLit); literal {
+					return true
+				}
+				switch sel.Sel.Name {
+				case "Update":
+					record("bump")
+				case "updateOrgScoped":
+					if id, ok := call.Args[1].(*ast.Ident); ok {
+						record("orgScoped:" + id.Name)
+					} else {
+						record("orgScoped:?")
+					}
+				case "updateOrgRetention", "updateOperation":
+					record("orgRetention")
+				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked", "admissionUpdate":
+					if id, ok := call.Args[1].(*ast.Ident); ok {
+						record(id.Name)
+					} else {
+						record("?")
+					}
+				case "update":
+					if id, ok := call.Args[1].(*ast.Ident); ok && id.Name == "true" {
+						record("bump")
+					} else {
+						record("by kind")
+					}
+				case "replicatedUpdate":
+					record("replicated") // a commit that bypasses every classifying entry
+				}
+				return true
+			})
+		}
+	}
+	// updateAs forwards to update(ctx, !keep, ...): the one dispatcher.
+	delete(got, "updateAs")
+	delete(got, "admissionUpdate") // the admission dispatcher: the ledger commit it makes never touches AuthorityRevision, and the whole-state commit it falls back to is updateAs(w)
+	delete(got, "updateAsGuarded") // the guarded dispatcher: forwards to update/replicatedUpdate
+	delete(got, "updateAsGuardedChecked")
+	delete(want, "updateAs")
+	for name, class := range got {
+		if want[name] != class {
+			t.Errorf("writer %s is %q, reviewed table says %q", name, class, want[name])
+		}
+	}
+	for name, class := range want {
+		if got[name] != class {
+			t.Errorf("reviewed writer %s no longer found as %q (got %q)", name, class, got[name])
+		}
+	}
+	// A writer constant used by updateAs must be on the allowlist, and the allowlist holds
+	// nothing that no writer uses.
+	used := map[writer]bool{}
+	for _, class := range got {
+		for _, part := range strings.Split(class, " + ") { // a function that commits two writers (serveAdmission) is both
+			if strings.HasPrefix(part, "writer") {
+				used[writer(strings.TrimPrefix(part, "writer"))] = true
+			}
+		}
+	}
+	for w := range nonAuthorityWriters {
+		if !used[w] {
+			t.Errorf("allowlisted writer %s is used by no function", w)
+		}
+	}
+	for w := range used {
+		if _, ok := nonAuthorityWriters[w]; !ok {
+			t.Errorf("updateAs writer %s is not on the allowlist: it would bump", w)
+		}
+	}
+}
+
+func TestExpectedRevisionRule(t *testing.T) {
+	st := func(revision, authority model.Revision) *State {
+		return &State{Revision: revision, AuthorityRevision: authority}
+	}
+	cases := []struct {
+		name     string
+		st       *State
+		kind     CommandKind
+		expected model.Revision
+		ok       bool
+	}{
+		{"retention at current", st(100, 10), KindDeleteScope, 100, true},
+		{"retention at the authority revision", st(100, 10), KindDeleteScope, 10, true},
+		{"retention between", st(100, 10), KindDeleteScope, 55, true},
+		{"retention just below the authority revision", st(100, 10), KindDeleteScope, 9, false},
+		{"retention above current", st(100, 10), KindDeleteScope, 101, false},
+		{"retention far above current", st(100, 10), KindDeleteScope, ^model.Revision(0), false},
+		{"policy change between", st(100, 10), KindPolicyChange, 50, true},
+		{"begin fence between", st(100, 10), KindBeginFence, 50, true},
+		{"complete fence between", st(100, 10), KindCompleteFence, 50, true},
+		{"evidence gap between", st(100, 10), KindRecordEvidenceGap, 50, true},
+		{"authority equals revision: only current", st(100, 100), KindDeleteScope, 99, false},
+		{"authority equals revision: current", st(100, 100), KindDeleteScope, 100, true},
+		{"empty state", st(0, 0), KindDeleteScope, 0, true},
+		{"legacy state is strict", st(100, 0), KindDeleteScope, 99, false},
+		{"legacy state accepts current", st(100, 0), KindDeleteScope, 100, true},
+		{"other kind: current", st(100, 10), KindApplyCondition, 100, true},
+		{"other kind: between", st(100, 10), KindApplyCondition, 50, false},
+		{"other kind: authority revision", st(100, 10), KindApplyCondition, 10, false},
+		{"other kind: above", st(100, 10), KindApplyCondition, 101, false},
+		{"admission kind: between", st(100, 10), KindReserveAdmission, 50, false},
+		{"grant kind: between", st(100, 10), KindGrant, 50, false},
+		{"audit: between", st(100, 10), KindAudit, 50, false},
+	}
+	for _, c := range cases {
+		if got := expectedRevisionOK(c.st, model.ID{}, string(c.kind), c.expected); got != c.ok {
+			t.Errorf("%s: expectedRevisionOK(revision %d, authority %d, %s, %d) = %v, want %v", c.name, c.st.Revision, c.st.AuthorityRevision, c.kind, c.expected, got, c.ok)
+		}
+	}
+}
+
+// A retention command of an organization needs a view no older than the later of the
+// installation's authority floor and that organization's own authority revision; another
+// organization's value never matters.
+func TestExpectedRevisionRuleUsesTheOrganizationsOwnAuthority(t *testing.T) {
+	a, b := model.ID{1}, model.ID{2}
+	stamp := func(org model.ID, r model.Revision) map[string]model.ControlOrg {
+		raw, _ := json.Marshal(r)
+		return map[string]model.ControlOrg{org.String(): {Settings: map[string]json.RawMessage{model.OrgAuthorityKey: raw}}}
+	}
+	st := &State{Revision: 100, AuthorityRevision: 10, Orgs: stamp(a, 60)}
+	for _, c := range []struct {
+		name     string
+		org      model.ID
+		expected model.Revision
+		ok       bool
+	}{
+		{"the organization's own revision is the floor", a, 60, true},
+		{"just below the organization's own revision", a, 59, false},
+		{"between the installation floor and the organization's", a, 30, false},
+		{"another organization ignores it", b, 30, true},
+		{"another organization still has the installation floor", b, 9, false},
+	} {
+		if got := expectedRevisionOK(st, c.org, string(KindDeleteScope), c.expected); got != c.ok {
+			t.Errorf("%s: expectedRevisionOK(org floor 60, installation 10, %d) = %v, want %v", c.name, c.expected, got, c.ok)
+		}
+	}
+	// An unreadable value is strict: only the current revision commits.
+	bad := &State{Revision: 100, AuthorityRevision: 10, Orgs: map[string]model.ControlOrg{a.String(): {Settings: map[string]json.RawMessage{model.OrgAuthorityKey: json.RawMessage(`"x"`)}}}}
+	if expectedRevisionOK(bad, a, string(KindDeleteScope), 99) || !expectedRevisionOK(bad, a, string(KindDeleteScope), 100) {
+		t.Fatal("an unreadable organization authority revision must accept exactly the current revision")
+	}
+}
+
+// A state that never set the field encodes exactly as before: omitempty drops it, so every
+// golden snapshot and digest of a state with AuthorityRevision zero is unchanged.
+func TestZeroAuthorityRevisionEncodesAsBefore(t *testing.T) {
+	raw, err := json.Marshal(State{Installation: model.ID{1}, Revision: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "uthority") {
+		t.Fatalf("zero AuthorityRevision is encoded: %s", raw)
+	}
+	raw, err = json.Marshal(State{Installation: model.ID{1}, Revision: 7, AuthorityRevision: 5})
+	if err != nil || !strings.Contains(string(raw), `"authority_revision":"5"`) {
+		t.Fatalf("non-zero AuthorityRevision encoded as %s (%v)", raw, err)
+	}
+	var back State
+	if err = json.Unmarshal(raw, &back); err != nil || back.AuthorityRevision != 5 {
+		t.Fatalf("round trip: %+v %v", back, err)
+	}
+}
+
+// bump moves AuthorityRevision to the new Revision after fn ran; fn can neither forge it nor stop it.
+func TestUpdateCannotForgeAuthorityRevision(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openAuthorityStore(t)
+	forge := func(to model.Revision) func(*State) error {
+		return func(st *State) error { st.AuthorityRevision = to; return nil }
+	}
+	if err := s.Update(ctx, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	rev, auth := revisions(t, s)
+	if rev != auth || rev == 0 {
+		t.Fatalf("an authority update must stamp the new revision: revision %d authority %d", rev, auth)
+	}
+	// A bumping writer that tries to lower or raise the field still ends at the new revision.
+	for _, forged := range []model.Revision{0, 1, 999999} {
+		if err := s.Update(ctx, forge(forged)); err != nil {
+			t.Fatal(err)
+		}
+		if rev, auth = revisions(t, s); rev != auth {
+			t.Fatalf("a writer forged AuthorityRevision to %d: revision %d authority %d", forged, rev, auth)
+		}
+	}
+	// A non-authority writer that tries to move it leaves the value it found.
+	before := auth
+	for _, forged := range []model.Revision{0, rev + 100} {
+		if err := s.updateAs(ctx, writerReserveAdmission, forge(forged)); err != nil {
+			t.Fatal(err)
+		}
+		if _, auth = revisions(t, s); auth != before {
+			t.Fatalf("a non-authority writer moved AuthorityRevision %d -> %d (forged %d)", before, auth, forged)
+		}
+	}
+}
+
+// Classification at the primitive: a writer on the allowlist leaves the field, anything else,
+// including a name no one has classified, moves it.
+func TestUnclassifiedWriterBumps(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openAuthorityStore(t)
+	if err := s.Update(ctx, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	_, base := revisions(t, s)
+	for w := range nonAuthorityWriters {
+		if err := s.updateAs(ctx, w, func(*State) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if rev, auth := revisions(t, s); auth != base || rev <= base {
+			t.Fatalf("allowlisted writer %s: revision %d authority %d, base %d", w, rev, auth, base)
+		}
+	}
+	for _, w := range []writer{"", "NewWriterNobodyClassified", "reserveadmission", writerReserveAdmission + " "} {
+		if err := s.updateAs(ctx, w, func(*State) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if rev, auth := revisions(t, s); auth != rev {
+			t.Fatalf("unclassified writer %q did not bump: revision %d authority %d", w, rev, auth)
+		}
+	}
+}
+
+// A control.db written before the field existed opens with AuthorityRevision zero. Its last
+// authority change is unknown, so a retention command is strict (the current revision only)
+// until the first authority transition stamps the field; Transact stamps it itself the first
+// time such a command conflicts, so a legacy installation does not stay starvable.
+func TestLegacyStateWithoutAuthorityRevisionIsStrictAndHeals(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openAuthorityStore(t)
+	for range 3 {
+		if err := s.updateAs(ctx, writerReserveAdmission, func(*State) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Rewrite the committed state as the pre-change build wrote it: no field.
+	if _, err := s.MakeLegacyAuthorityForTest(); err != nil {
+		t.Fatal(err)
+	}
+	rev, auth := revisions(t, s)
+	if auth != 0 || rev == 0 {
+		t.Fatalf("legacy fixture: revision %d authority %d", rev, auth)
+	}
+	st := &State{Revision: rev}
+	if expectedRevisionOK(st, model.ID{}, string(KindDeleteScope), rev-1) || !expectedRevisionOK(st, model.ID{}, string(KindDeleteScope), rev) {
+		t.Fatal("a legacy state must accept exactly the current revision for a retention command")
+	}
+	if err := s.healLegacyAuthority(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rev2, auth2 := revisions(t, s)
+	if auth2 != rev2 || rev2 != rev+1 {
+		t.Fatalf("heal: revision %d -> %d, authority %d", rev, rev2, auth2)
+	}
+	// Healing is idempotent: nothing further to stamp, nothing committed.
+	if err := s.healLegacyAuthority(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rev3, auth3 := revisions(t, s); rev3 != rev2 || auth3 != auth2 {
+		t.Fatalf("second heal committed: revision %d authority %d", rev3, auth3)
+	}
+}

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT; owner full-design approval and execution-method selection required. No code or tests below exist yet and no command was run for this document.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Code/test paths are Create until implemented; planned commands are requirements, not executed results.
 
 **Goal:** Deliver the real server-side artifact/source-map and replay evidence modules consumed by custom SDKs and native investigation, rather than leave SDK integration dependent on an unowned backend.
 

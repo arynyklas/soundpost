@@ -1,0 +1,4 @@
+/* Copyright 2026 Aryn Yklas */
+/* SPDX-License-Identifier: Apache-2.0 */
+main { font-family: system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; }
+label, button, #result { display: block; margin-top: 1rem; }

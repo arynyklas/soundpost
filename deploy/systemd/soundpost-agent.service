@@ -1,0 +1,61 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+# OPTIONAL host collection agent. Installing and enabling it is an operator decision; the
+# server never requires it. The agent runs as its own unprivileged account and is the only
+# unit that may hold any capability, and only the ones an operator uncomments for a collector
+# they enabled. It never runs as root and shares no account, directory or secret with the server.
+#   useradd --system --shell /usr/sbin/nologin soundpost-agent
+# Its source credential is a systemd credential (0400, visible to this service only):
+#   install -m 0600 -o root -g root agent-source.token /etc/soundpost/agent/source.token
+# The agent has no credential flag: agent.json names the file in `credential_file`, which must
+# be the absolute path systemd gives the loaded credential, /run/credentials/soundpost-agent.service/source.token.
+# ExecStart passes only the flags cmd/soundpost-agent defines (-config, -once, -validate); a test in
+# build/deploy_test.go fails if it names any other.
+[Unit]
+Description=Soundpost host collection agent (optional)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=soundpost-agent
+Group=soundpost-agent
+StateDirectory=soundpost-agent
+StateDirectoryMode=0700
+UMask=0077
+LoadCredential=source.token:/etc/soundpost/agent/source.token
+ExecStart=/usr/local/bin/soundpost-agent -config=/etc/soundpost/agent/agent.json
+Restart=on-failure
+RestartSec=5s
+
+# Default: no capability. Native CPU/off-CPU acquisition needs CAP_PERFMON (and, for some
+# kernels, CAP_SYS_PTRACE) and is OFF until an operator uncomments the next two lines for a
+# specific, reviewed collector. NEVER add CAP_SYS_ADMIN, and never run this unit as root.
+CapabilityBoundingSet=
+AmbientCapabilities=
+#CapabilityBoundingSet=CAP_PERFMON
+#AmbientCapabilities=CAP_PERFMON
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+LimitNOFILE=4096
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

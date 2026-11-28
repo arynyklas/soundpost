@@ -1,0 +1,15 @@
+{
+  "name": "@soundpost/node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Aryn Yklas",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@soundpost/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.12"
+  }
+}

@@ -1,0 +1,31 @@
+Soundpost version-pinned generic regular-expression and Unicode primitives
+
+This directory contains generic library code, not a telemetry query engine.
+
+The original regexp, regexp/syntax and unicode source files retain their
+original The Go Authors copyright headers and BSD-3-Clause license. They are
+NOT relicensed as Soundpost first-party Apache-2.0 code. Full original license
+texts are retained in go123/LICENSE, go124/LICENSE and go126/LICENSE.
+
+Original source:
+- github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc
+- github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853
+- golang/go tags go1.23.4, go1.24.5 and go1.26.10, src/regexp/syntax and src/unicode
+
+Exact source URLs, module zip hashes, original file SHA256 hashes, vendored file
+SHA256 hashes, modifications, and license hash are recorded in sources.json.
+Module ZIP bytes came directly from proxy.golang.org; stdlib source bytes came
+directly from raw.githubusercontent.com/golang/go at the specified tags.
+No code was extracted from Loki's AGPL implementation or translated from its
+parser, evaluator, templates, optimization tables or corpus.
+
+Modifications to original source are limited to import relocation and one
+pooled checkedInput field on each regexp machine. Unmodified Unicode data is
+version-specific: all three editions report Unicode15.0.0, but Go1.26.10 adds
+category/name-dispatch data that must not be substituted into older editions.
+
+The separate regexp/context.go files are independently authored Soundpost
+execution/cancellation adapters, Copyright 2026 Aryn Yklas, Apache-2.0 (the
+repository LICENSE). They do not replace, relicense or claim authorship of the
+original matching algorithms. They run the original NFA with cancellable
+string input, preserving absolute anchor context and capture semantics.

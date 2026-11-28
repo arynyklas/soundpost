@@ -1,0 +1,33 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Charts are SVG drawn at their measured width. Colours come only from classes (no inline style, no attribute colours). */
+.chart-wrap{width:100%;min-width:0}
+svg.chart{display:block;width:100%;height:auto;overflow:visible;cursor:crosshair;touch-action:pan-y}
+svg.chart:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.ch-grid{stroke:var(--border);stroke-width:1}
+.ch-axis{fill:var(--text-3);font:11.5px "Segoe UI",system-ui,sans-serif}
+.ch-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ch-area{fill-opacity:.16;stroke:none}
+.ch-threshold{stroke:var(--crit);stroke-dasharray:5 4;stroke-width:1.2}
+.ch-threshold-text{fill:var(--crit);font:600 11.5px "Segoe UI",system-ui,sans-serif}
+.ch-mark{stroke:var(--accent-2);stroke-dasharray:3 3}
+.ch-mark-text{fill:var(--accent-2);font:600 11.5px "Segoe UI",system-ui,sans-serif}
+.ch-gap rect{fill:var(--high);fill-opacity:.1}
+.ch-gap line{stroke:var(--high);stroke-dasharray:3 3}
+.ch-gap text{fill:var(--high);font:600 11.5px "Segoe UI",system-ui,sans-serif}
+.ch-hover line{stroke:var(--text-3);stroke-width:1;stroke-dasharray:2 3}
+.ch-hover circle{stroke:var(--panel);stroke-width:2}
+.ch-bucket{fill:var(--text);fill-opacity:.08}
+.ch-tip rect:first-child{fill:var(--panel);stroke:var(--border-2)}
+.ch-tip text{fill:var(--text);font:12.5px "Segoe UI",system-ui,sans-serif}
+.ch-tip .ch-tip-time{fill:var(--text-3)}
+.ch-tip .ch-tip-val{font-weight:600}
+.ch-tip .ch-tip-none{fill:var(--high);font-weight:600}
+.ch-s-c1{stroke:var(--c1)}.ch-s-c2{stroke:var(--c2)}.ch-s-c3{stroke:var(--c3)}.ch-s-c4{stroke:var(--c4)}.ch-s-c5{stroke:var(--c5)}.ch-s-c6{stroke:var(--c6)}
+.ch-s-crit{stroke:var(--crit)}.ch-s-ok{stroke:var(--ok)}.ch-s-high{stroke:var(--high)}.ch-s-info{stroke:var(--info)}.ch-s-unk{stroke:var(--unk)}
+.ch-f-c1{fill:var(--c1)}.ch-f-c2{fill:var(--c2)}.ch-f-c3{fill:var(--c3)}.ch-f-c4{fill:var(--c4)}.ch-f-c5{fill:var(--c5)}.ch-f-c6{fill:var(--c6)}
+.ch-f-crit{fill:var(--crit)}.ch-f-ok{fill:var(--ok)}.ch-f-high{fill:var(--high)}.ch-f-info{fill:var(--info)}.ch-f-unk{fill:var(--unk)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--text-2)}
+.legend .sq{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.sq.c-c1{background:var(--c1)}.sq.c-c2{background:var(--c2)}.sq.c-c3{background:var(--c3)}.sq.c-c4{background:var(--c4)}.sq.c-c5{background:var(--c5)}.sq.c-c6{background:var(--c6)}
+.sq.c-crit{background:var(--crit)}.sq.c-ok{background:var(--ok)}.sq.c-high{background:var(--high)}.sq.c-info{background:var(--info)}.sq.c-unk{background:var(--unk)}
+svg.spark{display:block;width:90px;height:22px}

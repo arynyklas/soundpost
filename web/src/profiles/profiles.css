@@ -1,0 +1,3 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Profile list and page. The table, caption, correlation and indentation rules of the page live in styles/explore.css with the rest of Explore; no inline styles anywhere (the CSP forbids them). State is carried by words; these rules only add emphasis, never meaning. */
+.profile-table{table-layout:auto}

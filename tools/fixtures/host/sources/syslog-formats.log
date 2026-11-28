@@ -1,0 +1,7 @@
+Nov 10 12:00:01 host1 myapp[4242]: service started unit alpha
+2026-11-10T12:00:02.250000+00:00 host1 myapp[4242]: request status 503
+<14>1 2026-11-10T12:00:03Z host1 myapp 4242 ID47 - service started unit beta
+<13>Nov 10 12:00:04 host1 myapp: request status 200
+Nov 10 12:00:05 host1 sshd[77]: service started unit alpha
+Nov 10 12:00:06 host1 myapp[4242]: Failed password for root from 10.0.0.9
+this is not syslog at all

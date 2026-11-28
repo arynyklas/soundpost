@@ -1,0 +1,476 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+
+package scan
+
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+const testNonce = "a1b2c3"
+
+func testPolicy(t *testing.T) Policy {
+	t.Helper()
+	p, e := LoadPolicy("../policy.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	return p
+}
+
+func TestPolicyIsStrictAndSentinelsAreDistinct(t *testing.T) {
+	p := testPolicy(t)
+	seen := map[string]bool{}
+	for _, k := range p.Kinds {
+		v, e := p.Sentinel(k.ID, testNonce)
+		if e != nil || !strings.HasPrefix(v, p.Marker) || !strings.HasSuffix(v, testNonce) || seen[v] {
+			t.Fatalf("kind %s value %q err %v", k.ID, v, e)
+		}
+		seen[v] = true
+	}
+	if len(seen) != 8 {
+		t.Fatalf("expected comm, stack, heap, env, argv, path, input and db sentinels, got %d", len(seen))
+	}
+	comm, _ := p.Sentinel("comm", testNonce)
+	if len(comm) > 15 {
+		t.Fatal("comm sentinel does not fit the kernel's 15-byte thread name")
+	}
+	stages := make([]string, len(AllStages))
+	for i, s := range AllStages {
+		stages[i] = string(s)
+	}
+	if strings.Join(stages, ",") != strings.Join(p.Stages, ",") {
+		t.Fatal("stage list and policy.json drifted")
+	}
+	if _, e := p.Sentinel("comm", "zzzzzz"); e == nil {
+		t.Fatal("non-hex nonce accepted")
+	}
+}
+
+// Every encoding must be caught, including values that cross alignment.
+func TestDetectorCatchesEncodings(t *testing.T) {
+	p := testPolicy(t)
+	d, e := NewDetector(p, testNonce)
+	if e != nil {
+		t.Fatal(e)
+	}
+	stack, _ := p.Sentinel("stack", testNonce)
+	raw := []byte(stack)
+	utf16 := []byte{}
+	for _, c := range raw {
+		utf16 = append(utf16, c, 0)
+	}
+	quoted, _ := json.Marshal(stack)
+	word := binary.LittleEndian.Uint64(raw[:8])
+	cases := map[string][]byte{
+		"raw":         []byte("prefix " + stack + " suffix"),
+		"upper":       []byte(strings.ToUpper(stack)),
+		"lower":       []byte(strings.ToLower(stack)),
+		"reversed":    reverse(raw),
+		"hex":         []byte(hex.EncodeToString(raw)),
+		"utf16":       utf16,
+		"json":        quoted,
+		"word_dec_le": []byte(`{"ip":"` + strconv.FormatUint(word, 10) + `"}`),
+		"word_hex":    []byte("0x" + strconv.FormatUint(word, 16)),
+		"raw_window":  []byte("xx" + stack[7:19] + "yy"),
+		"nonce_word":  []byte(strconv.FormatUint(binary.LittleEndian.Uint64([]byte(stack[11:19])), 10)),
+		"marker_only": []byte("xx SPCNRY- xx"),
+	}
+	for shift := range 3 {
+		filler := bytes.Repeat([]byte{'~'}, shift)
+		stream := append(append(append([]byte(nil), filler...), raw...), []byte("trailing-bytes")...)
+		cases["base64_std_"+strconv.Itoa(shift)] = []byte(base64.StdEncoding.EncodeToString(stream))
+		cases["base64_url_"+strconv.Itoa(shift)] = []byte(base64.URLEncoding.EncodeToString(stream))
+	}
+	for name, input := range cases {
+		if hits := d.Scan(input); len(hits) == 0 {
+			t.Errorf("%s: sentinel not detected", name)
+		}
+	}
+	if hits := d.Scan([]byte(`{"kind":"cpu_sample","ip":"4198400","callchain":[{"ip":"4198431"}],"period":"10101010"}`)); len(hits) != 0 {
+		t.Fatalf("clean numeric profile flagged: %v", hits)
+	}
+}
+
+// A detector built for one run must not fire on another run's nonce.
+func TestDetectorIsPerRun(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	other, _ := p.Sentinel("heap", "ffeedd")
+	// Only run-independent prefix evidence may fire for another run's value; no
+	// full-value encoding may.
+	for _, hit := range d.Scan([]byte(other)) {
+		if hit.Kind != "marker" && !strings.HasPrefix(hit.Encoding, "word_") && hit.Encoding != "raw_window" {
+			t.Fatalf("matched another run's full value: %v", hit)
+		}
+	}
+}
+
+func TestHitNeverContainsContent(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	comm, _ := p.Sentinel("comm", testNonce)
+	a := NewPrivacyAudit(d)
+	e := a.Observe(StageSocket, []byte(`{"domain":{"host_id":"`+comm+`"}}`))
+	var leak *Leak
+	if !errors.As(e, &leak) {
+		t.Fatalf("leak not reported: %v", e)
+	}
+	if strings.Contains(e.Error(), comm) || strings.Contains(e.Error(), testNonce) {
+		t.Fatal("violation text echoes the observed content")
+	}
+	for _, v := range a.Violations() {
+		if strings.Contains(v.String(), testNonce) {
+			t.Fatal("violation record echoes the nonce")
+		}
+	}
+}
+
+func TestAuditDecompressesCompressedWireStage(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	heap, _ := p.Sentinel("heap", testNonce)
+	var z bytes.Buffer
+	w := gzip.NewWriter(&z)
+	for i := range 200 {
+		w.Write([]byte(`{"records":[{"n":` + strconv.Itoa(i) + `,"note":"` + heap + `"}]}` + "\n"))
+	}
+	w.Close()
+	if len(d.Scan(z.Bytes())) != 0 {
+		t.Fatal("test premise: gzip should hide the plaintext from a raw scan")
+	}
+	a := NewPrivacyAudit(d)
+	var leak *Leak
+	if e := a.Observe(StageWireCompressed, z.Bytes()); !errors.As(e, &leak) {
+		t.Fatalf("compressed leak hidden: %v", e)
+	}
+	if e := a.Observe(StageWireCompressed, []byte("not gzip")); !errors.Is(e, ErrUninspectable) {
+		t.Fatalf("uninspectable compressed stage passed: %v", e)
+	}
+	if e := a.Observe("raw_mmap_ring", []byte("x")); !errors.Is(e, ErrUnknownStage) {
+		t.Fatalf("a raw ring stage must not exist: %v", e)
+	}
+}
+
+func TestRequireStagesRefusesEmptyOrSkippedStage(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	a := NewPrivacyAudit(d)
+	a.Observe(StageSocket, []byte("{}"))
+	a.Observe(StageStaging, nil)
+	if e := a.RequireStages(StageSocket); e != nil {
+		t.Fatal(e)
+	}
+	if e := a.RequireStages(StageSocket, StageStaging, StageStorage); e == nil || !strings.Contains(e.Error(), "owned_sanitized_staging") || !strings.Contains(e.Error(), "admitted_storage") {
+		t.Fatalf("empty/skipped stage passed: %v", e)
+	}
+}
+
+const cleanAttr = `1 perf_event_open({type=PERF_TYPE_SOFTWARE, size=PERF_ATTR_SIZE_VER5, config=PERF_COUNT_SW_CPU_CLOCK, sample_freq=99, sample_type=PERF_SAMPLE_IP|PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_CALLCHAIN|PERF_SAMPLE_CPU|PERF_SAMPLE_PERIOD, read_format=0, disabled=1, inherit=0, exclude_kernel=1, exclude_hv=1, mmap=1, comm=1, freq=1, task=1, precise_ip=0 /* arbitrary skid */, mmap_data=0, sample_id_all=1, exclude_callchain_kernel=1, mmap2=1, comm_exec=1, use_clockid=1, context_switch=0, wakeup_events=1, bp_type=HW_BREAKPOINT_EMPTY, config1=0, config2=0, branch_sample_type=0, sample_regs_user=0, sample_stack_user=0, clockid=CLOCK_MONOTONIC, sample_regs_intr=0, aux_watermark=0, sample_max_stack=127, aux_sample_size=0}, 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 17`
+
+func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
+	p := testPolicy(t)
+	audit := func(s string) []Finding {
+		t.Helper()
+		f, _, e := AuditStrace(p, strings.NewReader(s))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return f
+	}
+	if f := audit(cleanAttr + "\n1 ioctl(17, PERF_EVENT_IOC_ENABLE, 0) = 0\n"); len(f) != 0 {
+		t.Fatalf("clean run flagged: %v", f)
+	}
+	_, sum, _ := AuditStrace(p, strings.NewReader(cleanAttr+"\n"))
+	if sum.PerfEventOpens != 1 || sum.CPUOpens != 1 {
+		t.Fatalf("summary does not show the observed open: %+v", sum)
+	}
+	if len(sum.Attributes) != 1 || !strings.HasPrefix(sum.Attributes[0], "type=PERF_TYPE_SOFTWARE, size=PERF_ATTR_SIZE_VER5") || !strings.Contains(sum.Attributes[0], "sample_type=PERF_SAMPLE_IP|PERF_SAMPLE_TID") {
+		t.Fatalf("the audited attribute is not recorded verbatim: %q", sum.Attributes)
+	}
+	// An attribute the audit could not read is a finding and is never listed as audited.
+	if _, trunc, _ := AuditStrace(p, strings.NewReader(strings.Replace(cleanAttr, ", read_format=0,", ", ...", 1)+"\n")); len(trunc.Attributes) != 0 {
+		t.Fatalf("a truncated attribute was recorded as audited: %q", trunc.Attributes)
+	}
+	mutate := map[string]string{
+		"perf_attr_sample_type":  strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_STACK_USER", 1),
+		"perf_attr_sample_type2": strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_REGS_USER", 1),
+		"perf_attr_nonzero":      strings.Replace(cleanAttr, "sample_regs_user=0", "sample_regs_user=0xff", 1),
+		"perf_attr_nonzero2":     strings.Replace(cleanAttr, "sample_stack_user=0", "sample_stack_user=8192", 1),
+		"perf_attr_nonzero3":     strings.Replace(cleanAttr, "mmap_data=0", "mmap_data=1", 1),
+		"perf_attr_required3":    strings.Replace(cleanAttr, "mmap=1", "mmap=0", 1),
+		"perf_attr_required4":    strings.Replace(cleanAttr, "mmap2=1", "mmap2=0", 1),
+		"perf_attr_required":     strings.Replace(cleanAttr, "disabled=1", "disabled=0", 1),
+		"perf_attr_required2":    strings.Replace(cleanAttr, "exclude_callchain_kernel=1, ", "", 1),
+		"perf_attr_type":         strings.Replace(cleanAttr, "PERF_TYPE_SOFTWARE", "PERF_TYPE_BREAKPOINT", 1),
+		"perf_attr_truncated":    strings.Replace(cleanAttr, ", read_format=0,", ", ...", 1),
+		"forbidden_syscall":      "1 ptrace(PTRACE_SEIZE, 4242, NULL, 0) = 0",
+		"forbidden_syscall2":     "1 process_vm_readv(4242, [{iov_base=0x1, iov_len=8}], 1, [{iov_base=0x2, iov_len=8}], 1, 0) = 8",
+		"forbidden_syscall3":     "1 bpf(BPF_PROG_LOAD, {prog_type=BPF_PROG_TYPE_KPROBE}, 128) = 3",
+		"forbidden_perf_ioctl":   "1 ioctl(17, PERF_EVENT_IOC_SET_BPF, 5) = 0",
+		"forbidden_open_path":    `1 openat(AT_FDCWD, "/proc/4242/mem", O_RDONLY) = 5`,
+		"forbidden_open_path2":   `1 openat(AT_FDCWD, "/proc/self/task/9/environ", O_RDONLY) = 5`,
+		"forbidden_dump_name":    `1 openat(AT_FDCWD, "/var/tmp/perf.data", O_WRONLY|O_CREAT|O_TRUNC, 0600) = 5`,
+		"forbidden_dump_name2":   `1 openat(AT_FDCWD, "/tmp/core.1234", O_WRONLY|O_CREAT, 0600) = 5`,
+		"forbidden_tracefs":      `1 openat(AT_FDCWD, "/sys/kernel/tracing/trace_pipe", O_RDONLY) = 5`,
+	}
+	for name, line := range mutate {
+		if f := audit(line + "\n"); len(f) == 0 {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+	// The scheduler tracepoint rule allows RAW only for PERF_TYPE_TRACEPOINT.
+	cpuRaw := strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_RAW", 1)
+	if f := audit(cpuRaw + "\n"); len(f) == 0 {
+		t.Fatal("PERF_SAMPLE_RAW allowed on the CPU event")
+	}
+	sched := strings.NewReplacer("PERF_TYPE_SOFTWARE", "PERF_TYPE_TRACEPOINT", "PERF_SAMPLE_IP|", "", "|PERF_SAMPLE_PERIOD", "|PERF_SAMPLE_RAW", "mmap=1", "mmap=0", "mmap2=1", "mmap2=0").Replace(cleanAttr)
+	for name, bad := range map[string]string{"mmap": "mmap=0", "mmap2": "mmap2=0"} {
+		if f := audit(strings.Replace(sched, bad, strings.Replace(bad, "=0", "=1", 1), 1) + "\n"); len(f) == 0 {
+			t.Fatalf("%s records on the scheduler tracepoint attribute were not flagged", name)
+		}
+	}
+	if f := audit(sched + "\n"); len(f) != 0 {
+		t.Fatalf("scheduler tracepoint attribute refused: %v", f)
+	}
+	probe := strings.NewReplacer("PERF_ATTR_SIZE_VER5", "PERF_ATTR_SIZE_VER0", "exclude_callchain_kernel=1, ", "", "sample_id_all=1, ", "", "use_clockid=1, ", "").Replace(cleanAttr)
+	if f := audit(probe + "\n"); len(f) != 0 {
+		t.Fatalf("disabled VER0 capability probe flagged: %v", f)
+	}
+	if f := audit(strings.Replace(probe, "PERF_ATTR_SIZE_VER0", "PERF_ATTR_SIZE_VER5", 1) + "\n"); len(f) == 0 {
+		t.Fatal("a VER5 sampling event without its required flags was accepted")
+	}
+	if f := audit(`1 openat(AT_FDCWD, "/repo/packages/core", O_RDONLY|O_DIRECTORY) = 5` + "\n"); len(f) != 0 {
+		t.Fatalf("read-only open of a directory named core flagged: %v", f)
+	}
+	for _, f := range audit(`1 openat(AT_FDCWD, "/tmp/SPCNRY-PATH-a1b2c3/perf.data", O_WRONLY|O_CREAT) = 5` + "\n") {
+		if strings.Contains(f.String(), testNonce) {
+			t.Fatal("finding echoes the sentinel nonce")
+		}
+	}
+}
+
+// The strace audit knows the helper's two newer syscalls: prctl only as the D53 THP opt-out (plus the runtime's and the
+// canary's own thread/VMA naming) and ppoll only as the ring exit probe (one fd, no signal mask).
+func TestStraceAuditPinsPrctlAndPpollShapes(t *testing.T) {
+	p := testPolicy(t)
+	audit := func(s string) ([]Finding, StraceSummary) {
+		t.Helper()
+		f, sum, e := AuditStrace(p, strings.NewReader(s))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return f, sum
+	}
+	clean := strings.Join([]string{
+		`4242 prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) = 0`,
+		`[pid  4243] prctl(PR_SET_NAME, "worker") = 0`,
+		`4243 prctl(PR_GET_NAME, "worker") = 0`,
+		`4243 prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, 0xc000000000, 4194304, "Go: heap") = -1 EPERM (Operation not permitted)`,
+		`4242 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0) = 1 ([{fd=7, revents=POLLHUP}])`,
+		`[pid  4244] ppoll([{fd=9, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>`,
+	}, "\n") + "\n"
+	f, sum := audit(clean)
+	if len(f) != 0 {
+		t.Fatalf("the helper's own prctl/ppoll calls were flagged: %v", f)
+	}
+	if sum.Prctls != 4 || sum.ThpDisables != 1 || sum.Ppolls != 2 {
+		t.Fatalf("summary does not count what was observed: %+v", sum)
+	}
+	mutants := map[string]string{
+		"prctl_set_ptracer":        `1 prctl(PR_SET_PTRACER, 1, 0, 0, 0) = 0`,
+		"prctl_set_ptracer_number": `1 prctl(0x59616d61, 1, 0, 0, 0) = 0`,
+		"prctl_thp_enable":         `1 prctl(PR_SET_THP_DISABLE, 0, 0, 0, 0) = 0`,
+		"prctl_thp_number_enable":  `1 prctl(0x29, 0, 0, 0, 0) = 0`,
+		"prctl_set_dumpable":       `1 prctl(PR_SET_DUMPABLE, 1) = 0`,
+		"prctl_set_mm":             `1 prctl(PR_SET_MM, PR_SET_MM_MAP, 0x7ffc0000, 104, 0) = -1 EPERM (Operation not permitted)`,
+		"prctl_no_arguments":       `1 prctl() = -1 EFAULT (Bad address)`,
+		"ppoll_64_fds":             `1 ppoll([{fd=7, events=0}, {fd=8, events=0}, ...], 64, {tv_sec=0, tv_nsec=0}, NULL, 0) = 1`,
+		"ppoll_zero_fds":           `1 ppoll(NULL, 0, {tv_sec=0, tv_nsec=0}, NULL, 0) = 0 (Timeout)`,
+		"ppoll_sigmask":            `1 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, [INT], 8) = 1`,
+		"ppoll_sigmask_pointer":    `1 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, 0x7ffe0000, 8) = 1`,
+		"ppoll_unparseable":        `1 ppoll(0x7ffe0000, 1) = -1 EFAULT (Bad address)`,
+	}
+	for name, line := range mutants {
+		if f, _ := audit(line + "\n"); len(f) == 0 {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+	// A counted-but-refused call must not count as the helper's opt-out.
+	if _, sum := audit(mutants["prctl_thp_enable"] + "\n"); sum.ThpDisables != 0 {
+		t.Errorf("THP re-enable counted as the opt-out: %+v", sum)
+	}
+}
+
+// The static source audit pins the one ppoll call shape of ring_linux.go like it pins the one prctl.
+func TestGoSourceAuditPinsPpollShape(t *testing.T) {
+	p := testPolicy(t)
+	const prelude = "package x\nimport \"syscall\"\nvar _ = syscall.EPERM\nfunc f(fd uintptr) {\n"
+	audit := func(body string) []string { return AuditGoSource(p, "x.go", prelude+body+"}\n", nil) }
+	if got := audit("\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 0, 0, 0)\n"); len(got) != 0 {
+		t.Fatalf("the ring exit probe's call shape was flagged: %v", got)
+	}
+	mutants := map[string]string{
+		"ppoll_64_fds":            "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 64, 0, 0, 0, 0)\n",
+		"ppoll_sigmask":           "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 8, 0, 0)\n",
+		"ppoll_computed_nfds":     "\tn := uintptr(1)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, n, 0, 0, 0, 0)\n",
+		"ppoll_computed_sigmask":  "\tm := uintptr(0)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, m, 0, 0)\n",
+		"ppoll_short_form":        "\tsyscall.Syscall(syscall.SYS_PPOLL, fd, 1, 0)\n",
+		"ppoll_no_arguments":      "\tsyscall.Syscall6(syscall.SYS_PPOLL)\n",
+		"ppoll_via_rawsyscall6":   "\tsyscall.RawSyscall6(syscall.SYS_PPOLL, fd, 1, 0, 0, 0, 0)\n",
+		"ppoll_numeric_number":    "\tsyscall.Syscall6(271, fd, 1, 0, 0, 0, 0)\n",
+		"ppoll_computed_selector": "\tsyscall.Syscall6(uintptr(271), fd, 1, 0, 0, 0, 0)\n",
+	}
+	for name, body := range mutants {
+		if got := audit(body); len(got) == 0 {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+	found := false
+	for _, f := range audit("\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 64, 0, 0, 0, 0)\n") {
+		found = found || strings.Contains(f, "ppoll_call_not_allowlisted")
+	}
+	if !found {
+		t.Error("a wrong-shape ppoll is not reported as ppoll_call_not_allowlisted")
+	}
+}
+
+// The policy cannot be widened without editing this test: every allowlist the two audits use is pinned here.
+func TestPolicyPinsPrctlAndPpollAllowlists(t *testing.T) {
+	p := testPolicy(t).Syscalls
+	if len(p.SourcePrctl) != 1 || p.SourcePrctl[0].Option != 41 || p.SourcePrctl[0].Arg != 1 {
+		t.Errorf("source prctl allowlist: %+v", p.SourcePrctl)
+	}
+	if len(p.SourcePpoll) != 1 || p.SourcePpoll[0].Nfds != 1 || p.SourcePpoll[0].Sigmask != 0 {
+		t.Errorf("source ppoll allowlist: %+v", p.SourcePpoll)
+	}
+	if len(p.StraceAllowedPpoll) != 1 || p.StraceAllowedPpoll[0].Nfds != 1 || p.StraceAllowedPpoll[0].Sigmask != "NULL" {
+		t.Errorf("strace ppoll allowlist: %+v", p.StraceAllowedPpoll)
+	}
+	got := map[string]string{}
+	for _, c := range p.StraceAllowedPrctl {
+		arg := "any"
+		if c.Arg != nil {
+			arg = strconv.FormatInt(*c.Arg, 10)
+		}
+		got[c.Option] = strconv.FormatInt(c.Number, 10) + "/" + arg
+	}
+	want := map[string]string{"PR_SET_THP_DISABLE": "41/1", "PR_SET_NAME": "15/any", "PR_GET_NAME": "16/any", "PR_SET_VMA": "1398164801/any"}
+	if len(got) != len(want) || len(p.StraceAllowedPrctl) != len(want) {
+		t.Errorf("strace prctl allowlist has %d entries: %v", len(p.StraceAllowedPrctl), got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("strace prctl %s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// With more syscalls traced, `strace -f` interleaves threads: a call prints as `name( <unfinished ...>` and its
+// arguments (for perf_event_open, the attribute struct) appear on the matching `<... name resumed>` line. The audit
+// must join the two instead of reporting an unreadable attribute (or, worse, skipping the call).
+func TestStraceAuditJoinsUnfinishedAndResumedCalls(t *testing.T) {
+	p := testPolicy(t)
+	audit := func(lines ...string) ([]Finding, StraceSummary) {
+		t.Helper()
+		f, sum, e := AuditStrace(p, strings.NewReader(strings.Join(lines, "\n")+"\n"))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return f, sum
+	}
+	attr := strings.TrimPrefix(strings.SplitN(cleanAttr, ", 7, -1", 2)[0], "1 perf_event_open(")
+	resumed := func(pid int, body string) string {
+		return strconv.Itoa(pid) + " <... perf_event_open resumed>" + body + ", 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 9"
+	}
+	other := `4243 prctl(PR_SET_NAME, "worker") = 0`
+	f, sum := audit("4242 perf_event_open( <unfinished ...>", other, resumed(4242, attr))
+	if len(f) != 0 {
+		t.Fatalf("an interleaved clean perf_event_open was flagged: %v", f)
+	}
+	if sum.PerfEventOpens != 1 || sum.CPUOpens != 1 || len(sum.Attributes) != 1 || sum.Prctls != 1 {
+		t.Fatalf("the joined call was not counted/recorded: %+v", sum)
+	}
+	// The pid-prefixed form of strace -f -o is joined the same way.
+	if f, sum = audit("[pid  4242] perf_event_open( <unfinished ...>", other, "[pid  4242] <... perf_event_open resumed>"+attr+", 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 9"); len(f) != 0 || sum.PerfEventOpens != 1 {
+		t.Fatalf("pid-bracket form: %v %+v", f, sum)
+	}
+	// A forbidden attribute on the resumed line is still found, and is reported at the line where the call began.
+	bad := strings.Replace(attr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_STACK_USER", 1)
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", other, resumed(4242, bad)); len(f) != 1 || f[0].Rule != "perf_attr_sample_type" || f[0].Line != 1 {
+		t.Fatalf("a forbidden interleaved attribute: %v", f)
+	}
+	// Another thread's resumed call must not complete this thread's call.
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", resumed(4243, attr)); len(f) == 0 {
+		t.Fatal("a resumed line of another pid completed an unrelated unfinished call")
+	}
+	// A call whose arguments never appear (the process was killed first) is reported, not skipped.
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", "4242 +++ killed by SIGKILL +++"); len(f) != 1 || f[0].Rule != "perf_attr_unparseable" {
+		t.Fatalf("an unfinished perf_event_open with no attribute passed: %v", f)
+	}
+	// Calls other than perf_event_open join too: a forbidden ptrace and a mis-shaped ppoll started on one line.
+	if f, _ = audit("4242 ptrace(PTRACE_SEIZE, 4243 <unfinished ...>", "4242 <... ptrace resumed>NULL, 0) = 0"); len(f) == 0 {
+		t.Fatal("an unfinished forbidden syscall was not flagged")
+	}
+	if f, _ = audit("4242 ppoll([{fd=7, events=0}], 64, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>", "4242 <... ppoll resumed>) = 1"); len(f) != 1 || f[0].Rule != "ppoll_not_allowlisted" {
+		t.Fatalf("an unfinished mis-shaped ppoll: %v", f)
+	}
+	if f, sum = audit("4242 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>", "4242 <... ppoll resumed>) = 1 ([{fd=7, revents=POLLHUP}])"); len(f) != 0 || sum.Ppolls != 1 {
+		t.Fatalf("an unfinished clean ppoll: %v %+v", f, sum)
+	}
+}
+
+// 04.08-C20 review Minor 2: a compressed stage that cannot be inflated was never inspected. It must not count as an
+// observed (and therefore clean) stage, the audit must remember it, and discarding Observe's result with `_ =` must
+// not hide it from RequireStages.
+func TestUninspectableCompressedStageIsNeverObservedAndClean(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	a := NewPrivacyAudit(d)
+	e := a.Observe(StageWireCompressed, []byte("not gzip but not empty either"))
+	if !errors.Is(e, ErrUninspectable) || NotLeak(e) == nil {
+		t.Fatalf("uninspectable stage must surface as an error callers act on: %v", e)
+	}
+	if buffers, octets := a.Observed(StageWireCompressed); buffers != 0 || octets != 0 {
+		t.Fatalf("an uninspectable buffer counted as observed: %d buffers %d bytes", buffers, octets)
+	}
+	if a.Uninspected() != 1 {
+		t.Fatalf("uninspectable buffers remembered: %d", a.Uninspected())
+	}
+	if e := a.RequireStages(StageWireCompressed); e == nil || !strings.Contains(e.Error(), "never observed") {
+		t.Fatalf("an uninspectable stage satisfied RequireStages: %v", e)
+	}
+	// a later good buffer observes the stage, but the uninspected one still fails the audit
+	var z bytes.Buffer
+	w := gzip.NewWriter(&z)
+	w.Write([]byte(`{"records":[]}`))
+	w.Close()
+	if e := a.Observe(StageWireCompressed, z.Bytes()); e != nil {
+		t.Fatal(e)
+	}
+	if e := a.RequireStages(StageWireCompressed); e == nil || !strings.Contains(e.Error(), "uninspectable") {
+		t.Fatalf("a stage with an uninspected buffer passed: %v", e)
+	}
+	// a truncated gzip stream and an inflation bomb are uninspectable too
+	if e := a.Observe(StageWireCompressed, z.Bytes()[:z.Len()-4]); !errors.Is(e, ErrUninspectable) {
+		t.Fatalf("truncated gzip passed: %v", e)
+	}
+	// a leak is still a leak, and NotLeak passes only that error through as nil
+	heap, _ := p.Sentinel("heap", testNonce)
+	var leak *Leak
+	if e := a.Observe(StageSocket, []byte(heap)); !errors.As(e, &leak) || NotLeak(e) != nil {
+		t.Fatalf("a leak must stay a leak recorded by the audit: %v", e)
+	}
+	if NotLeak(nil) != nil || NotLeak(ErrUnknownStage) == nil {
+		t.Fatal("NotLeak must pass nil and every non-leak error")
+	}
+}

@@ -1,0 +1,35 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Services and jobs screens (.svc-, .job-). Colours come only from tokens; no inline styles anywhere (the CSP forbids them). */
+
+/* Services */
+.svc-red-note{margin:0}
+
+/* Jobs: health, recovery and loss are separate sentences; the blocks only group them. */
+.job-block{padding:8px 12px;border:1px solid var(--border);border-left-width:4px;border-radius:6px;background:var(--raised);overflow-wrap:anywhere}
+.job-block p,.job-block ul{margin:4px 0}
+.job-block ul{padding-left:18px}
+/* Inside a card a block is not a second card: no border, no fill. The dashed edge of loss and observer stays as a thin rule. */
+.card .job-block{padding:2px 0;border:0;border-radius:0;background:transparent}
+.card [data-testid=job-loss],.card [data-testid=job-observer]{padding-left:10px;border-left:2px dashed var(--border-2)}
+[data-testid=job-loss],[data-testid=job-observer]{border-left-style:dashed}
+[data-testid=job-skipped]{margin:8px 0 0;padding-left:18px}
+[data-testid=job-skipped] li,[data-testid=job-loss] li,[data-testid=correction]{margin:4px 0;overflow-wrap:anywhere}
+tr[data-health=failed]>:first-child,tr[data-health=missed]>:first-child,tr[data-state=failed]>:first-child{box-shadow:inset 3px 0 0 var(--crit)}
+tr[data-health=succeeded]>:first-child,tr[data-state=succeeded]>:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+tr[data-health=cancelled]>:first-child,tr[data-health=late]>:first-child,tr[data-health=running_too_long]>:first-child,tr[data-state=cancelled]>:first-child{box-shadow:inset 3px 0 0 var(--high)}
+tr[data-selected=yes] td,tr[data-selected=yes] th{background:var(--accent-bg)}
+.table td p,.table th p{margin:0 0 4px}
+.table td ul{margin:0;padding-left:16px}
+
+/* Run strip: runs at the instants they started. Colour reinforces; the words are in the accessible name and the legend. */
+.job-strip-wrap{display:block;min-width:140px;width:100%}
+svg.job-strip{display:block;width:100%;height:22px}
+.job-grid{stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
+.job-r-ok{fill:var(--ok)}.job-r-failed{fill:var(--crit)}.job-r-retry{fill:var(--high)}.job-r-running{fill:var(--info)}.job-r-cancelled{fill:var(--unk)}
+.job-r-expected{fill:none;stroke:var(--unk);stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
+.job-hero-strip{display:flex;flex-direction:column;gap:8px;max-width:760px}
+.job-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0;list-style:none;font-size:12.5px;color:var(--text-2)}
+.job-sw{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:2px;vertical-align:-1px}
+.job-sw-ok{background:var(--ok)}.job-sw-failed{background:var(--crit)}.job-sw-retry{background:var(--high)}.job-sw-running{background:var(--info)}.job-sw-cancelled{background:var(--unk)}
+.job-sw-expected{border:1.5px dashed var(--unk)}
+@media (max-width:820px){.job-strip-wrap{min-width:0}}

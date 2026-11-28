@@ -1,0 +1,1062 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package replica
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"hash/crc32"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
+	raft "go.etcd.io/raft/v3"
+	pb "go.etcd.io/raft/v3/raftpb"
+	"google.golang.org/protobuf/proto"
+)
+
+var readyCRC = crc32.MakeTable(crc32.Castagnoli)
+
+type readyRecord struct {
+	Group    model.ID `json:"group"`
+	Node     uint64   `json:"node,string"`
+	Members  Members  `json:"members"`
+	Hard     []byte   `json:"hard,omitempty"`
+	Snapshot []byte   `json:"snapshot,omitempty"`
+	Entries  [][]byte `json:"entries,omitempty"`
+	// SnapshotPart is one slice of a snapshot that does not fit one record, and SnapshotParts, on the record
+	// that completes it, how many part records precede it (ready_parts.go). Neither is ever written for a
+	// snapshot that fits.
+	SnapshotPart  []byte `json:"snapshot_part,omitempty"`
+	SnapshotParts uint64 `json:"snapshot_parts,string,omitempty"`
+}
+type readyWAL struct {
+	file       *os.File
+	group      model.ID
+	node       uint64
+	members    Members
+	beforeSync func() error
+	fault      func(string) error
+}
+
+func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed []byte, application, seedIndex, seedTerm uint64, fault func(string) error, installed *installedSeed) (*readyWAL, *raft.MemoryStorage, error) {
+	if err := durablefs.MkdirAll(dir); err != nil {
+		return nil, nil, err
+	}
+	path := filepath.Join(dir, "ready.wal")
+	_, statErr := os.Stat(path)
+	fresh := os.IsNotExist(statErr)
+	if statErr != nil && !fresh {
+		return nil, nil, statErr
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !fresh {
+		// A journal that exists was written by an earlier run, possibly one that ended in a failed
+		// fsync: the kernel then keeps serving the pages it could not write from memory. Read what
+		// the device holds, verify every frame below, then sync once more before trusting it.
+		durablefs.DropCachedPages(f)
+	}
+	fail := func(e error) (*readyWAL, *raft.MemoryStorage, error) { f.Close(); return nil, nil, e }
+	if fresh {
+		if err = durablefs.SyncFileAndDir(path); err != nil {
+			return fail(err)
+		}
+	}
+	w := &readyWAL{file: f, group: group, node: node, members: cloneMembers(members), fault: fault}
+	memory := raft.NewMemoryStorage()
+	offset := int64(0)
+	records := 0
+	var pending [][]byte // the part records of a snapshot whose last record has not been read yet
+	pendingStart := int64(0)
+	for {
+		var header [16]byte
+		n, e := io.ReadFull(f, header[:])
+		if e == io.EOF && n == 0 {
+			break
+		}
+		if e == io.ErrUnexpectedEOF {
+			if e = w.truncate(offset); e != nil {
+				return fail(e)
+			}
+			break
+		}
+		if e != nil {
+			return fail(e)
+		}
+		if string(header[:4]) != "SPR1" || binary.BigEndian.Uint32(header[12:]) != crc32.Checksum(header[:12], readyCRC) {
+			if torn, e := w.tornFinal(offset, 0); e != nil {
+				return fail(e)
+			} else if torn {
+				break
+			}
+			return fail(ErrInvalid)
+		}
+		length := binary.BigEndian.Uint32(header[4:8])
+		if length == 0 || uint64(length) > uint64(maxReady()) {
+			return fail(ErrInvalid)
+		}
+		raw := make([]byte, length)
+		if _, e = io.ReadFull(f, raw); e == io.EOF || e == io.ErrUnexpectedEOF {
+			if e = w.truncate(offset); e != nil {
+				return fail(e)
+			}
+			break
+		} else if e != nil {
+			return fail(e)
+		}
+		if crc32.Checksum(raw, readyCRC) != binary.BigEndian.Uint32(header[8:12]) {
+			if torn, e := w.tornFinal(offset, int64(16+length)); e != nil {
+				return fail(e)
+			} else if torn {
+				break
+			}
+			return fail(ErrInvalid)
+		}
+		var r readyRecord
+		if model.StrictJSON(raw, &r) != nil || r.Group != group || r.Node != node || ValidateMembers(r.Members) != nil {
+			return fail(ErrInvalid)
+		}
+		w.members = cloneMembers(r.Members)
+		switch {
+		case len(r.SnapshotPart) > 0:
+			if r.SnapshotParts != 0 || len(r.Snapshot) > 0 || len(r.Hard) > 0 || len(r.Entries) > 0 {
+				return fail(ErrInvalid)
+			}
+			if len(pending) == 0 {
+				pendingStart = offset
+			}
+			pending = append(pending, r.SnapshotPart)
+			offset += int64(16 + length)
+			continue
+		case r.SnapshotParts > 0:
+			if len(r.Snapshot) > 0 || uint64(len(pending)) != r.SnapshotParts {
+				return fail(ErrInvalid)
+			}
+			r.Snapshot, pending = bytes.Join(pending, nil), nil
+		case len(pending) > 0:
+			return fail(ErrInvalid)
+		}
+		if e = installRecord(memory, r); e != nil {
+			return fail(e)
+		}
+		records++
+		offset += int64(16 + length)
+	}
+	if len(pending) > 0 {
+		// The chain of a snapshot whose last record never reached the disk: nothing acknowledged it.
+		if err = w.truncate(pendingStart); err != nil {
+			return fail(err)
+		}
+	}
+	if !fresh && records == 0 {
+		return fail(ErrInvalid)
+	}
+	if !fresh {
+		// Every frame verified. What was read must now be durable too: a node that acknowledges an
+		// entry on the strength of bytes that live only in the page cache breaks the majority
+		// guarantee when the machine loses power. A journal that cannot be synced is refused.
+		if fault != nil {
+			if err = fault("wal_open_sync"); err != nil {
+				return fail(err)
+			}
+		}
+		if err = f.Sync(); err != nil {
+			return fail(err)
+		}
+	}
+	if fresh {
+		conf := &pb.ConfState{}
+		for _, m := range members.Nodes {
+			if m.Learner {
+				conf.Learners = append(conf.Learners, m.ID)
+			} else {
+				conf.Voters = append(conf.Voters, m.ID)
+			}
+		}
+		snap := &pb.Snapshot{Metadata: &pb.SnapshotMetadata{ConfState: conf}}
+		rd := raft.Ready{Snapshot: snap}
+		if installed != nil {
+			if installed.conf != nil {
+				snap.Metadata.ConfState = installed.conf
+			}
+			snap.Data = installed.data
+			snap.Metadata.Index = new(installed.index)
+			snap.Metadata.Term = new(installed.term)
+			rd.HardState = &pb.HardState{Term: new(installed.term), Commit: new(installed.index)}
+		} else if seed != nil {
+			if seedIndex == 0 {
+				seedIndex = 1
+			}
+			if seedTerm == 0 {
+				seedTerm = 1
+			}
+			data, e := json.Marshal(snapshotEnvelope{Application: application, State: seed, Members: cloneMembers(members)})
+			if e != nil {
+				return fail(e)
+			}
+			snap.Data = data
+			snap.Metadata.Index = new(seedIndex)
+			snap.Metadata.Term = new(seedTerm)
+			rd.HardState = &pb.HardState{Term: new(seedTerm), Commit: new(seedIndex)}
+		}
+		if err = w.persist(rd); err != nil {
+			return fail(err)
+		}
+		if err = memory.ApplySnapshot(snap); err != nil {
+			return fail(err)
+		}
+		if rd.HardState != nil {
+			if err = memory.SetHardState(rd.HardState); err != nil {
+				return fail(err)
+			}
+		}
+	}
+	if _, err = f.Seek(0, io.SeekEnd); err != nil {
+		return fail(err)
+	}
+	return w, memory, nil
+}
+func (w *readyWAL) truncate(offset int64) error {
+	if err := w.file.Truncate(offset); err != nil {
+		return err
+	}
+	return w.file.Sync()
+}
+
+// tornFinal applies decision D16: the bad frame at offset is dropped only when it provably never
+// reached the disk whole, and nothing verifiable follows it. frame is the frame's declared length
+// when its header was readable (0 when it was not). A complete record that fails its checksum, or
+// unreadable header bytes that are not zero, is corruption and is refused: a synced record may have
+// been acknowledged. The rule, applied to the bytes from offset to the end of the file:
+//
+//   - a readable header must describe a frame that ends exactly at the end of the file (a header
+//     that declares more than the file holds is the short tail handled by the caller);
+//   - the header's sector (the bytes up to the next 512-byte boundary) is entirely zero, or at
+//     least one 512-byte sector-aligned chunk lying inside the record is entirely zero (an unwritten
+//     sector, the rule etcd uses for torn writes);
+//   - no verifiable frame header begins after offset.
+func (w *readyWAL) tornFinal(offset, frame int64) (bool, error) {
+	info, err := w.file.Stat()
+	if err != nil {
+		return false, err
+	}
+	size := info.Size()
+	if frame > 0 && offset+frame != size {
+		return false, nil
+	}
+	if frame == 0 && size-offset > 16+int64(maxReady()) {
+		return false, nil
+	}
+	rest := make([]byte, size-offset)
+	if _, err = w.file.ReadAt(rest, offset); err != nil {
+		return false, err
+	}
+	allZero := func(b []byte) bool {
+		for _, c := range b {
+			if c != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	const sector = 512
+	headerEnd := min(int64(len(rest)), sector-offset%sector)
+	unwritten := allZero(rest[:headerEnd])
+	for start := (offset + sector - 1) / sector * sector; !unwritten && start+sector <= size; start += sector {
+		unwritten = allZero(rest[start-offset : start-offset+sector])
+	}
+	if !unwritten {
+		return false, nil
+	}
+	for i := 1; i+16 <= len(rest); i++ {
+		if string(rest[i:i+4]) == "SPR1" && binary.BigEndian.Uint32(rest[i+12:i+16]) == crc32.Checksum(rest[i:i+12], readyCRC) {
+			return false, nil
+		}
+	}
+	if err = w.truncate(offset); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+func (w *readyWAL) Close() error { return w.file.Close() }
+
+// readyHead is the leading members of a readyRecord, with the tags of readyRecord.
+// TestReadyRecordWriterMatchesJSONMarshal keeps the writer below in step with readyRecord.
+type readyHead struct {
+	Group   model.ID `json:"group"`
+	Node    uint64   `json:"node,string"`
+	Members Members  `json:"members"`
+}
+
+// readyBuffer is the memory one journal record is built in: the record text and the protobuf
+// scratch of one entry. A record carries every entry of a Ready (a fragment of 256 KiB is about
+// 0.6 MiB of text), so the buffers are reused across records instead of allocated for each.
+type readyBuffer struct{ record, scratch []byte }
+
+// readyBufferKeep is the largest buffer the pool keeps; a bigger one (a rare 100 MiB batch) is
+// left to the collector rather than held for the life of the process.
+const readyBufferKeep = 16 << 20
+
+var readyBuffers = sync.Pool{New: func() any { return new(readyBuffer) }}
+
+func (b *readyBuffer) release() {
+	if cap(b.record) > readyBufferKeep {
+		b.record = nil
+	}
+	if cap(b.scratch) > readyBufferKeep {
+		b.scratch = nil
+	}
+	readyBuffers.Put(b)
+}
+
+// appendRecord builds the journal record of rd in b.record and returns it. The bytes are those of
+// json.Marshal(readyRecord{Group, Node, Members, Hard, Snapshot, Entries}) with the protobuf
+// encodings of the hard state, the snapshot and every entry: the base64 of each is written
+// straight into the record, where json.Marshal would hold a protobuf copy of every entry, the
+// text in its own buffer and a copy of that text.
+func (w *readyWAL) appendRecord(b *readyBuffer, rd raft.Ready) ([]byte, error) {
+	head, need, scratch, err := w.recordNeed(rd)
+	if err != nil {
+		return nil, err
+	}
+	if cap(b.record) < need {
+		b.record = make([]byte, 0, need)
+	}
+	if cap(b.scratch) < scratch {
+		b.scratch = make([]byte, 0, scratch)
+	}
+	out := append(b.record[:0], head[:len(head)-1]...)
+	part := func(m proto.Message) ([]byte, error) {
+		raw, err := proto.MarshalOptions{}.MarshalAppend(b.scratch[:0], m)
+		if err != nil {
+			return nil, err
+		}
+		b.scratch = raw
+		return raw, nil
+	}
+	// omitempty drops a hard state or snapshot whose encoding is empty, exactly as it does a
+	// nil or empty []byte field.
+	for _, field := range []struct {
+		key string
+		msg proto.Message
+		set bool
+	}{{`,"hard":"`, rd.HardState, rd.HardState != nil}, {`,"snapshot":"`, rd.Snapshot, rd.Snapshot != nil}} {
+		if !field.set {
+			continue
+		}
+		raw, err := part(field.msg)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		out = append(out, field.key...)
+		out = base64.StdEncoding.AppendEncode(out, raw)
+		out = append(out, '"')
+	}
+	if len(rd.Entries) > 0 {
+		out = append(out, `,"entries":[`...)
+		for i, ent := range rd.Entries {
+			raw, err := part(ent)
+			if err != nil {
+				return nil, err
+			}
+			if i > 0 {
+				out = append(out, ',')
+			}
+			out = append(out, '"')
+			out = base64.StdEncoding.AppendEncode(out, raw)
+			out = append(out, '"')
+		}
+		out = append(out, ']')
+	}
+	b.record = append(out, '}')
+	return b.record, nil
+}
+func (w *readyWAL) persist(rd raft.Ready) error {
+	if w.needsParts(rd) {
+		return w.persistParts(rd)
+	}
+	buf := readyBuffers.Get().(*readyBuffer)
+	defer buf.release()
+	raw, err := w.appendRecord(buf, rd)
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxReady() {
+		return ErrInvalid
+	}
+	if err = w.writeFrame(raw); err != nil {
+		return err
+	}
+	return w.syncFrames()
+}
+
+// writeFrame appends one record (its framing and the text raw) to the journal.
+func (w *readyWAL) writeFrame(raw []byte) error {
+	var header [16]byte
+	copy(header[:4], "SPR1")
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(raw)))
+	binary.BigEndian.PutUint32(header[8:12], crc32.Checksum(raw, readyCRC))
+	binary.BigEndian.PutUint32(header[12:], crc32.Checksum(header[:12], readyCRC))
+	if w.fault != nil {
+		if err := w.fault("wal_write"); err != nil {
+			return err
+		}
+	}
+	if err := writeFull(w.file, header[:]); err != nil {
+		return err
+	}
+	if w.fault != nil {
+		if err := w.fault("wal_payload_write"); err != nil {
+			return err
+		}
+	}
+	return writeFull(w.file, raw)
+}
+
+// syncFrames makes the records written so far durable.
+func (w *readyWAL) syncFrames() error {
+	if w.beforeSync != nil {
+		if err := w.beforeSync(); err != nil {
+			return err
+		}
+	}
+	if w.fault != nil {
+		if err := w.fault("wal_sync"); err != nil {
+			return err
+		}
+	}
+	return w.file.Sync()
+}
+func writeFull(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, e := w.Write(b)
+		if e != nil {
+			return e
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		b = b[n:]
+	}
+	return nil
+}
+func installRecord(memory *raft.MemoryStorage, r readyRecord) error {
+	if len(r.Snapshot) > 0 {
+		snap := &pb.Snapshot{}
+		if proto.Unmarshal(r.Snapshot, snap) != nil {
+			return ErrInvalid
+		}
+		if err := memory.ApplySnapshot(snap); err != nil && err != raft.ErrSnapOutOfDate {
+			return err
+		}
+	}
+	entries := make([]*pb.Entry, 0, len(r.Entries))
+	for _, raw := range r.Entries {
+		ent := &pb.Entry{}
+		if proto.Unmarshal(raw, ent) != nil {
+			return ErrInvalid
+		}
+		entries = append(entries, ent)
+	}
+	if len(entries) > 0 {
+		last, _ := memory.LastIndex()
+		if entries[0].GetIndex() > last+1 {
+			return ErrInvalid
+		}
+		if err := memory.Append(entries); err != nil {
+			return err
+		}
+	}
+	if len(r.Hard) > 0 {
+		hard := &pb.HardState{}
+		if proto.Unmarshal(r.Hard, hard) != nil {
+			return ErrInvalid
+		}
+		last, _ := memory.LastIndex()
+		if hard.GetCommit() > last {
+			return ErrJournalBehind
+		}
+		if err := memory.SetHardState(hard); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// drive runs ready cycles until Raft has nothing left to hand out and no proposal is waiting. It is the only
+// RawNode.Ready consumer: the stage goroutine of a group that ticks by itself, or whoever changed the state of a
+// group its owner ticks (Open, and the tests that tick by hand), so that group is quiet when the call returns.
+func (g *Group) drive() error {
+	for {
+		again, err := g.cycle()
+		if err != nil || !again {
+			return err
+		}
+	}
+}
+
+// cycle handles one Ready, and reports whether there may be another. The order is Raft's contract: every changed
+// persistent state (entries, hard state including a commit-only one, a snapshot) is fsynced before a message is sent
+// or Advance is called, entries are applied in order, and Advance comes last. The cycle holds ioMu throughout and mu
+// only for the memory work between the journal write, the machine's Apply and the sends: a Tick or a Step that
+// arrives meanwhile is not held up by any of them, and their effects (heartbeats, votes, responses) leave with the
+// next Ready.
+func (g *Group) cycle() (bool, error) {
+	g.ioMu.Lock()
+	defer g.ioMu.Unlock()
+	g.busy.Store(true)
+	defer g.busy.Store(false)
+	g.mu.Lock()
+	if g.failed || g.closed {
+		g.mu.Unlock()
+		return false, ErrUnavailable
+	}
+	if g.snapWanted {
+		g.cutWantedSendSnapshotLocked()
+	}
+	g.mu.Unlock()
+	g.intake() // the proposals that queued meanwhile become one append
+	g.mu.Lock()
+	if g.failed || g.closed {
+		g.mu.Unlock()
+		return false, ErrUnavailable
+	}
+	if !g.raw.HasReady() {
+		g.refreshSoloRead()
+		g.mu.Unlock()
+		return false, nil
+	}
+	rd := g.raw.Ready()
+	priorLast, _ := g.memory.LastIndex()
+	g.mu.Unlock()
+	began := time.Now()
+	if err := g.stage(rd, priorLast); err != nil {
+		return false, err
+	}
+	g.lane.cycleN.Add(1)
+	g.lane.cycleNS.Add(uint64(time.Since(began)))
+	if d := int64(time.Since(began)); d > g.phases.cycleMax.Load() {
+		g.phases.cycleMax.Store(d) // ioMu is held: the only writer
+	}
+	return true, nil
+}
+
+// stageFailed fails the group closed because its storage or its machine failed (unless it already failed) and
+// returns err.
+func (g *Group) stageFailed(reason FailReason, err error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.failed {
+		g.failStop(reason)
+	}
+	return err
+}
+
+// stage persists rd, installs it in the memory state, sends its messages, applies its committed entries and
+// advances Raft. ioMu is held, mu is not.
+func (g *Group) stage(rd raft.Ready, priorLast uint64) error {
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		// A snapshot from the leader is about to become the journal head: the durable proof
+		// goes first, so a crash between the persist and the restore cannot leave it standing.
+		if err := g.removeProofFile(); err != nil {
+			return g.stageFailed(FailJournal, ErrUnavailable)
+		}
+		g.mu.Lock()
+		g.machineRules = 0
+		g.mu.Unlock()
+	}
+	if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
+		persistBegan := time.Now()
+		if err := g.disk.persist(rd); err != nil {
+			return g.stageFailed(FailJournal, ErrUnavailable)
+		}
+		since(&g.phases.persistNS, persistBegan)
+		g.phases.persistN.Add(1)
+		g.lane.persisted(rd, persistBegan)
+	}
+	if err := g.install(rd, priorLast); err != nil {
+		return err
+	}
+	g.send(rd.Messages)
+	for _, ent := range rd.CommittedEntries {
+		if err := g.applyEntry(ent); err != nil {
+			return g.stageFailed(FailApply, err)
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	for _, r := range rd.ReadStates {
+		if req := g.reads[string(r.RequestCtx)]; req != nil {
+			req.index = r.Index
+		}
+	}
+	g.completeReads()
+	g.raw.Advance(rd)
+	g.notify()
+	g.refreshSoloRead()
+	return nil
+}
+
+// install makes what the journal now holds the state of the group in memory: the snapshot (and the machine it
+// restores), the log, the hard state, and the tables of the commands in the log.
+func (g *Group) install(rd raft.Ready, priorLast uint64) error {
+	defer func() { clear(g.fresh) }() // what this cycle proposed is in the log now
+	// The entries that extend the log are decoded before mu is taken (a Ready of the proposers' batch holds hundreds of
+	// them); a Ready that replaces a snapshot or truncates the log rebuilds the tables under mu instead.
+	var decoded []Entry
+	extends := raft.IsEmptySnap(rd.Snapshot) && (len(rd.Entries) == 0 || rd.Entries[0].GetIndex() > priorLast)
+	if extends {
+		decoded = make([]Entry, len(rd.Entries))
+		for i, ent := range rd.Entries {
+			if ent.GetType() != pb.EntryNormal || len(ent.GetData()) == 0 {
+				continue
+			}
+			e, err := g.decodeEntry(ent.GetData())
+			if err != nil {
+				return g.stageFailed(FailState, err)
+			}
+			decoded[i] = e
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
+	if snapshotChanged {
+		g.tail.reset() // the log restarts at the snapshot: what was retained below it is no longer a prefix of it
+		if err := g.memory.ApplySnapshot(rd.Snapshot); err == raft.ErrSnapOutOfDate && g.sameIndexSnapshot(rd.Snapshot) {
+			// The journal head record and a later record can carry the same-index snapshot
+			// (a compaction rewrite copies the in-memory one); installRecord tolerates that at
+			// open, so the running group does too. Its state is already in place.
+			snapshotChanged = false
+		} else if err != nil {
+			g.failStop(FailState)
+			return err
+		} else if err := g.restoreSnapshot(rd.Snapshot); err != nil {
+			g.failStop(FailState)
+			return err
+		}
+	}
+	if err := g.memory.Append(rd.Entries); err != nil {
+		g.failStop(FailState)
+		return err
+	}
+	if !raft.IsEmptyHardState(rd.HardState) {
+		if err := g.memory.SetHardState(rd.HardState); err != nil {
+			g.failStop(FailState)
+			return err
+		}
+	}
+	if snapshotChanged || len(rd.Entries) > 0 && rd.Entries[0].GetIndex() <= priorLast {
+		if err := g.rebuildKnown(); err != nil {
+			g.failStop(FailState)
+			return err
+		}
+	} else if decoded == nil {
+		for _, entry := range rd.Entries {
+			if err := g.remember(entry, 0); err != nil {
+				g.failStop(FailState)
+				return err
+			}
+		}
+	} else {
+		for i, entry := range rd.Entries {
+			if entry.GetType() == pb.EntryNormal && len(entry.GetData()) > 0 {
+				g.noteEntry(entry, decoded[i])
+			}
+		}
+	}
+	return nil
+}
+
+// send hands the messages of a persisted Ready to the transport. The members it reads (a snapshot's recipient) are
+// only changed by a cycle, and the caller is one.
+func (g *Group) send(messages []*pb.Message) {
+	type failure struct {
+		to       uint64
+		snapshot bool
+	}
+	var failed []failure
+	for _, m := range messages {
+		if (g.gate != nil || g.guard != nil) && m.GetType() == pb.MsgSnap {
+			g.sendGatedSnapshot(cloneMessage(m))
+			continue
+		}
+		out := cloneMessage(m)
+		if m.GetType() == pb.MsgSnap {
+			out.Context = g.snapshotContext(out, out.GetContext())
+		}
+		if err := g.transport.Send(g.group, out); err != nil {
+			g.noteUnreachable(m.GetTo())
+			failed = append(failed, failure{m.GetTo(), m.GetType() == pb.MsgSnap})
+		}
+	}
+	if len(failed) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, f := range failed {
+		g.raw.ReportUnreachable(f.to)
+		if f.snapshot {
+			g.raw.ReportSnapshot(f.to, raft.SnapshotFailure)
+		}
+	}
+}
+
+// sameIndexSnapshot reports whether snap sits at exactly the index of the snapshot the in-memory
+// log already holds. An older snapshot is still refused.
+func (g *Group) sameIndexSnapshot(snap *pb.Snapshot) bool {
+	current, err := g.memory.Snapshot()
+	return err == nil && current.GetMetadata().GetIndex() == snap.GetMetadata().GetIndex()
+}
+func (g *Group) rebuildKnown() error {
+	g.known = map[model.ID]map[uint64]struct{}{}
+	g.replay = map[uint64]replayedEntry{}
+	g.logCommands = map[model.ID]CommittedEntry{}
+	g.logApplication = g.application
+	for id, c := range g.completed {
+		if !g.digestKind(c.Entry.Kind) { // kept by digest: nothing to index, the retry table answers
+			g.logCommands[id] = c
+		}
+		if c.Entry.ReservationID != nil && c.Entry.Kind != Cancellation && c.Outcome != "conflict" {
+			reservation := *c.Entry.ReservationID
+			if g.known[reservation] == nil {
+				g.known[reservation] = map[uint64]struct{}{}
+			}
+			g.known[reservation][c.Index] = struct{}{}
+		}
+	}
+	first, _ := g.memory.FirstIndex()
+	last, _ := g.memory.LastIndex()
+	if last < first {
+		return nil
+	}
+	entries, err := g.memory.Entries(first, last+1, ^uint64(0))
+	if err != nil {
+		return err
+	}
+	for _, ent := range entries {
+		if err = g.remember(ent, 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyEntry applies one committed entry. The caller is the cycle: it holds ioMu and not mu, so the machine's Apply
+// (and the proof files around it) run without the group lock; what the entry changes in the group (applied, the
+// tables, the waiters) is committed under mu in one short section, in the order the entries come.
+func (g *Group) applyEntry(ent *pb.Entry) error {
+	if ent.GetIndex() <= g.applied {
+		return nil
+	}
+	c := CommittedEntry{Group: g.group, Term: ent.GetTerm(), Index: ent.GetIndex(), ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}, Entry: Entry{Kind: Noop}}
+	switch ent.GetType() {
+	case pb.EntryNormal:
+		if len(ent.GetData()) > 0 {
+			entry, err := g.appliedEntry(ent)
+			if err != nil {
+				return err
+			}
+			c.Entry = entry
+			c.ApplicationCursor.Index = model.Uint64(c.Entry.ApplicationIndex)
+		}
+	case pb.EntryConfChange:
+		change := &pb.ConfChange{}
+		if proto.Unmarshal(ent.GetData(), change) != nil {
+			return ErrInvalid
+		}
+		g.mu.Lock()
+		g.soloRead.Store(nil)
+		g.conf = g.raw.ApplyConfChange(change)
+		g.mu.Unlock()
+	case pb.EntryConfChangeV2:
+		change := &pb.ConfChangeV2{}
+		if proto.Unmarshal(ent.GetData(), change) != nil {
+			return ErrInvalid
+		}
+		var next Members
+		changesMembers := len(change.GetContext()) > 0
+		if changesMembers && (model.StrictJSON(change.GetContext(), &next) != nil || ValidateMembers(next) != nil) {
+			return ErrInvalid
+		}
+		g.mu.Lock()
+		g.soloRead.Store(nil)
+		g.conf = g.raw.ApplyConfChange(change)
+		if changesMembers {
+			g.retiring = append([]Member(nil), g.members.Nodes...)
+			g.members = next
+			g.disk.members = cloneMembers(next)
+		}
+		if len(g.conf.GetVotersOutgoing()) == 0 {
+			g.retiring = nil
+		}
+		g.publishMembers()
+		g.mu.Unlock()
+	default:
+		return ErrInvalid
+	}
+	suspended := false
+	if c.Entry.Kind == Control {
+		// The command may turn out stale; the durable proof must not outlive that outcome.
+		var err error
+		if suspended, err = g.suspendProof(); err != nil {
+			return err
+		}
+	}
+	applyBegan := time.Now()
+	result := g.machine.Apply(c)
+	applyEnd := time.Now()
+	g.phases.applyNS.Add(uint64(applyEnd.Sub(applyBegan)))
+	g.phases.applyN.Add(1)
+	g.lane.applied(c.Entry.ID, applyBegan, applyEnd)
+	if result != nil && result != ErrConflict {
+		return result
+	}
+	if result == nil && suspended {
+		if err := g.resumeProof(); err != nil {
+			return err
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	if result == ErrConflict && c.Entry.ReservationID != nil {
+		delete(g.known[*c.Entry.ReservationID], c.Index)
+		if len(g.known[*c.Entry.ReservationID]) == 0 {
+			delete(g.known, *c.Entry.ReservationID)
+		}
+	}
+	if result == ErrConflict {
+		c.Outcome = "conflict"
+		if c.Entry.Kind == Control {
+			g.machineRules = 0 // a stale command still carries the state it was built from
+			g.proofWithdrawn(ProofWithdrawal{Index: c.Index})
+		}
+	}
+	g.applied = ent.GetIndex()
+	g.application = uint64(c.ApplicationCursor.Index)
+	g.advanceSoloRead() // before any waiter below is answered: its receipt is not ahead of a read made after it
+	if c.Entry.Kind != Noop {
+		if old, ok := g.completed[c.Entry.ID]; ok {
+			c = old
+		} else {
+			g.completed[c.Entry.ID] = g.retained(c)
+			g.trackRetry(c)
+		}
+		for _, ch := range g.pending[c.Entry.ID] {
+			ch <- proposalResult{entry: c, err: result}
+		}
+		delete(g.pending, c.Entry.ID)
+		if g.digestKind(c.Entry.Kind) {
+			// Applied: the retry table answers every later retry, and the log index only
+			// matters for a command that is in the log and not yet applied.
+			delete(g.logCommands, c.Entry.ID)
+		}
+		if g.afterAck != nil {
+			g.afterAck()
+		}
+	}
+	g.countApplied(len(ent.GetData()))
+	return nil
+}
+
+// digestKind reports whether the machine asked for the retry table to keep commands of kind k by
+// digest (DigestRetryMachine).
+func (g *Group) digestKind(k Kind) bool {
+	return g.retryDigest != nil && k != Noop && g.retryDigest(k)
+}
+
+// retained is c as the retry table keeps it: for a kind kept by digest the payload is dropped and
+// Entry.Original carries the digest of the payload the command was proposed with, so a retry is
+// still recognized by sameProposal and a different payload under the ID is still a conflict. The
+// receipt (group, term, index, application cursor, outcome) is untouched.
+func (g *Group) retained(c CommittedEntry) CommittedEntry {
+	if !g.digestKind(c.Entry.Kind) {
+		return c
+	}
+	original := c.Entry.proposed()
+	c.Entry.Payload = nil
+	c.Entry.Original = &original
+	return c
+}
+func (g *Group) completeReads() {
+	status := g.raw.BasicStatus()
+	for id, r := range g.reads {
+		if status.HardState.GetTerm() != r.term {
+			r.finish(proposalResult{err: ErrStale})
+			delete(g.reads, id)
+		} else if r.index > 0 && g.applied >= r.index {
+			r.finish(proposalResult{entry: CommittedEntry{Group: g.group, Term: r.term, Index: g.applied, ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}}})
+			delete(g.reads, id)
+		}
+	}
+	g.issueReadLocked() // the callers that arrived while the round was in flight
+}
+
+// snapshotEnvelope is what a Raft snapshot of a group carries. Retry names the format of the retry
+// table when it is not the one every build reads (retryDigestTag: records kept by digest): a reader
+// that predates the field refuses the envelope instead of installing a table it would misread.
+// Retry is first: digestBearing finds it without decoding the envelope.
+type snapshotEnvelope struct {
+	Retry       string           `json:"retry,omitempty"`
+	Application uint64           `json:"application,string"`
+	State       []byte           `json:"state"`
+	Completed   []CommittedEntry `json:"completed"`
+	Members     Members          `json:"members"`
+	Retiring    []Member         `json:"retiring,omitempty"`
+	// RetryParts and RetryFrom: the retry table of a digest machine kept in files of the snapshot
+	// directory instead of Completed (retry_parts.go). Completed then holds only the entries of kinds
+	// that are not kept by digest.
+	RetryParts []string `json:"retry_parts,omitempty"`
+	RetryFrom  uint64   `json:"retry_from,string,omitempty"`
+}
+
+func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
+	var envelope snapshotEnvelope
+	if model.StrictJSON(snap.GetData(), &envelope) != nil || ValidateMembers(envelope.Members) != nil {
+		return ErrInvalid
+	}
+	// The leader's retry table as it was cut: not covered by any local pass. The durable proof
+	// goes first, before the machine is restored.
+	if err := g.dropProof(); err != nil {
+		return err
+	}
+	index := snap.GetMetadata().GetIndex()
+	if verifier, ok := g.machine.(interface{ VerifySnapshot([]byte) error }); ok {
+		if err := verifier.VerifySnapshot(envelope.State); err != nil {
+			return err
+		}
+	}
+	if g.machine.Applied() < index {
+		if err := g.machine.Restore(envelope.State, index); err != nil {
+			return err
+		}
+	}
+	g.applied = index
+	g.application = envelope.Application
+	g.members = cloneMembers(envelope.Members)
+	g.retiring = append([]Member(nil), envelope.Retiring...)
+	g.publishMembers()
+	g.conf = snap.GetMetadata().GetConfState()
+	g.resetRetryPartsLocked()
+	for _, c := range envelope.Completed {
+		if c.Group != g.group || c.Index > index {
+			return ErrInvalid
+		}
+		g.completed[c.Entry.ID] = g.retained(c)
+	}
+	if len(envelope.RetryParts) > 0 {
+		parts, err := g.loadRetryParts(envelope, index)
+		if err != nil {
+			return err
+		}
+		g.retryParts = parts
+	}
+	g.rebuildRetryOrder()
+	g.proofWithdrawn(ProofWithdrawal{Index: index, Install: true})
+	return nil
+}
+
+// Snapshot never truncates the durable journal. It transfers every authoritative
+// byte supplied by Machine, together with receipts, membership and cursor cuts.
+func (g *Group) Snapshot() error {
+	g.lockAll()
+	defer g.unlockAll()
+	if g.failed || g.closed || g.applied == 0 {
+		return ErrUnavailable
+	}
+	state, err := g.machine.Snapshot()
+	if err != nil {
+		return err
+	}
+	e := snapshotEnvelope{Application: g.application, State: state, Members: cloneMembers(g.members), Retiring: append([]Member(nil), g.retiring...)}
+	for _, c := range g.completed {
+		e.Completed = append(e.Completed, c)
+	}
+	e.markRetry()
+	raw, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	snap, err := g.memory.CreateSnapshot(g.applied, g.conf, raw)
+	if err != nil {
+		return err
+	}
+	if err = g.disk.persist(raft.Ready{Snapshot: snap}); err != nil {
+		g.failStop(FailJournal)
+		return err
+	}
+	return nil
+}
+
+// snapshotGateTimeout bounds what a sender waits for the machine to order its statement before
+// a snapshot leaves; a snapshot withheld that long is reported as failed and sent again.
+const snapshotGateTimeout = 15 * time.Second
+
+// sendGatedSnapshot sends a snapshot message once the sender-side checks of the group allow it: the
+// SnapshotGuard (Config.SnapshotGuard: the receiver must be able to use the state) and the machine's
+// gate (which orders what the install will invalidate; its token goes into the Context). g.mu is
+// held by the caller and must not be taken by either: they run on their own goroutine, and a
+// withheld message is reported as a failed delivery the way a failed Send does.
+func (g *Group) sendGatedSnapshot(m *pb.Message) {
+	var to Member
+	listed := false
+	if g.guard != nil {
+		for _, list := range [][]Member{g.members.Nodes, g.retiring} {
+			for _, member := range list {
+				if member.ID == m.GetTo() {
+					to, listed = member, true
+				}
+			}
+		}
+	}
+	g.gateWG.Add(1)
+	go func() {
+		defer g.gateWG.Done()
+		ctx, cancel := context.WithTimeout(g.gateCtx, snapshotGateTimeout)
+		defer cancel()
+		var err error
+		switch {
+		case g.guard != nil && !listed:
+			err = ErrUnavailable // not in the configuration: nothing names it, so nothing is sent
+		case g.guard != nil:
+			err = g.guard(ctx, to)
+		}
+		snapshotContext := m.GetContext()
+		if err == nil && g.gate != nil {
+			var token []byte
+			if token, err = g.gate.BeforeSnapshotSend(ctx, m.GetTo()); err == nil {
+				snapshotContext = gateContext(token)
+			}
+		}
+		if err == nil {
+			m.Context = g.snapshotContext(m, snapshotContext)
+			err = g.transport.Send(g.group, m)
+		}
+		if err != nil {
+			g.ReportDelivery(m.GetTo(), true, err)
+		}
+	}()
+}

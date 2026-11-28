@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "authored-scalar-addition",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "1 + 2",
+        "time_ns": "1700000000000000000"
+      },
+      "expected": {
+        "kind": "scalar",
+        "type": "scalar",
+        "values": [
+          {
+            "timestamp": "1700000000000000000",
+            "bits": "4008000000000000"
+          }
+        ],
+        "diagnostics": null
+      }
+    },
+    {
+      "id": "authored-log-multiplicity",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "input": {
+        "expression": "{fixture=\"sanity\"}",
+        "start_ns": "1700000000000000000",
+        "end_ns": "1700000000000000002",
+        "logs": [
+          {
+            "timestamp_ns": "1700000000000000001",
+            "line": "alpha",
+            "labels": {
+              "fixture": "sanity"
+            }
+          },
+          {
+            "timestamp_ns": "1700000000000000001",
+            "line": "beta",
+            "labels": {
+              "fixture": "sanity"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "kind": "streams",
+        "type": "log",
+        "values": [
+          {
+            "timestamp": "1700000000000000001",
+            "line": "alpha",
+            "labels": {
+              "fixture": "sanity"
+            }
+          },
+          {
+            "timestamp": "1700000000000000001",
+            "line": "beta",
+            "labels": {
+              "fixture": "sanity"
+            }
+          }
+        ],
+        "diagnostics": null
+      }
+    }
+  ]
+}

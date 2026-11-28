@@ -1,0 +1,73 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Workload parameters and the design section 13 budgets used by tools/qualify. The budgets are copied from
+# docs/superpowers/specs/2026-11-03-soundpost-design.md section 13 and are only ever compared against: a
+# missed budget is a measured failure that blocks the claim, never a reason to edit a limit here. The test
+# TestQualificationBudgetsMatchDesign pins every number below to that table.
+schema: soundpost-qualification-workloads/1
+
+budgets:
+  server_p95_latency_percent:
+    {limit: 5, unit: percent, source: "design 13 Python/server TS SDK: <=5% p95 latency increase, core capture"}
+  server_cpu_percent:
+    {limit: 5, unit: percent, source: "design 13 Python/server TS SDK: <=5% CPU increase, core capture"}
+  sdk_queue_bytes:
+    {limit: 2097152, unit: bytes, source: "design 13 Python/server TS SDK: <=2 MiB default queue"}
+  browser_core_gzip_bytes:
+    {limit: 40960, unit: bytes, source: "design 13 Browser SDK/replay: core <=40 KiB gzip"}
+  browser_replay_gzip_bytes:
+    {limit: 61440, unit: bytes, source: "design 13 Browser SDK/replay: replay separate <=60 KiB gzip"}
+  browser_recorder_batch_p95_ms:
+    {limit: 5, unit: ms, source: "design 13 Browser SDK/replay: recorder <=5 ms p95 per mutation batch"}
+  browser_recorder_queue_bytes:
+    {limit: 2097152, unit: bytes, source: "design 13 Browser SDK/replay: bounded 2-MiB queue"}
+  native_cpu_overhead_percent:
+    {limit: 3, unit: percent, source: "design 13 Native profiler: <=3% CPU overhead per profiled target workload"}
+  native_memory_bytes:
+    {limit: 67108864, unit: bytes, source: "design 13 Native profiler: bounded 64-MiB acquisition/export memory"}
+  single_host_ack_p95_ms:
+    {limit: 250, unit: ms, source: "design 13 Single-host: p95 durable ACK <250 ms (10 orgs, 100 projects, 100k active metric series, 2k mixed records/s for 1 hour)"}
+  single_host_rss_bytes:
+    {limit: 12884901888, unit: bytes, source: "design 13 Single-host: steady RSS <12 GiB"}
+  single_host_missing_acked_records:
+    {limit: 0, unit: records, source: "design 13 Single-host: no loss of ACKed records across process restart"}
+  queries_interactive_p95_ms:
+    {limit: 2000, unit: ms, source: "design 13 Queries: p95 interactive <2 s (24-hour representative scans, 1 GiB encoded input per signal, concurrent ingest, 10 active interactive queries, 100 rules/minute)"}
+  queries_false_healthy_answers:
+    {limit: 0, unit: count, source: "design 13 Queries: no false healthy state (no complete answer, rule evaluation or recovery notification over a lost shard)"}
+  queries_overlimit_unexplained:
+    {limit: 0, unit: count, source: "design 13 Queries: explicit resource error on limit (over-limit probes not answered by an explicit resource error)"}
+  queries_golden_mismatches:
+    {limit: 0, unit: count, source: "design 13 Queries: representative scans return the same answer for the same query (golden answers over immutable data)"}
+
+# Server SDK overhead: committed harness fixtures/sdk/overhead.mjs (03.09, measurement per D54): an open-loop load process at 1000 req/s
+# against a deterministic node:http handler. Every run is a fresh server process: a fixed warm-up (discarded for both arms) and then a
+# steady-state window of at least 30 s per arm; arms alternate over at least 5 repetitions. The warm figures are gated; the legacy 1+3 s
+# window of the same processes is recorded as cold_window and never gated. The handler is synthetic, so tail percentiles and a
+# "representative" handler are NOT claimed; the full design workload is recorded as not run.
+sdk_server:
+  requests_per_second: 1000
+  warmup_s: 10
+  steady_s: 30
+  runs: 5
+  only: "server,bundle"
+  handler_hashes: [3, 100]
+  full_command: "NOT RUN: a representative 1k req/s production-shaped handler for long enough to resolve p95/p99 (design 13); the committed harness only offers the synthetic 10 s warm-up + 30 s x 5 run above"
+
+# Native acceptance (04.09): the committed runner with a reduced capture time (its documented smoke is 60 s).
+native_acceptance:
+  duration: 30s
+  seed: 451
+
+# Native overhead (04.09): a REAL but reduced run; the documented full command is recorded, not run.
+native_overhead:
+  hz: 99
+  seconds: 20
+  repeats: 3
+  fixtures: cpu
+  full_command: "NOT RUN: go run ./fixtures/nativeperf/overhead --manifest fixtures/nativeperf/qualification.json --hz 99 --seconds 120 --repeats 5 (about 20 minutes per fixture)"
+
+# Native privacy (04.08 verifier) real capture seconds.
+native_privacy:
+  seconds: 4

@@ -1,0 +1,25 @@
+{
+ "schema":"soundpost-authored-syntax-cases-v1",
+ "phase":"syntax",
+ "copyright":"Copyright 2026 Aryn Yklas",
+ "license":"Apache-2.0",
+ "source_facts":[
+  "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/lex.go#L1062-L1086",
+  "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/lex.go#L1183-L1206"
+ ],
+ "cases":[
+  {"id":"owned-unicode-ascii-whitespace","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"sum\t(\nfixture_metric\r)"},"expected":{"accepted":true,"type":"vector"}},
+  {"id":"owned-unicode-bare-accent","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"résultat"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-bare-cjk-label","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric{区域=\"north\"}"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-bare-garay-post15","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"𐵐_metric"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-bare-arabic-digit-suffix","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_١"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-quoted-metric","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"{\"résultat\"}"},"expected":{"accepted":true,"type":"vector"}},
+  {"id":"owned-unicode-quoted-label","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric{\"区域\"=\"north\"}"},"expected":{"accepted":true,"type":"vector"}},
+  {"id":"owned-unicode-quoted-garay-label","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric{\"𐵐\"=\"value\"}"},"expected":{"accepted":true,"type":"vector"}},
+  {"id":"owned-unicode-nonbreaking-space-not-whitespace","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"sum (fixture_metric)"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-em-space-not-whitespace","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"sum (fixture_metric)"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-formfeed-not-whitespace","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"sum\f(fixture_metric)"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-vertical-tab-not-whitespace","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"sum\u000b(fixture_metric)"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-unicode-quoted-whitespace-value","profiles":["promql-prometheus-3.1.0","promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric{zone=\"north east\"}"},"expected":{"accepted":true,"type":"vector"}}
+ ]
+}

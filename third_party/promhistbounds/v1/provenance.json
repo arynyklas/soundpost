@@ -1,0 +1,46 @@
+{
+  "primitive": "Precalculated exponential-bucket-bound mantissas (schemas 0-8) of Prometheus native histograms, required for bit-exact histogram_fraction/histogram_quantile/histogram_stddev/histogram_stdvar bucket bounds",
+  "module": "github.com/prometheus/prometheus model/histogram/generic.go (table `exponentialBounds`), identical in the two pinned releases",
+  "license": "Apache-2.0",
+  "copyright": "Copyright The Prometheus Authors",
+  "approved_by": "Main, 2026-11-04: numeric data only (511 float64 constants), no Prometheus code, evaluator or storage logic; needed because the entries are not derivable from a closed formula (tested: correct rounding, round-down, truncation to 15/16/17 digits, pow/exp/exp2, iterated sqrt of neighbours all differ from the table in 253-469 of 511 entries) and an empirical curve fit would extrapolate arbitrarily. Same approval class as the other generic vendored primitives; fully reversible by deleting this directory and the first-party fit it replaces.",
+  "source_container": "conformance/query source lock: Prometheus 3.1.0 commit 7086161a93b262aa0949dbf2aba15a5a7b13e0a3 and 3.13.5 commit f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+  "sources": [
+    {
+      "release": "3.1.0",
+      "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+      "tarball_url": "https://codeload.github.com/prometheus/prometheus/tar.gz/7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+      "tarball_sha256": "1a394b385e1fca89a6b81eab782074de26c5d35fccdebfef15c68daa55029de5",
+      "file": "model/histogram/generic.go",
+      "file_sha256": "c4fef7fb6a8ccf5dc932135f258162137a8fab3ad814326c1e9eaef8759c3365"
+    },
+    {
+      "release": "3.13.5",
+      "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+      "tarball_url": "https://codeload.github.com/prometheus/prometheus/tar.gz/f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+      "tarball_sha256": "c2f96e97afede2cb4b43266bf62d964bed9194c7a1ac37759e1c6fd68600b410",
+      "file": "model/histogram/generic.go",
+      "file_sha256": "0e1187794848014b7c0f331c2e4364e6ff10f1e9a6ca7945585507cc20514f97"
+    }
+  ],
+  "files": [
+    {
+      "path": "bounds.go",
+      "entries": 511,
+      "table_digest_sha256": "f21134c635552399c35782d7e915622251d6d91ce0aed7abc59beaa2b92f832c",
+      "table_digest_definition": "SHA-256 of lines `schema:index:%016x\\n` (IEEE-754 bits of each entry, schema-major then index), recomputed independently with go/parser over both pinned upstream sources and equal to this package's digest",
+      "adaptations": [
+        "data-only extraction of the exponentialBounds literal; values re-emitted as Go float literals in shortest round-trip form",
+        "accessor Mantissa(schema, index) and documentation are first-party"
+      ],
+      "excluded": [
+        "getBound and getBoundExponential logic and every other upstream function"
+      ]
+    }
+  ],
+  "license_files": {
+    "LICENSE": "Apache-2.0 text, byte-identical in both pinned releases",
+    "UPSTREAM-NOTICE-3.13.5": "upstream NOTICE at commit f4974359..., verbatim",
+    "UPSTREAM-NOTICE-3.1.0": "upstream NOTICE at commit 7086161a..., verbatim (differs from the 3.13.5 NOTICE)"
+  }
+}

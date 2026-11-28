@@ -1,0 +1,8 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Sign-in page */
+.login{max-width:460px;margin:8vh auto 32px}
+.login>header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.login>header p{margin:0;color:var(--text-3)}
+.login .panel h1{font-size:20px;margin-bottom:8px}
+.login .panel nav button{flex:1}
+.login button.primary{width:100%;margin-top:8px;min-height:38px}

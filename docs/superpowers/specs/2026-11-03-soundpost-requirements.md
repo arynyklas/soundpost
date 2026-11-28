@@ -1,6 +1,6 @@
 # Soundpost selected requirements
 
-Date: 2026-11-03. This is the portable product intake, not an approved architecture or a capability claim. The owner authorized repository initialization and design preparation in this session; product implementation requires approval of the written design. Soundpost is the selected name. Registry reservations and legal naming clearance are not claimed.
+Date: 2026-11-03. This is the portable product intake, not a capability claim. Aryn Yklas approved the complete design/contracts and selected subagent-driven implementation with m1 implementers and m2 reviewers on 2026-11-03. Soundpost is the selected name. Registry reservations and legal naming clearance are not claimed.
 
 ## Provenance and precedence
 
@@ -37,7 +37,7 @@ The customer's gateway, application and job acceptance journeys are expressed be
 | R21 | Acceptance journey: scheduled/background run to failed attempt to retry/recovery, with persistent failure history and correct current health. |
 | R22 | Acceptance includes adversarial cross-organization denial plus pipeline outage/recovery and acknowledged-ingestion node-failure drills. |
 | R23 | One shared architecture/specification and separate independently testable plans for engines, SDK/capture, investigation UI, incident workflow, deployment/conformance and customer adoption. Preserve all scope; a first vertical slice is not the complete product. |
-| R24 | Obtain full design approval before product implementation. Execution method remains unselected. Product ownership does not authorize customer production changes. |
+| R24 | Obtain full design approval before product implementation. Approved on 2026-11-03; execution uses m1 implementation subagents and m2 reviewers. Product ownership does not authorize customer production changes. |
 
 ## Decisions not inherited
 

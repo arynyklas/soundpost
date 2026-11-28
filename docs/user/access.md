@@ -1,0 +1,36 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
+# Access to Soundpost
+
+Open the installation’s trusted HTTPS origin. The production browser bundle and `/api/v1` must be served by the same Soundpost process/origin. Never disable certificate checks or use a development proxy for authentication acceptance.
+
+## First boot
+
+Choose **First boot** and supply the one-use token from `bootstrap.token` in the installation's data directory (the service log names the file but never prints the token), your email and a password of at least sixteen bytes. No default password, public signup or role selector exists. A successful request consumes the token. First boot on an ordinary installation creates the first instance administrator. On a restored installation the same form creates a recovery administrator; see Restored installations below. The UI never claims that old restored identities are active.
+
+## Local account and recovery
+
+Choose **Local account**, enter your password and, when enabled, a TOTP or one-use recovery code. Account access offers authenticator enrollment through the actual authority. Enter the displayed secret in an authenticator and confirm its current code. Save the returned recovery codes offline immediately; they are not retrievable later. They remain only in browser component memory until explicit dismissal, logout, authoritative session denial or a focus/navigation refresh. A transient validation outage hides protected views without discarding undismissed codes; confirmed access restores the view. Do not capture secrets in screenshots or shared logs. An already-used authenticator/recovery code is not reusable.
+
+## Single sign-on
+
+Choose **Single sign-on** and supply administrator-provided organization and provider IDs. Soundpost redirects to the configured HTTPS provider and consumes its real authorization code using PKCE. Only explicit provider-subject mappings to admitted local accounts work. An email domain or organization membership does not automatically grant project data. The server validates issuer, audience, nonce, state and browser binding; a failed callback does not create a session.
+
+## Session and permissions
+
+The host-only session cookie is Secure, HttpOnly and SameSite Strict. CSRF tokens stay in application memory; no bearer credentials are put in browser storage. Sign out revokes the server session. Fresh reauthentication rotates the session and CSRF token. The boundary revalidates on focus, browser navigation and every five seconds. Authoritative 401/403 denial clears authenticated content and transient secrets; network/5xx failure instead pauses protected views and reports unavailable validation without claiming that the session expired. A changed account triggers a fresh boundary load. Server release-time scope validation remains authoritative, not this browser poll.
+
+Organization listings are the actual administrative read response, not a project entitlement inventory. Empty and forbidden results remain explicit. Telemetry, restricted raw sources, artifacts, replay and profiles have independent permissions. This access page does not invent a queue or healthy status when investigation surfaces are absent.
+
+Instance elevation selects explicitly returned organizations, requires current password/MFA and a reason, and requests a committed audit before accepting the real returned handle. It expires after fifteen minutes. Focus/navigation clears the elevated view; expiry removes its keyed content. Clearing the view is not server-side revocation of the handle; server expiry/session revocation remain authoritative. Ordinary/project administrators cannot gain instance authority by changing this UI.
+
+The request form is on the **Account** page and, for an account that administers organizations, above the result of **Metrics** and **Logs**, so an elevation is requested on the page where it is spent (navigating clears it). The notice "Scoped elevation active" and **Clear elevated view** appear on whichever of these pages you are on.
+
+While an elevation is active, the Explore query and format requests for an organization you selected carry its handle (`elevation`), so the same server route that refuses an organization administrator without a data grant answers you, and the page says in words that the answer is an audited elevated read. The handle is sent only for an organization selected when you elevated, only before it expires, and never on the live log view (the server refuses elevated live streams). The read is audited by the server before data is returned; if the audit cannot commit, the read fails closed. Navigating, returning to the window, expiry or **Clear elevated view** removes the handle, so the next query is the ordinary one. The server's throttle on elevation reads that found nothing (30 in five minutes per session) answers HTTP 429 `rate_limited`, which the page shows as **Rate limited** with the request ID.
+
+Explore also has an optional **Minimum data position** (one `group:index` per line, the cursor an ingest receipt returns in `X-Soundpost-Cursor`, or one a previous answer listed under its shard cursors). A read that has not reached it is not shown as complete: without partial results the query is refused with error code `stale`; with partial results the project is shown as **Stale**.
+
+## Restored installations
+
+After a disaster restore (`soundpost backup restore` and `activate`) the installation is bootstrap-only. Every earlier session, token, source credential and sender is inactive, and so is every account, membership, organization administrator, grant, team, source reader and integration the backup held; an old password does not sign in. The one-time token for the first administrator is in `bootstrap.token` of the restored data directory (the service log names the file and never prints the token). Choose **First boot**, supply that token and a new email and password: this creates a recovery administrator and restores nothing.
+
+While anything is still inactive the account page shows **Restored installation: access is bootstrap-only** with the number of inactive items and the list (`POST /api/v1/restore/items`, instance administrator only; `GET /api/v1/session` carries `restore.pending` for every signed-in account and omits it when nothing is pending). Each item has its own **Reauthorize** button: you give a reason and your current password (or authenticator code), the session is freshly authenticated, and `POST /api/v1/restore/reconcile` reinstates exactly that item as of the backup and commits an audit record (`restore.reconcile.<kind>`) in the same transaction; the page shows the audit record ID. Reauthorizing an account grants nothing by itself: its membership, administrator role and grants are separate items. A source is reissued a new credential, shown once; the old secret is never revived. A restored account cannot reauthorize restored items, and a single sign-on provider of the backup is listed but never offered for reactivation here: register it again against the current identity authority. Logouts, revocations and demotions made after the backup are not undone by a restore.

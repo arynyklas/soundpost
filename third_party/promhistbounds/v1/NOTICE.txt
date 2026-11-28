@@ -1,0 +1,4 @@
+Exponential bucket-bound mantissa table (schemas 0-8) from the Prometheus project, model/histogram/generic.go.
+Copyright The Prometheus Authors. Apache License 2.0 terms are retained in LICENSE; the upstream NOTICE files of both pinned releases are retained verbatim as UPSTREAM-NOTICE-3.13.5 and UPSTREAM-NOTICE-3.1.0.
+This directory carries numeric data only (511 float64 constants identical in Prometheus 3.1.0 and 3.13.5), not Prometheus engine, parser, evaluator or storage code; the histogram arithmetic that uses it is first-party.
+Exact pinned source URLs, SHA-256 values, the independently recomputed table digest and the approval rationale are in provenance.json.

@@ -1,0 +1,14 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Accessibility rules that apply to the whole application (05.09). No inline styles are used (the CSP forbids them).
+   Reduced motion is already enforced by the @media (prefers-reduced-motion:reduce) rule at the end of style.css; the
+   accessibility spec proves it against an author rule that tries to animate. */
+
+/* Focus moved to the main landmark by the skip link is a destination, not a control: no ring around the whole page. */
+main[tabindex="-1"]:focus{outline:none}
+/* Headings that receive focus after a section or entity change show where the user is. */
+h1:focus-visible,h2:focus-visible,h3:focus-visible,h4:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+/* Forced-colors (Windows high contrast): state borders must stay visible when author colours are replaced. */
+@media (forced-colors:active){
+ .status,.badge,.banner,.frame,.project-panel{border-color:CanvasText}
+}

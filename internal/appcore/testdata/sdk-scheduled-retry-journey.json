@@ -1,0 +1,51 @@
+[
+ {
+  "attempt_id": "f70e390e2a66d9866b3e7b2c27c6c2fe",
+  "job_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_ns": "1699999205000000000",
+  "ordinal": "1",
+  "producer_epoch": "35f0889dfeaf889d2bca237a48058081",
+  "run_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schedule_occurrence": "s.1699999200000000000.f0.4bda1821",
+  "sequence": "1",
+  "state": "started",
+  "terminal_ns": null
+ },
+ {
+  "attempt_id": "f70e390e2a66d9866b3e7b2c27c6c2fe",
+  "cause_error": "418a5aa40bb3bf91737c9928bd085e52",
+  "job_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_ns": "1699999205000000000",
+  "ordinal": "1",
+  "producer_epoch": "35f0889dfeaf889d2bca237a48058081",
+  "run_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schedule_occurrence": "s.1699999200000000000.f0.4bda1821",
+  "sequence": "2",
+  "state": "failed",
+  "terminal_ns": "1699999220000000000"
+ },
+ {
+  "attempt_id": "63f8c9f220074849978ebe1a938db5e6",
+  "job_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_ns": "1699999260000000000",
+  "ordinal": "2",
+  "producer_epoch": "35f0889dfeaf889d2bca237a48058081",
+  "run_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schedule_occurrence": "s.1699999200000000000.f0.4bda1821",
+  "sequence": "3",
+  "state": "started",
+  "terminal_ns": null
+ },
+ {
+  "attempt_id": "63f8c9f220074849978ebe1a938db5e6",
+  "job_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_ns": "1699999260000000000",
+  "ordinal": "2",
+  "producer_epoch": "35f0889dfeaf889d2bca237a48058081",
+  "run_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schedule_occurrence": "s.1699999200000000000.f0.4bda1821",
+  "sequence": "4",
+  "state": "succeeded",
+  "terminal_ns": "1699999290000000000"
+ }
+]

@@ -1,0 +1,4431 @@
+{
+  "observation": {
+    "expected": {
+      "org": "e3e629977d4bee3cfb066bd07872f759",
+      "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+      "other_org": "ed913997b1d495bb0202174b6e4cc73b",
+      "other_project": "1773b5bb4fac13ee49f57256ede11cf2",
+      "web_source": "5db2d5a79ff644195e5da29804029c4e",
+      "web_build": "893b5f18e4958052c1d24a99deff1d89",
+      "job": "bb06f0be745e818fc0459f2fb7527f65",
+      "run": "638309dea3cb1bcf411d6591f8d9a89b",
+      "throw_source": "src/receipt.ts",
+      "throw_line": 24,
+      "throw_column": 10,
+      "unpriced_item": "sku-404",
+      "canaries": [
+        "CANARY_BODY_7f3a",
+        "CANARY_PROMPT_9b2f",
+        "CANARY_SQL_LITERAL_5d1e"
+      ],
+      "required_versions": [
+        "go",
+        "bun",
+        "node_linux",
+        "python",
+        "chrome",
+        "postgres",
+        "soundpost",
+        "postgres_server_binary"
+      ]
+    },
+    "direct_trace": "e527c971015611d25531b695efe6835a",
+    "ui_trace": "016f894fa7d59cdc52df608ed9039a7d",
+    "reads": [
+      {
+        "actor": "reader-a",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "e527c971015611d25531b695efe6835a",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "trace": "e527c971015611d25531b695efe6835a",
+          "state": "ready",
+          "partial": false,
+          "path": {
+            "trace_id": "e527c971015611d25531b695efe6835a",
+            "span_count": 6,
+            "spans": [
+              {
+                "span_id": "2d1539b843e428db",
+                "parent_id": null,
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1795085786600000000",
+                "end_wall_ns": "1795085786897000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "296527721",
+                  "max_ns": "296527721",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786600000000"
+              },
+              {
+                "span_id": "ccf443a41c634f3c",
+                "parent_id": "2d1539b843e428db",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "api",
+                "start_wall_ns": "1795085786603000000",
+                "end_wall_ns": "1795085786891000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "288456332",
+                  "max_ns": "288456332",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786603000000"
+              },
+              {
+                "span_id": "977a589ea7f36b40",
+                "parent_id": "ccf443a41c634f3c",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1795085786614081139",
+                "end_wall_ns": "1795085786890940329",
+                "duration": {
+                  "known": true,
+                  "min_ns": "276857924",
+                  "max_ns": "276857924",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786890941896"
+              },
+              {
+                "span_id": "935624e5de1009ef",
+                "parent_id": "977a589ea7f36b40",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1795085786831033794",
+                "end_wall_ns": "1795085786832271649",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1237905",
+                  "max_ns": "1237905",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786832282066"
+              },
+              {
+                "span_id": "befed027af214f73",
+                "parent_id": "977a589ea7f36b40",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1795085786832503779",
+                "end_wall_ns": "1795085786833791325",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1288717",
+                  "max_ns": "1288717",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786833800289"
+              },
+              {
+                "span_id": "537aaed74a334806",
+                "parent_id": "977a589ea7f36b40",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "dependency",
+                "start_wall_ns": "1795085786833979215",
+                "end_wall_ns": "1795085786890422507",
+                "duration": {
+                  "known": true,
+                  "min_ns": "56445945",
+                  "max_ns": "56445945",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085786890446467"
+              }
+            ],
+            "trees": [
+              {
+                "root_span_id": "2d1539b843e428db",
+                "orphan": false,
+                "duration": {
+                  "known": true,
+                  "min_ns": "296527721",
+                  "max_ns": "296527721",
+                  "basis": "same_domain_monotonic"
+                },
+                "segments": [
+                  {
+                    "span_id": "2d1539b843e428db",
+                    "depth": 0,
+                    "self": {
+                      "known": true,
+                      "min_ns": "8071389",
+                      "max_ns": "8071389",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "ccf443a41c634f3c",
+                    "depth": 1,
+                    "self": {
+                      "known": true,
+                      "min_ns": "11598408",
+                      "max_ns": "11598408",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "977a589ea7f36b40",
+                    "depth": 2,
+                    "self": {
+                      "known": true,
+                      "min_ns": "217885357",
+                      "max_ns": "217885357",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "935624e5de1009ef",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1237905",
+                      "max_ns": "1237905",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "befed027af214f73",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1288717",
+                      "max_ns": "1288717",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "537aaed74a334806",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "56445945",
+                      "max_ns": "56445945",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  }
+                ]
+              }
+            ],
+            "observed": {
+              "known": true,
+              "min_ns": "296527721",
+              "max_ns": "296527721",
+              "basis": "same_domain_monotonic"
+            },
+            "edges": [],
+            "clock_issues": [
+              {
+                "span_id": "977a589ea7f36b40",
+                "parent_id": "ccf443a41c634f3c",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "977a589ea7f36b40",
+                "parent_id": "ccf443a41c634f3c",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              }
+            ],
+            "unlike_clock_domains": true,
+            "max_uncertainty_ns": "4611686018427387904",
+            "sampling": {
+              "kept": 6,
+              "dropped": 0,
+              "min_probability": 1,
+              "sampled": false,
+              "invalid_probability": 0
+            },
+            "late_spans": [],
+            "producer_gaps": [],
+            "complete": false,
+            "reasons": [
+              "clock_uncertain"
+            ]
+          },
+          "sections": [
+            {
+              "name": "spans",
+              "state": "ready"
+            },
+            {
+              "name": "links",
+              "state": "ready"
+            }
+          ]
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "ed913997b1d495bb0202174b6e4cc73b",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "e527c971015611d25531b695efe6835a",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "71f95b59f43f5c50c0140e81b4ada599"
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "e527c971015611d25531b695efe6835a",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "54796ba26f93e6e74121df1df1631535"
+        }
+      },
+      {
+        "actor": "reader-a",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "016f894fa7d59cdc52df608ed9039a7d",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "trace": "016f894fa7d59cdc52df608ed9039a7d",
+          "state": "ready",
+          "partial": false,
+          "path": {
+            "trace_id": "016f894fa7d59cdc52df608ed9039a7d",
+            "span_count": 8,
+            "spans": [
+              {
+                "span_id": "d612058814d83c9d",
+                "parent_id": null,
+                "span_kind": "internal",
+                "operation": "ui.action",
+                "status": "error",
+                "start_wall_ns": "1795085788446000000",
+                "end_wall_ns": "1795085788472000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "25500000",
+                  "max_ns": "25500000",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788446000000"
+              },
+              {
+                "span_id": "abf3f87613ef46c5",
+                "parent_id": "d612058814d83c9d",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "gateway",
+                "start_wall_ns": "1795085788447000000",
+                "end_wall_ns": "1795085788466000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "19700000",
+                  "max_ns": "19700000",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788447000000"
+              },
+              {
+                "span_id": "4df153417c54ec92",
+                "parent_id": "abf3f87613ef46c5",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1795085788450000000",
+                "end_wall_ns": "1795085788465000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "14919718",
+                  "max_ns": "14919718",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788450000000"
+              },
+              {
+                "span_id": "e7ba78513d808d73",
+                "parent_id": "4df153417c54ec92",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "api",
+                "start_wall_ns": "1795085788450000000",
+                "end_wall_ns": "1795085788465000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "14241024",
+                  "max_ns": "14241024",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788450000000"
+              },
+              {
+                "span_id": "6359e7309e852acf",
+                "parent_id": "e7ba78513d808d73",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1795085788453428657",
+                "end_wall_ns": "1795085788464811966",
+                "duration": {
+                  "known": true,
+                  "min_ns": "11381969",
+                  "max_ns": "11381969",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788464813020"
+              },
+              {
+                "span_id": "09cbeba6ab417800",
+                "parent_id": "6359e7309e852acf",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1795085788460375681",
+                "end_wall_ns": "1795085788461709875",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1333611",
+                  "max_ns": "1333611",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788461715556"
+              },
+              {
+                "span_id": "4d1fd6e6d1f664bd",
+                "parent_id": "6359e7309e852acf",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1795085788461821970",
+                "end_wall_ns": "1795085788462781087",
+                "duration": {
+                  "known": true,
+                  "min_ns": "960134",
+                  "max_ns": "960134",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788462784879"
+              },
+              {
+                "span_id": "7e3042fb45884f5e",
+                "parent_id": "6359e7309e852acf",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "dependency",
+                "start_wall_ns": "1795085788462912040",
+                "end_wall_ns": "1795085788464593090",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1681377",
+                  "max_ns": "1681377",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": [],
+                "reported_wall_ns": "1795085788464595368"
+              }
+            ],
+            "trees": [
+              {
+                "root_span_id": "d612058814d83c9d",
+                "orphan": false,
+                "duration": {
+                  "known": true,
+                  "min_ns": "25500000",
+                  "max_ns": "25500000",
+                  "basis": "same_domain_monotonic"
+                },
+                "segments": [
+                  {
+                    "span_id": "d612058814d83c9d",
+                    "depth": 0,
+                    "self": {
+                      "known": true,
+                      "min_ns": "5800000",
+                      "max_ns": "5800000",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "abf3f87613ef46c5",
+                    "depth": 1,
+                    "self": {
+                      "known": true,
+                      "min_ns": "4780282",
+                      "max_ns": "4780282",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "4df153417c54ec92",
+                    "depth": 2,
+                    "self": {
+                      "known": true,
+                      "min_ns": "678694",
+                      "max_ns": "678694",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "e7ba78513d808d73",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "2859055",
+                      "max_ns": "2859055",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "6359e7309e852acf",
+                    "depth": 4,
+                    "self": {
+                      "known": true,
+                      "min_ns": "7406847",
+                      "max_ns": "7406847",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "09cbeba6ab417800",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1333611",
+                      "max_ns": "1333611",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "4d1fd6e6d1f664bd",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "960134",
+                      "max_ns": "960134",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "7e3042fb45884f5e",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1681377",
+                      "max_ns": "1681377",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  }
+                ]
+              }
+            ],
+            "observed": {
+              "known": true,
+              "min_ns": "25500000",
+              "max_ns": "25500000",
+              "basis": "same_domain_monotonic"
+            },
+            "edges": [],
+            "clock_issues": [
+              {
+                "span_id": "4df153417c54ec92",
+                "parent_id": "abf3f87613ef46c5",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "4df153417c54ec92",
+                "parent_id": "abf3f87613ef46c5",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "6359e7309e852acf",
+                "parent_id": "e7ba78513d808d73",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "6359e7309e852acf",
+                "parent_id": "e7ba78513d808d73",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              }
+            ],
+            "unlike_clock_domains": true,
+            "max_uncertainty_ns": "4611686018427387904",
+            "sampling": {
+              "kept": 8,
+              "dropped": 0,
+              "min_probability": 1,
+              "sampled": false,
+              "invalid_probability": 0
+            },
+            "late_spans": [],
+            "producer_gaps": [],
+            "complete": false,
+            "reasons": [
+              "clock_uncertain"
+            ]
+          },
+          "targets": [
+            {
+              "span_id": "d612058814d83c9d",
+              "kind": "error",
+              "id": "26f2a0bd41a89ff18a5b873e4fad58f9",
+              "relation": "explicit",
+              "available": true,
+              "issue_id": "59a9fbb139685f39de9f2a162e1d6f50"
+            }
+          ],
+          "sections": [
+            {
+              "name": "spans",
+              "state": "ready"
+            },
+            {
+              "name": "links",
+              "state": "ready"
+            }
+          ]
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "ed913997b1d495bb0202174b6e4cc73b",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "016f894fa7d59cdc52df608ed9039a7d",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "0ea83ffc26099bb678d5f1496efd911d"
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "016f894fa7d59cdc52df608ed9039a7d",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "dc4d59838a5996f5d2f6327abef7ca58"
+        }
+      }
+    ],
+    "errors": [
+      {
+        "issue": "59a9fbb139685f39de9f2a162e1d6f50",
+        "occurrence": "26f2a0bd41a89ff18a5b873e4fad58f9",
+        "read": {
+          "route": "/api/v1/evidence/occurrence",
+          "actor": "analyst",
+          "status": 200,
+          "body": {
+            "org": "e3e629977d4bee3cfb066bd07872f759",
+            "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+            "issue": "59a9fbb139685f39de9f2a162e1d6f50",
+            "occurrence": "26f2a0bd41a89ff18a5b873e4fad58f9",
+            "state": "ready",
+            "detail": {
+              "exception_class": "Error",
+              "mechanism": "manual",
+              "handled": true,
+              "fatal": false,
+              "code": null,
+              "build_id": "893b5f18e4958052c1d24a99deff1d89",
+              "trace_id": "016f894fa7d59cdc52df608ed9039a7d",
+              "span_id": "d612058814d83c9d",
+              "frames": [
+                {
+                  "module_id": "assets/index-BXThAc6x.js",
+                  "function": "vi",
+                  "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                  "line": 3,
+                  "column": 37228,
+                  "in_app": true,
+                  "async": false
+                },
+                {
+                  "module_id": "assets/index-BXThAc6x.js",
+                  "function": "\u003canonymous\u003e",
+                  "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                  "line": 3,
+                  "column": 74060,
+                  "in_app": true,
+                  "async": false
+                },
+                {
+                  "module_id": "assets/index-BXThAc6x.js",
+                  "function": "_i.withSpan",
+                  "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                  "line": 3,
+                  "column": 31456,
+                  "in_app": true,
+                  "async": true
+                },
+                {
+                  "module_id": "assets/index-BXThAc6x.js",
+                  "function": "f",
+                  "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                  "line": 3,
+                  "column": 73695,
+                  "in_app": true,
+                  "async": true
+                }
+              ],
+              "exception_graph": {
+                "nodes": [
+                  {
+                    "id": 0,
+                    "exception_class": "Error",
+                    "frames": [
+                      {
+                        "module_id": "assets/index-BXThAc6x.js",
+                        "function": "vi",
+                        "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                        "line": 3,
+                        "column": 37228,
+                        "in_app": true,
+                        "async": false
+                      },
+                      {
+                        "module_id": "assets/index-BXThAc6x.js",
+                        "function": "\u003canonymous\u003e",
+                        "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                        "line": 3,
+                        "column": 74060,
+                        "in_app": true,
+                        "async": false
+                      },
+                      {
+                        "module_id": "assets/index-BXThAc6x.js",
+                        "function": "_i.withSpan",
+                        "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                        "line": 3,
+                        "column": 31456,
+                        "in_app": true,
+                        "async": true
+                      },
+                      {
+                        "module_id": "assets/index-BXThAc6x.js",
+                        "function": "f",
+                        "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+                        "line": 3,
+                        "column": 73695,
+                        "in_app": true,
+                        "async": true
+                      }
+                    ],
+                    "context_suppressed": false
+                  }
+                ],
+                "edges": [],
+                "reasons": [
+                  "foreign_or_custom_error_class"
+                ]
+              }
+            },
+            "sections": [
+              {
+                "name": "occurrence_detail",
+                "state": "ready"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "job_run": {
+      "route": "/api/v1/jobs/view",
+      "actor": "reader-a",
+      "status": 200,
+      "body": {
+        "org": "e3e629977d4bee3cfb066bd07872f759",
+        "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "job": "bb06f0be745e818fc0459f2fb7527f65",
+        "state": "ready",
+        "permission": "telemetry.read",
+        "evaluated_at_ns": "1795085803572116116",
+        "source": {
+          "version": "4",
+          "cursor": {
+            "group": "547215a6cfd9d06ebd66e26bbb91327e",
+            "index": "3"
+          }
+        },
+        "erased": false,
+        "definition_revisions": 0,
+        "health": {
+          "status": "succeeded",
+          "as_of_ns": "0",
+          "complete": true,
+          "reasons": [
+            "attempt_succeeded",
+            "run_recovered_after_retry"
+          ],
+          "evidence": {
+            "occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+            "run": "638309dea3cb1bcf411d6591f8d9a89b",
+            "attempt": "e59bddca2bd0427cb96c48ab9d0bc9f8",
+            "attempt_state": "succeeded",
+            "attempt_count": 2,
+            "cause_trace": "8df422cb035801c2fe656d3021329442"
+          }
+        },
+        "observer": {
+          "state": "none",
+          "expected_schedule": false
+        },
+        "loss": {
+          "intervals": [],
+          "total": 0,
+          "affects_current_health": false
+        },
+        "total_runs": 1,
+        "total_attempts": 2,
+        "compaction": {
+          "runs": "0",
+          "through_ns": "0"
+        },
+        "latest_occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+        "runs": [
+          {
+            "id": "638309dea3cb1bcf411d6591f8d9a89b",
+            "occurrence": {
+              "key": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+              "scheduled": false,
+              "fold": 0
+            },
+            "status": "recovered",
+            "recovered": true,
+            "first_started_ns": "1795085789319948022",
+            "final_attempt": "e59bddca2bd0427cb96c48ab9d0bc9f8",
+            "attempt_count": 2,
+            "failed_attempts": 1,
+            "basis_of_health": true,
+            "overlaps": [],
+            "overlap_count": 0
+          }
+        ],
+        "run": {
+          "id": "638309dea3cb1bcf411d6591f8d9a89b",
+          "occurrence": {
+            "key": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+            "scheduled": false,
+            "fold": 0
+          },
+          "status": "recovered",
+          "recovered": true,
+          "first_started_ns": "1795085789319948022",
+          "final_attempt": "e59bddca2bd0427cb96c48ab9d0bc9f8",
+          "attempt_count": 2,
+          "failed_attempts": 1,
+          "basis_of_health": true,
+          "overlaps": [],
+          "overlap_count": 0,
+          "attempts": [
+            {
+              "id": "e958041bc37c2500eee91cba2fb12f2f",
+              "ordinal": "1",
+              "started": true,
+              "observed_ns": "1795085789319948022",
+              "terminal": {
+                "state": "failed",
+                "at_ns": "1795085789559622935"
+              },
+              "effective": "failed",
+              "corrections": [],
+              "events_accepted": 2,
+              "cause_trace": "174b035a6365b800d9bacd8320b9d830",
+              "cause_error": "fee201f0635caef3b498c8d4d5856814",
+              "final": false,
+              "after_newer_occurrence": false
+            },
+            {
+              "id": "e59bddca2bd0427cb96c48ab9d0bc9f8",
+              "ordinal": "2",
+              "started": true,
+              "observed_ns": "1795085789810038284",
+              "terminal": {
+                "state": "succeeded",
+                "at_ns": "1795085790223403972"
+              },
+              "effective": "succeeded",
+              "corrections": [],
+              "events_accepted": 2,
+              "cause_trace": "8df422cb035801c2fe656d3021329442",
+              "final": true,
+              "after_newer_occurrence": false
+            }
+          ]
+        },
+        "sections": [
+          {
+            "name": "attempts",
+            "state": "ready"
+          },
+          {
+            "name": "health",
+            "state": "ready"
+          },
+          {
+            "name": "observer",
+            "state": "ready"
+          },
+          {
+            "name": "loss",
+            "state": "ready"
+          }
+        ]
+      }
+    },
+    "frames": {
+      "route": "/api/v1/evidence/frames",
+      "actor": "builder",
+      "status": 200,
+      "body": {
+        "org": "e3e629977d4bee3cfb066bd07872f759",
+        "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "build": "893b5f18e4958052c1d24a99deff1d89",
+        "state": "ready",
+        "frames": [
+          {
+            "original": {
+              "module_id": "assets/index-BXThAc6x.js",
+              "function": "vi",
+              "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+              "line": 3,
+              "column": 37228,
+              "in_app": true,
+              "async": false
+            },
+            "reason": "resolved",
+            "resolved": {
+              "source": "src/receipt.ts",
+              "line": 24,
+              "column": 10
+            },
+            "map_sha256": "4df12f9377c1346f14ff2dbb6d6700d4c3a16992ee371702dac72ace40e679fd",
+            "source": {
+              "state": "withheld",
+              "reason": "sources_not_requested"
+            }
+          },
+          {
+            "original": {
+              "module_id": "assets/index-BXThAc6x.js",
+              "function": "\u003canonymous\u003e",
+              "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+              "line": 3,
+              "column": 74060,
+              "in_app": true,
+              "async": false
+            },
+            "reason": "resolved",
+            "resolved": {
+              "source": "src/main.ts",
+              "function": "formatReceipt",
+              "line": 84,
+              "column": 27
+            },
+            "map_sha256": "4df12f9377c1346f14ff2dbb6d6700d4c3a16992ee371702dac72ace40e679fd",
+            "source": {
+              "state": "withheld",
+              "reason": "sources_not_requested"
+            }
+          },
+          {
+            "original": {
+              "module_id": "assets/index-BXThAc6x.js",
+              "function": "_i.withSpan",
+              "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+              "line": 3,
+              "column": 31456,
+              "in_app": true,
+              "async": true
+            },
+            "reason": "resolved",
+            "resolved": {
+              "source": "external/client.ts",
+              "line": 151,
+              "column": 18
+            },
+            "map_sha256": "4df12f9377c1346f14ff2dbb6d6700d4c3a16992ee371702dac72ace40e679fd",
+            "source": {
+              "state": "withheld",
+              "reason": "sources_not_requested"
+            }
+          },
+          {
+            "original": {
+              "module_id": "assets/index-BXThAc6x.js",
+              "function": "f",
+              "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+              "line": 3,
+              "column": 73695,
+              "in_app": true,
+              "async": true
+            },
+            "reason": "resolved",
+            "resolved": {
+              "source": "src/main.ts",
+              "line": 72,
+              "column": 4
+            },
+            "map_sha256": "4df12f9377c1346f14ff2dbb6d6700d4c3a16992ee371702dac72ace40e679fd",
+            "source": {
+              "state": "withheld",
+              "reason": "sources_not_requested"
+            }
+          }
+        ],
+        "sections": [
+          {
+            "name": "symbolication",
+            "state": "ready"
+          }
+        ]
+      }
+    },
+    "page_error": {
+      "found": true,
+      "path": "assets/index-BXThAc6x.js",
+      "line": 3,
+      "column": 37229
+    },
+    "artifact": {
+      "uploaded": true,
+      "build": "893b5f18e4958052c1d24a99deff1d89",
+      "debug_id": "befc61a14b012ecf55426ede6732a450",
+      "artifact_id": "2b412d336565166033c6b8f38c0140e0",
+      "bundle_has_sourcemap_reference": false
+    },
+    "canary_flows": [
+      {
+        "canary": "CANARY_BODY_7f3a",
+        "reached": [
+          "dependency_prompt_counter",
+          "database_row"
+        ]
+      },
+      {
+        "canary": "CANARY_PROMPT_9b2f",
+        "reached": [
+          "dependency_prompt_counter"
+        ]
+      },
+      {
+        "canary": "CANARY_SQL_LITERAL_5d1e",
+        "reached": [
+          "postgres_statement_log"
+        ]
+      }
+    ],
+    "canary_leaks": null,
+    "replay": {
+      "attempted": true,
+      "admitted_chunks": 1,
+      "refusal": "",
+      "recorder_chunks": 3,
+      "stored_replay_rows": 3
+    },
+    "profile": {
+      "attempted": true,
+      "capability_status": "supported",
+      "capability_reason": "ok",
+      "stored_profile_rows": 1,
+      "stored_capability_rows": 3,
+      "stored_profile_samples": 30,
+      "capability_linked": true,
+      "sdk_enqueues_profile": true,
+      "profile_ids": [
+        "8628dfae0d9585406592c6d0944583b1"
+      ],
+      "chunk_capabilities": [
+        "b9031592cb8e2c6b166b94cc3bc452de"
+      ],
+      "stored_capabilities": [
+        {
+          "id": "136e7d758f433c9cff6e752e56340704",
+          "status": "unsupported",
+          "reason": "js_self_profiling_unavailable",
+          "method": "browser_js_self_profile",
+          "signal": "profile_chunk"
+        },
+        {
+          "id": "1e8908f50b60d0da95cfb220ab9274a7",
+          "status": "denied",
+          "reason": "document_policy_missing",
+          "method": "browser_js_self_profile",
+          "signal": "profile_chunk"
+        },
+        {
+          "id": "b9031592cb8e2c6b166b94cc3bc452de",
+          "status": "supported",
+          "reason": "ok",
+          "method": "browser_js_self_profile",
+          "signal": "profile_chunk"
+        }
+      ],
+      "read": {
+        "route": "/api/v1/profiles/view",
+        "actor": "analyst",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "profile": "8628dfae0d9585406592c6d0944583b1",
+          "state": "ready",
+          "partial": false,
+          "view": {
+            "profile_id": "8628dfae0d9585406592c6d0944583b1",
+            "process_id": "3ec2331ec7d90e2a422582cf258de186",
+            "project_id": "3fc3bcde3bdd8277f7dde1409274cd54",
+            "method": "runtime_cpu",
+            "units": "samples",
+            "clock": {
+              "wall_ns": "1795085793755000000",
+              "mono_ns": "0",
+              "domain": {
+                "host": "b61e1c015df786cf2affdab11da9eb5b",
+                "boot": "a25de2c87abc2703a7ac43cf9f443a7c",
+                "runtime": "ec22cf94126f5f75176929f3228f377d"
+              },
+              "uncertainty_ns": "18446744073709551615"
+            },
+            "frames": [
+              {
+                "module_id": "assets/index-BXThAc6x.js",
+                "function": "startProfile",
+                "artifact_id": "assets/index-BXThAc6x.js",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "assets/index-BXThAc6x.js",
+                "function": "Wi",
+                "artifact_id": "assets/index-BXThAc6x.js",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "assets/index-BXThAc6x.js",
+                "function": "Oa",
+                "artifact_id": "assets/index-BXThAc6x.js",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "assets/index-BXThAc6x.js",
+                "function": "profile",
+                "artifact_id": "assets/index-BXThAc6x.js",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "assets/index-BXThAc6x.js",
+                "function": "",
+                "artifact_id": "assets/index-BXThAc6x.js",
+                "offset": "0",
+                "reason": "not_captured"
+              }
+            ],
+            "stacks": [
+              {
+                "frames": [
+                  0,
+                  1,
+                  2,
+                  3
+                ]
+              },
+              {
+                "frames": [
+                  4
+                ]
+              }
+            ],
+            "samples": [
+              {
+                "at_ns": "0",
+                "stack": 0,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "6600000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "10300000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "20300000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "30700000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "40700000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "50900000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "60800000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "70900000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "81100000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "91100000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "101200000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "111200000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "121300000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "131500000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "141700000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "151800000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "161900000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "171900000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "182000000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "192000000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "202000000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "212200000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "222300000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "232300000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "242400000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "262600000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "272700000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "282700000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "292900000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              }
+            ],
+            "intervals": null,
+            "capabilities": [
+              {
+                "id": "b9031592cb8e2c6b166b94cc3bc452de",
+                "value": {
+                  "runtime": "Chromium/156.0.8078.80",
+                  "version": "156.0.8078.80",
+                  "build": "Chromium/156.0.8078.80",
+                  "os": "linux",
+                  "arch": "x86_64",
+                  "signal": "profile_chunk",
+                  "method": "browser_js_self_profile",
+                  "status": "supported",
+                  "reason": "ok",
+                  "coverage": {
+                    "frames": "partial",
+                    "threads": "partial",
+                    "workers": "none",
+                    "tasks": "none"
+                  },
+                  "clock_domain": {
+                    "host": "b61e1c015df786cf2affdab11da9eb5b",
+                    "boot": "a25de2c87abc2703a7ac43cf9f443a7c",
+                    "runtime": "ec22cf94126f5f75176929f3228f377d"
+                  },
+                  "expires_ns": "1795089393755000000"
+                }
+              }
+            ],
+            "loss": null,
+            "loss_count": "0",
+            "truncated": false,
+            "links": [],
+            "watermarks": [
+              {
+                "group": "3da50e43343bb6382f1bd5842b4df652",
+                "index": "10"
+              },
+              {
+                "group": "0bf2b4d0708ac79db05a6ed6dd82c0c8",
+                "index": "1"
+              },
+              {
+                "group": "2ce9c562b37ed4f41a1b2172f3e001d3",
+                "index": "2"
+              },
+              {
+                "group": "403a113ca7769d7d56fb7b3ac31a2ac4",
+                "index": "1"
+              },
+              {
+                "group": "e639cee856296d8dbdbb4e944348257f",
+                "index": "1"
+              },
+              {
+                "group": "03523d02bfb875f5bff01f57013b3cb4",
+                "index": "2"
+              },
+              {
+                "group": "9fce91561d508515cf4c279cdf009ab1",
+                "index": "3"
+              },
+              {
+                "group": "deb59e6c0cb6cf7d1685e674dae3ef07",
+                "index": "1"
+              },
+              {
+                "group": "c216bb7a643f91f99f56da5be9134903",
+                "index": "2"
+              },
+              {
+                "group": "c25839c794ddf4efa5ddff3fd1e9f6fd",
+                "index": "4"
+              },
+              {
+                "group": "0bbad8cc832e411069ea4f2f2d46f714",
+                "index": "1"
+              },
+              {
+                "group": "547215a6cfd9d06ebd66e26bbb91327e",
+                "index": "4"
+              },
+              {
+                "group": "75a95190b44cb9ea6d9a5a1971cac9af",
+                "index": "1"
+              },
+              {
+                "group": "3a5b3d1dcb5a5abc911089653b791ab6",
+                "index": "1"
+              },
+              {
+                "group": "6842ec4f4891934910bbd4bf1742dbde",
+                "index": "3"
+              },
+              {
+                "group": "074e8943ad3756266ee8afbb795aa5ec",
+                "index": "2"
+              },
+              {
+                "group": "48b3954e6539082f0714136430ca085b",
+                "index": "2"
+              },
+              {
+                "group": "08101687475e7d2806dc632e7e3ddb05",
+                "index": "2"
+              },
+              {
+                "group": "46e3c9f1ff9f401bdfa73c8a540508f6",
+                "index": "3"
+              },
+              {
+                "group": "9ab83e6eda6463b82fd5c81f6fafefcd",
+                "index": "0"
+              },
+              {
+                "group": "fb70a8d58ea861638eac44d87b81663d",
+                "index": "2"
+              },
+              {
+                "group": "7ed59faeebfd5736fef77f9c0a97524a",
+                "index": "4"
+              },
+              {
+                "group": "391d5a03ee7ed5cc5404e2945bfb950e",
+                "index": "0"
+              },
+              {
+                "group": "3d5c019211fd47dd4fc4c458e5baad2f",
+                "index": "4"
+              },
+              {
+                "group": "1ab3b46dbeeadd9ce8bcd279ce2aeee8",
+                "index": "3"
+              },
+              {
+                "group": "0639fc94cd37c03f189530c01d4ec1e4",
+                "index": "6"
+              },
+              {
+                "group": "176941ebadd0abc983dad944ca6d7ae3",
+                "index": "4"
+              },
+              {
+                "group": "4f00df3eeb5f7e0c5515bb29591f1111",
+                "index": "4"
+              },
+              {
+                "group": "ec64dc2e12ba12a48515772e490bd6fe",
+                "index": "0"
+              },
+              {
+                "group": "29ea2f7d24157f452e0c90938979eb0a",
+                "index": "2"
+              },
+              {
+                "group": "6f19821358ac1654f48d9d16388fee97",
+                "index": "1"
+              },
+              {
+                "group": "686f5c7cb4d177b6ee629344f70fb6f3",
+                "index": "2"
+              },
+              {
+                "group": "65d2cc3be28e0ff7651e9fc0a209dca6",
+                "index": "1"
+              },
+              {
+                "group": "7c5b62d3bd89e02ec3f7a33b4b7fa070",
+                "index": "1"
+              },
+              {
+                "group": "9e449852b65be2f49318da60284a41e1",
+                "index": "4"
+              },
+              {
+                "group": "e55a81d47e71914e59d76d8c06e329a0",
+                "index": "2"
+              },
+              {
+                "group": "70d924a0f74fc5ac3a6b4653b4f99129",
+                "index": "2"
+              },
+              {
+                "group": "e2316ebafb9a293dd9e0efb1c2a46975",
+                "index": "3"
+              },
+              {
+                "group": "ef970cd19ed0ab2d34ead64f9cc4df93",
+                "index": "1"
+              },
+              {
+                "group": "e9649e06d828f6c56f33a5a005f0fee3",
+                "index": "2"
+              },
+              {
+                "group": "b496bb56c383815ccd1083c3c27d23a2",
+                "index": "3"
+              },
+              {
+                "group": "afd4ef9c1c45033e69ebbd378ffe4ff8",
+                "index": "5"
+              },
+              {
+                "group": "51f1d3cb389a890cfce1d61cb63af4a3",
+                "index": "1"
+              },
+              {
+                "group": "6eb2709698cef6ad5a4cf9a59f3ed0db",
+                "index": "3"
+              },
+              {
+                "group": "521a0601306b292435d6435c3fb3bdc0",
+                "index": "0"
+              },
+              {
+                "group": "dfe8edc62754105887d150914bf9c3b0",
+                "index": "3"
+              },
+              {
+                "group": "e5abc205800a2bcf27f2333d0282c78a",
+                "index": "3"
+              },
+              {
+                "group": "5fe5ebdef2a008c1c943958505ff4b14",
+                "index": "1"
+              },
+              {
+                "group": "f0c4e1fe371a4d8ad6db8be48b17287f",
+                "index": "3"
+              },
+              {
+                "group": "91ac92ce5811b4e1d4c1afc09c95abc6",
+                "index": "2"
+              },
+              {
+                "group": "12b9f60b32a247c8f91ab2bfdc0cf3b9",
+                "index": "4"
+              },
+              {
+                "group": "17fa824d6649925253bfc74f4365366d",
+                "index": "2"
+              },
+              {
+                "group": "eb76a251c364c099f16482590a60b24a",
+                "index": "0"
+              },
+              {
+                "group": "909736cb7923f51aba8fb6c582982eec",
+                "index": "1"
+              },
+              {
+                "group": "b7fc4388c233e3b55df22776869139df",
+                "index": "2"
+              },
+              {
+                "group": "3b19e8ee30d2460d3489d569566a78f8",
+                "index": "3"
+              },
+              {
+                "group": "91ab784b37b0769fd9404aa8db0563fa",
+                "index": "2"
+              },
+              {
+                "group": "6e4c034e406fc7afa1ae7c85c0c105e0",
+                "index": "5"
+              },
+              {
+                "group": "420e8bc8ad6f4a2e37e51f4afd1c5825",
+                "index": "2"
+              },
+              {
+                "group": "084a27579d2d535a89b29906ee5c952c",
+                "index": "1"
+              },
+              {
+                "group": "62ad2ecb083f71c3f9b17abfafd11ae1",
+                "index": "3"
+              },
+              {
+                "group": "62b69f0f558712386401417da5b7ff3b",
+                "index": "2"
+              },
+              {
+                "group": "70bb16f228a646554e52174bb523bb05",
+                "index": "0"
+              },
+              {
+                "group": "99719e5e3d986871d4036fcd2b521270",
+                "index": "1"
+              }
+            ],
+            "completeness": "complete",
+            "reasons": null
+          },
+          "sections": [
+            {
+              "name": "profile",
+              "state": "ready"
+            }
+          ]
+        }
+      },
+      "console_errors": [],
+      "refusals": [
+        {
+          "variant": "denied",
+          "attempted": true,
+          "driver_status": "denied",
+          "driver_reason": "document_policy_missing",
+          "capability_id": "1e8908f50b60d0da95cfb220ab9274a7",
+          "ack_status": "obtained",
+          "ack_cursors": 1,
+          "flush_lost": 0,
+          "flush_pending": 0,
+          "console_errors": [
+            {
+              "text": "Document policy violation: js-profiling is not allowed in this document.",
+              "path": "/assets/index-BXThAc6x.js"
+            }
+          ],
+          "read": {
+            "route": "/api/v1/profiles/view",
+            "actor": "analyst",
+            "status": 404,
+            "body": {
+              "code": "not_found",
+              "retryable": false,
+              "detail": "not_found",
+              "request_id": "f75e61f8d3c7a3545617a99722b9e885"
+            }
+          }
+        },
+        {
+          "variant": "unsupported",
+          "attempted": true,
+          "driver_status": "unsupported",
+          "driver_reason": "js_self_profiling_unavailable",
+          "capability_id": "136e7d758f433c9cff6e752e56340704",
+          "ack_status": "obtained",
+          "ack_cursors": 1,
+          "flush_lost": 0,
+          "flush_pending": 0,
+          "console_errors": [],
+          "read": {
+            "route": "/api/v1/profiles/view",
+            "actor": "analyst",
+            "status": 404,
+            "body": {
+              "code": "not_found",
+              "retryable": false,
+              "detail": "not_found",
+              "request_id": "d3868fee9d5f7d3d89ca449bca0f7f8e"
+            }
+          }
+        }
+      ]
+    },
+    "runtime_profile": {
+      "attempted": true,
+      "method": "python_wall_samples",
+      "stored_profile_chunks": 1,
+      "stored_capability_records": 1,
+      "profile": "81a3ae8a8b7e997503f5fe126e662dde",
+      "read": {
+        "route": "/api/v1/profiles/view",
+        "actor": "analyst",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "profile": "81a3ae8a8b7e997503f5fe126e662dde",
+          "state": "incomplete",
+          "reason": "coverage_incomplete",
+          "partial": true,
+          "view": {
+            "profile_id": "81a3ae8a8b7e997503f5fe126e662dde",
+            "process_id": "f1ba3c65b884e96532979c98fb0fa6fd",
+            "project_id": "3fc3bcde3bdd8277f7dde1409274cd54",
+            "method": "runtime_cpu",
+            "units": "samples",
+            "clock": {
+              "wall_ns": "1795085789318374864",
+              "mono_ns": "0",
+              "domain": {
+                "host": "ac55a9cdabe7ee747cf33958c6ac6043",
+                "boot": "b1b6d8620d1ec2364789572070f5e719",
+                "runtime": "d6064ddaa4ae38c8a2294bdaf68b95bd"
+              },
+              "uncertainty_ns": "18446744073709551615"
+            },
+            "frames": [
+              {
+                "module_id": "external",
+                "function": "",
+                "artifact_id": "",
+                "offset": "0",
+                "reason": "not_captured"
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "begin_profile",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "main",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "\u003cmodule\u003e",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "work",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "run_attempt",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "api/telemetry.py",
+                "function": "Instruments.post_dependency",
+                "artifact_id": "api/telemetry.py",
+                "offset": "0",
+                "reason": ""
+              },
+              {
+                "module_id": "jobs/run.py",
+                "function": "summarise_catalog",
+                "artifact_id": "jobs/run.py",
+                "offset": "0",
+                "reason": ""
+              }
+            ],
+            "stacks": [
+              {
+                "frames": [
+                  0,
+                  1,
+                  2,
+                  3
+                ]
+              },
+              {
+                "frames": [
+                  0,
+                  4,
+                  5,
+                  2,
+                  3
+                ]
+              },
+              {
+                "frames": [
+                  0,
+                  6,
+                  4,
+                  5,
+                  2,
+                  3
+                ]
+              },
+              {
+                "frames": [
+                  2,
+                  3
+                ]
+              },
+              {
+                "frames": [
+                  7,
+                  4,
+                  5,
+                  2,
+                  3
+                ]
+              }
+            ],
+            "samples": [
+              {
+                "at_ns": "429000",
+                "stack": 0,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "2624000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "5196000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "7196000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "10366000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "11510000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "14971000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "15034000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "24464000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "24568000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "30201000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "30294000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "43180000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "43267000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "47355000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "47417000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "61453000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "61554000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "64532000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "65652000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "68058000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "71416000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "73463000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "73776000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "77121000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "77672000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "80730000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "82133000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "85642000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "85747000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "88085000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "91368000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "93792000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "93893000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "96145000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "99464000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "104382000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "104446000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "108706000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "108865000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "111639000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "115210000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "115313000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "119388000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "119451000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "126097000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "126203000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "130127000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "130279000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "132875000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "136764000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "136867000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "139353000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "141110000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "143454000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "147649000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "147720000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "151369000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "153616000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "157988000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "158066000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "164642000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "164687000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "171180000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "171216000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "186516000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "186649000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "189491000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "194939000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "195000000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "197069000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "199065000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "201060000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "203083000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "205112000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "207090000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "209076000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "211068000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "213100000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "215068000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "217066000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "219064000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "221065000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "223079000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "225087000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "227076000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "229068000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "231066000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "233097000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "235078000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "237120000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "239657000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "241084000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "243093000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "245121000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "247096000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "249065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "251081000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "253117000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "255086000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "257119000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "259125000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "261128000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "263076000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "265090000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "267079000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "269068000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "271063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "273107000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "275067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "277121000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "279071000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "281207000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "283082000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "285092000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "287081000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "289073000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "291209000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "293152000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "295069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "297072000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "299066000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "301065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "303062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "305067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "307069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "309115000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "311064000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "313066000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "315080000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "317074000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "319067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "321060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "323069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "325427000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "327075000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "329083000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "331064000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "333086000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "335062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "337063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "339069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "341114000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "343112000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "345072000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "347061000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "349065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "351066000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "353068000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "355064000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "357069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "359069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "361062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "363063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "365071000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "367068000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "369063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "371059000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "373073000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "375068000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "377074000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "379065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "381224000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "383072000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "385069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "388862000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "389092000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "391363000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "393069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "395072000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "397065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "399060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "401060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "403085000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "405106000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "407087000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "409195000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "411067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "413067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "415072000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "417068000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "419063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "421063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "423071000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "425076000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "427067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "429060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "431063000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "433060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "435207000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "437079000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "439069000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "441098000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "443074000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "445064000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "447066000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "449065000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "451067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "453062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "455066000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "457062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "459067000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "461062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "463088000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "465105000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "467078000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "469064000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "471081000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "473070000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "475061000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "477239000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "479076000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "481060000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "484256000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "485062000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "487085000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "489076000",
+                "stack": 3,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "492234000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "493234000",
+                "stack": 2,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "500160000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "500262000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "507407000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "507433000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "514755000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "514794000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "521973000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "522004000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "529193000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "529258000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "536412000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "536435000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "543682000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "543723000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "551002000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "551043000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "558321000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "558356000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "565511000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "565554000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "572694000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "572750000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "580004000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "580031000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "587237000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "587269000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "594417000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "594445000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "601665000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "601699000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "608950000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "608982000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "616117000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "616149000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "623288000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "623313000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "630516000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "630547000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "637699000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "637726000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "644901000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "644959000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "652078000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "652114000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "660228000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "660265000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "667446000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "667495000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "674659000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "674701000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "681815000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "681853000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "689114000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "689143000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "696487000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "696539000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "703699000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "703729000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "710880000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "710908000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "718101000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "718147000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "725319000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "725355000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "733953000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "733989000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "741230000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "741263000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "748426000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "748458000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "755716000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "755747000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "762893000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "762925000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "770121000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "770150000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "777311000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "777343000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "784558000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "784629000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "791808000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "791843000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "798983000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "799006000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "806224000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "806254000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "813439000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "813483000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "820639000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "820661000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "827890000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "827923000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "835066000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "835100000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "842298000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "842334000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "849663000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "849692000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "857081000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "857121000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "864276000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "864306000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "871498000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "871545000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "878780000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "878817000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "885893000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "885920000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "893076000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "893127000",
+                "stack": 4,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "895199000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "897233000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "899207000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "901233000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              },
+              {
+                "at_ns": "903603000",
+                "stack": 1,
+                "count": "1",
+                "thread": "1"
+              }
+            ],
+            "intervals": null,
+            "capabilities": [
+              {
+                "id": "39db002f707e8983ec159188fff9d5c9",
+                "value": {
+                  "runtime": "cpython",
+                  "version": "3.13.18",
+                  "build": "CPython Nov 11 2026 00:17:48 Clang 23.1.3 ",
+                  "os": "linux",
+                  "arch": "x86_64",
+                  "signal": "profile_chunk",
+                  "method": "python_wall_samples",
+                  "status": "supported",
+                  "reason": "ok",
+                  "coverage": {
+                    "frames": "partial",
+                    "threads": "partial",
+                    "workers": "none",
+                    "tasks": "none"
+                  },
+                  "clock_domain": {
+                    "host": "ac55a9cdabe7ee747cf33958c6ac6043",
+                    "boot": "b1b6d8620d1ec2364789572070f5e719",
+                    "runtime": "d6064ddaa4ae38c8a2294bdaf68b95bd"
+                  },
+                  "expires_ns": "1795089389318374864"
+                }
+              }
+            ],
+            "loss": null,
+            "loss_count": "146",
+            "truncated": false,
+            "links": [],
+            "watermarks": [
+              {
+                "group": "3da50e43343bb6382f1bd5842b4df652",
+                "index": "10"
+              },
+              {
+                "group": "0bf2b4d0708ac79db05a6ed6dd82c0c8",
+                "index": "1"
+              },
+              {
+                "group": "2ce9c562b37ed4f41a1b2172f3e001d3",
+                "index": "2"
+              },
+              {
+                "group": "403a113ca7769d7d56fb7b3ac31a2ac4",
+                "index": "1"
+              },
+              {
+                "group": "e639cee856296d8dbdbb4e944348257f",
+                "index": "1"
+              },
+              {
+                "group": "03523d02bfb875f5bff01f57013b3cb4",
+                "index": "2"
+              },
+              {
+                "group": "9fce91561d508515cf4c279cdf009ab1",
+                "index": "3"
+              },
+              {
+                "group": "deb59e6c0cb6cf7d1685e674dae3ef07",
+                "index": "1"
+              },
+              {
+                "group": "c216bb7a643f91f99f56da5be9134903",
+                "index": "2"
+              },
+              {
+                "group": "c25839c794ddf4efa5ddff3fd1e9f6fd",
+                "index": "4"
+              },
+              {
+                "group": "0bbad8cc832e411069ea4f2f2d46f714",
+                "index": "1"
+              },
+              {
+                "group": "547215a6cfd9d06ebd66e26bbb91327e",
+                "index": "4"
+              },
+              {
+                "group": "75a95190b44cb9ea6d9a5a1971cac9af",
+                "index": "1"
+              },
+              {
+                "group": "3a5b3d1dcb5a5abc911089653b791ab6",
+                "index": "1"
+              },
+              {
+                "group": "6842ec4f4891934910bbd4bf1742dbde",
+                "index": "3"
+              },
+              {
+                "group": "074e8943ad3756266ee8afbb795aa5ec",
+                "index": "2"
+              },
+              {
+                "group": "48b3954e6539082f0714136430ca085b",
+                "index": "2"
+              },
+              {
+                "group": "08101687475e7d2806dc632e7e3ddb05",
+                "index": "2"
+              },
+              {
+                "group": "46e3c9f1ff9f401bdfa73c8a540508f6",
+                "index": "3"
+              },
+              {
+                "group": "9ab83e6eda6463b82fd5c81f6fafefcd",
+                "index": "0"
+              },
+              {
+                "group": "fb70a8d58ea861638eac44d87b81663d",
+                "index": "2"
+              },
+              {
+                "group": "7ed59faeebfd5736fef77f9c0a97524a",
+                "index": "4"
+              },
+              {
+                "group": "391d5a03ee7ed5cc5404e2945bfb950e",
+                "index": "0"
+              },
+              {
+                "group": "3d5c019211fd47dd4fc4c458e5baad2f",
+                "index": "4"
+              },
+              {
+                "group": "1ab3b46dbeeadd9ce8bcd279ce2aeee8",
+                "index": "3"
+              },
+              {
+                "group": "0639fc94cd37c03f189530c01d4ec1e4",
+                "index": "6"
+              },
+              {
+                "group": "176941ebadd0abc983dad944ca6d7ae3",
+                "index": "4"
+              },
+              {
+                "group": "4f00df3eeb5f7e0c5515bb29591f1111",
+                "index": "4"
+              },
+              {
+                "group": "ec64dc2e12ba12a48515772e490bd6fe",
+                "index": "0"
+              },
+              {
+                "group": "29ea2f7d24157f452e0c90938979eb0a",
+                "index": "2"
+              },
+              {
+                "group": "6f19821358ac1654f48d9d16388fee97",
+                "index": "1"
+              },
+              {
+                "group": "686f5c7cb4d177b6ee629344f70fb6f3",
+                "index": "2"
+              },
+              {
+                "group": "65d2cc3be28e0ff7651e9fc0a209dca6",
+                "index": "1"
+              },
+              {
+                "group": "7c5b62d3bd89e02ec3f7a33b4b7fa070",
+                "index": "1"
+              },
+              {
+                "group": "9e449852b65be2f49318da60284a41e1",
+                "index": "4"
+              },
+              {
+                "group": "e55a81d47e71914e59d76d8c06e329a0",
+                "index": "2"
+              },
+              {
+                "group": "70d924a0f74fc5ac3a6b4653b4f99129",
+                "index": "2"
+              },
+              {
+                "group": "e2316ebafb9a293dd9e0efb1c2a46975",
+                "index": "3"
+              },
+              {
+                "group": "ef970cd19ed0ab2d34ead64f9cc4df93",
+                "index": "1"
+              },
+              {
+                "group": "e9649e06d828f6c56f33a5a005f0fee3",
+                "index": "2"
+              },
+              {
+                "group": "b496bb56c383815ccd1083c3c27d23a2",
+                "index": "3"
+              },
+              {
+                "group": "afd4ef9c1c45033e69ebbd378ffe4ff8",
+                "index": "5"
+              },
+              {
+                "group": "51f1d3cb389a890cfce1d61cb63af4a3",
+                "index": "1"
+              },
+              {
+                "group": "6eb2709698cef6ad5a4cf9a59f3ed0db",
+                "index": "3"
+              },
+              {
+                "group": "521a0601306b292435d6435c3fb3bdc0",
+                "index": "0"
+              },
+              {
+                "group": "dfe8edc62754105887d150914bf9c3b0",
+                "index": "3"
+              },
+              {
+                "group": "e5abc205800a2bcf27f2333d0282c78a",
+                "index": "3"
+              },
+              {
+                "group": "5fe5ebdef2a008c1c943958505ff4b14",
+                "index": "1"
+              },
+              {
+                "group": "f0c4e1fe371a4d8ad6db8be48b17287f",
+                "index": "3"
+              },
+              {
+                "group": "91ac92ce5811b4e1d4c1afc09c95abc6",
+                "index": "2"
+              },
+              {
+                "group": "12b9f60b32a247c8f91ab2bfdc0cf3b9",
+                "index": "4"
+              },
+              {
+                "group": "17fa824d6649925253bfc74f4365366d",
+                "index": "2"
+              },
+              {
+                "group": "eb76a251c364c099f16482590a60b24a",
+                "index": "0"
+              },
+              {
+                "group": "909736cb7923f51aba8fb6c582982eec",
+                "index": "1"
+              },
+              {
+                "group": "b7fc4388c233e3b55df22776869139df",
+                "index": "2"
+              },
+              {
+                "group": "3b19e8ee30d2460d3489d569566a78f8",
+                "index": "3"
+              },
+              {
+                "group": "91ab784b37b0769fd9404aa8db0563fa",
+                "index": "2"
+              },
+              {
+                "group": "6e4c034e406fc7afa1ae7c85c0c105e0",
+                "index": "5"
+              },
+              {
+                "group": "420e8bc8ad6f4a2e37e51f4afd1c5825",
+                "index": "2"
+              },
+              {
+                "group": "084a27579d2d535a89b29906ee5c952c",
+                "index": "1"
+              },
+              {
+                "group": "62ad2ecb083f71c3f9b17abfafd11ae1",
+                "index": "3"
+              },
+              {
+                "group": "62b69f0f558712386401417da5b7ff3b",
+                "index": "2"
+              },
+              {
+                "group": "70bb16f228a646554e52174bb523bb05",
+                "index": "0"
+              },
+              {
+                "group": "99719e5e3d986871d4036fcd2b521270",
+                "index": "1"
+              }
+            ],
+            "completeness": "partial",
+            "reasons": [
+              "coverage_incomplete"
+            ]
+          },
+          "sections": [
+            {
+              "name": "profile",
+              "state": "incomplete",
+              "reason": "coverage_incomplete"
+            }
+          ]
+        }
+      }
+    },
+    "versions": {
+      "bun": "1.3.14",
+      "chrome": "156.0.8078.80",
+      "go": "go version go1.27.3 linux/amd64",
+      "kernel": "6.12.74+deb13+1-amd64",
+      "node_linux": "v22.23.4",
+      "postgres": "PostgreSQL 16.9 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit",
+      "postgres_server_binary": "postgres (PostgreSQL) 16.9",
+      "python": "Python 3.13.18",
+      "python_cryptography": "50.0.0",
+      "python_httpx": "0.28.1",
+      "python_psycopg": "3.2.10",
+      "python_python": "3.13.18",
+      "soundpost": "1.0.0 unknown linux/amd64 built with ",
+      "soundpost_binary_sha256": "13f1ad4feb38a8307cb2f825d87149ecfdc0b9e0d091fc8af565a6bfa04ff841"
+    },
+    "unsafe_storage_hits": null
+  },
+  "rows": [
+    {
+      "name": "gateway_dependency_child_span",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "trace=e527c971015611d25531b695efe6835a spans=6"
+    },
+    {
+      "name": "frontend_request_api_db_chain",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "trace=016f894fa7d59cdc52df608ed9039a7d spans=8"
+    },
+    {
+      "name": "error_admitted_with_known_build",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "1 error(s) with build 893b5f18e4958052c1d24a99deff1d89"
+    },
+    {
+      "name": "error_linked_to_request_trace",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "error 26f2a0bd41a89ff18a5b873e4fad58f9 trace 016f894fa7d59cdc52df608ed9039a7d"
+    },
+    {
+      "name": "build_source_map_uploaded",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "build=893b5f18e4958052c1d24a99deff1d89 debug=befc61a14b012ecf55426ede6732a450 artifact=2b412d336565166033c6b8f38c0140e0"
+    },
+    {
+      "name": "mapped_frame_at_known_location",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "src/receipt.ts:24:10 build=893b5f18e4958052c1d24a99deff1d89 via stored occurrence 26f2a0bd41a89ff18a5b873e4fad58f9"
+    },
+    {
+      "name": "job_failed_attempt_retained_then_success",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "run=638309dea3cb1bcf411d6591f8d9a89b attempts=2 recovered"
+    },
+    {
+      "name": "same_trace_in_wrong_org_denied",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "4 denied probes"
+    },
+    {
+      "name": "canaries_absent_everywhere",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "3 canaries flowed, none stored"
+    },
+    {
+      "name": "db_span_safe_operation_only",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "4 postgres spans carry only db.execute"
+    },
+    {
+      "name": "replay_masked_interaction_real_recorder",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "3 replay chunks stored"
+    },
+    {
+      "name": "profile_linkage_with_capability_truth",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "capability=supported stored=1"
+    },
+    {
+      "name": "browser_profile_read_through_profile_view",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "profile=8628dfae0d9585406592c6d0944583b1 samples=30 state=ready loss=0 capability=supported/browser_js_self_profile"
+    },
+    {
+      "name": "browser_profile_refusals_stored_capability_only",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "denied=denied/document_policy_missing stored as 1e8908f50b60d0da95cfb220ab9274a7, route 404; unsupported=unsupported/js_self_profiling_unavailable stored as 136e7d758f433c9cff6e752e56340704, route 404; no chunk names either record"
+    },
+    {
+      "name": "browser_profile_scenarios_console_errors_explained",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "supported and unsupported runs log no console error; the denied run logs only the browser's own Document-Policy refusal"
+    },
+    {
+      "name": "runtime_profile_delivered_stored_linked",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "profile=81a3ae8a8b7e997503f5fe126e662dde samples=334 state=incomplete loss=146 capability=supported/python_wall_samples"
+    },
+    {
+      "name": "actual_ids_equal_expected",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "build=893b5f18e4958052c1d24a99deff1d89 job=bb06f0be745e818fc0459f2fb7527f65 run=638309dea3cb1bcf411d6591f8d9a89b traces=e527c971015611d25531b695efe6835a,016f894fa7d59cdc52df608ed9039a7d"
+    },
+    {
+      "name": "actual_versions_recorded",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "8 components"
+    }
+  ],
+  "source_sha256": "23428079fbde6c6e6a65f872007db5a1df84fdead213bca259e368faeb9e894d"
+}

@@ -1,0 +1,15 @@
+# 02.12-W1 (decision D29): configuration obligations observed by the configuration-phase oracle variants
+./internal/conformance/query TestReleaseConfigurationProtocolsResolution
+./internal/conformance/query TestReleaseConfigurationProtocolsRefusesWhatThePinnedReleaseRefuses
+./internal/conformance/query TestReleaseConfigurationScrapeInheritanceResolution
+./internal/conformance/query TestReleaseConfigurationScrapeInheritanceRefusesWhatThePinnedReleaseRefuses
+./internal/conformance/query TestReleaseConfigurationRecordedObservationsAreBoundToTheirInputs
+./internal/conformance/query TestConfigurationOracleLockIsVerifiable
+./internal/conformance/query TestConfigurationDockerfileMayOnlyAddTheConfigurationFile
+./internal/conformance/query TestClassifyReferenceConfigurationError
+./internal/conformance/query TestOracleIdentityFollowsThePhaseOfTheRow
+./internal/conformance/query TestParseConfigurationObservationsNeverReportsAnEmptySuccess
+./internal/conformance/query TestReleaseManifestCarriesTheConfigurationRows
+./internal/sources TestPromConfigDurationAndSizeGrammar
+./internal/sources TestPromConfigIgnoresUnmodelledKeys
+./internal/sources TestPromConfigRefusalCarriesFamilyAndScope

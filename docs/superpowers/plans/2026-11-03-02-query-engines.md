@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status: DRAFT — NOT AUTHORIZED FOR EXECUTION.** Full-design owner approval and an execution-method choice are both prerequisites. This document creates no product code, installs nothing and reports no exercised compiler, oracle, test, conformance or performance result.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Planned compiler/oracle/test/conformance commands are acceptance instructions, not exercised results.
 
 **Goal:** Implement independently authored, complete PromQL 3.1.0/3.13.5 and LogQL 3.5.2 language engines, owned query/discovery/live interfaces, isolated input translators and fenced rule evaluation without an upstream production engine.
 

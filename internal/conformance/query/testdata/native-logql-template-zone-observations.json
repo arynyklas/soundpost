@@ -1,0 +1,118 @@
+{
+ "provenance": "Observations of the pinned Loki 3.5.2 native template executor (the logql-native reference driver, built from the sha256-verified source archive of the source lock with Go 1.24.5, using the approved Go 1.24.5 zoneinfo dataset, sha256 58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0), taken without a container runtime because the local one was unavailable. The campaign (compare --phase logql-template) re-observes these rows against the oracle image.",
+ "compiler": "go1.24.5",
+ "unicode": "15.0.0",
+ "timezone_sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0",
+ "rows": [
+  {
+   "id": "logql-loki-3.5.2/template/zone-london-spring-gap",
+   "output": "1774747800",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-london-autumn-overlap",
+   "output": "1792891800",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-kolkata-half-hour",
+   "output": "1767205800",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-kathmandu-quarter-hour",
+   "output": "1767204900",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-lord-howe-summer",
+   "output": "1767186000",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-lord-howe-winter",
+   "output": "1782826200",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-mexico-city-no-dst-since-2022",
+   "output": "1782885600",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-almaty-utc5-since-2024",
+   "output": "1767207600",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-kiev-alias",
+   "output": "1767218400",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-ciudad-juarez-new-zone",
+   "output": "1782885600",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-amsterdam-before-1970",
+   "output": "-1249261200",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-new-york-after-last-transition-rule",
+   "output": "3802564800",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-dublin-negative-dst-winter",
+   "output": "1767225600",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-dublin-negative-dst-summer",
+   "output": "1782860400",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-abbreviation-london-summer",
+   "output": "UTC +0000",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-abbreviation-kolkata",
+   "output": "UTC +0000",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-abbreviation-sao-paulo-numeric",
+   "output": "UTC +0000",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-host-local-parse-new-york",
+   "output": "1782878400",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-host-local-parse-tokyo",
+   "output": "1767193200",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-local-zone-name-tokyo",
+   "output": "1767193200",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-timestamp-formatted-in-host-zone-auckland",
+   "output": "2026-01-01 13:00 NZDT",
+   "error": null
+  },
+  {
+   "id": "logql-loki-3.5.2/template/zone-timestamp-formatted-in-host-zone-utc",
+   "output": "2026-01-01 00:00 UTC",
+   "error": null
+  }
+ ]
+}

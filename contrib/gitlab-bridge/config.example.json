@@ -1,0 +1,14 @@
+{
+  "listen": "127.0.0.1:8443",
+  "tls_cert_file": "/etc/soundpost-gitlab-bridge/tls.crt",
+  "tls_key_file": "/etc/soundpost-gitlab-bridge/tls.key",
+  "gitlab_base_url": "https://gitlab.example.com",
+  "gitlab_ca_file": "",
+  "state_file": "/var/lib/soundpost-gitlab-bridge/deliveries.log",
+  "projects": {
+    "0123456789abcdef0123456789abcdef": {
+      "gitlab_project": "group/project",
+      "labels": ["soundpost"]
+    }
+  }
+}

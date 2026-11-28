@@ -1,0 +1,255 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
+# Background workers
+
+The leader-only background work of a node lives in `internal/appcore/workers.go`
+(`App.NewWorkers`, `App.RunWorkers`, `Workers.Run`, `Workers.Tick`). It drives,
+per project, the modules that are otherwise only libraries: the rules scheduler,
+evaluator and committer (`internal/rules`), the recording output worker, the
+condition consumer (`internal/conditions`) and the notification outbox and
+delivery worker (`internal/notify`). For the delivery semantics see
+[delivery semantics](delivery-semantics.md); for who owns notifications during
+an adoption see [notification cutover](notification-cutover.md).
+
+## What one pass does
+
+A pass takes the control group's leadership lease once (`Fence`). A node that is
+not the leader returns immediately and does nothing. As the leader, for each
+organization it serves it derives the system scopes afresh (see below), then for
+each project (at most `MaxProjects` per pass, in rotation):
+
+1. **Rules.** Lists the project's rules (`RuleSource`), takes the next `MaxRules`
+   in rotation and runs the scheduler under the lease with the project-scoped
+   read scope and the project's organization-administrator scope. The grid is
+   fixed by the committed state, so a second pass at the same time commits
+   nothing. `Tick` runs this step in the pass; `Run` serves it in a loop of its own
+   (see "The rule loop").
+2. **Recording outputs.** If an `OutputAdmission` is configured, flushes up to
+   `OutputLimit` pending recording outputs.
+3. **Producers.** Runs each configured `Producer` (issues and incidents from
+   ingested errors, job books from ingested job attempts) under the lease, each
+   bounded and idempotent.
+4. **Conditions.** Consumes up to `ConsumeLimit` condition outputs into
+   condition state.
+5. **Notification decisions.** If a `NotificationRouting` is configured, decides
+   the conditions and the incidents that may notify (at most `NotifyLimit` per
+   pass, each kind) into the delivery outbox.
+6. **Ownership mode.** If the project has a notification cutover record, brings
+   its delivery states to the mode its phase requires (`SyncModes`).
+7. **Delivery.** If a `Sender` is configured, runs one delivery pass (a batch of
+   at most `DeliveryBatch` claims).
+
+A pass over an idle project commits nothing (measured: the delivery claim was the only commit of an idle pass). The claim of the delivery stage is answered from the read that proves nothing is due,
+lapsed, settled or to be erased and that the project's delivery fence already equals the lease (`control.DeliveryClaimIdle`); the claim is committed only when
+it leases, settles or closes something, and for the first claim of a new leader term (it raises the fence that makes a deposed leader's later commit stale).
+An idle node therefore does not move the control revision (`TestAnIdleServeMovesNoControlRevision`: three projects, one-second passes, 0 commits in 20 s;
+before this rule 57). Without it a pass committed once per project, so the global revision that `create_org`, `create_user`, release registration and any other
+command without an organization epoch compare moved about `projects / (Interval + pass time)` times a second on a system doing nothing, and each commit also
+stored a command record in the bounded dedup window (100,000 entries).
+
+The lease is re-proved against a fresh quorum observation at the start of each
+project, and by each stage's constructor before every effect (the delivery worker
+again immediately before each send). A lease that is lost ends the pass
+(`PassReport.Deposed`); nothing after that point is written. Stage failures are
+recorded in the report by closed stage and fault code, never as text, and do not
+stop the other stages or projects. A lease that cannot be proved either way
+(the quorum is unreachable) is reported as a `fence` error and the project is
+skipped.
+
+## Bounds and backoff
+
+`Run` waits `Interval` (default 5 s, at least 10 ms) between passes. Passes that
+report errors double the wait up to `MaxBackoff` (default 1 min); a clean pass or
+a non-leader node returns to `Interval`. A pass is bounded by `PassTimeout`
+(default 2 min). `Run` starts one goroutine for the rule loop (below) beside its own
+loop over the other stages, and returns after the pass in flight of each loop observes
+cancellation. Each loop has its own wait and backoff; `Observe` is called by one loop
+at a time and carries the errors of the last pass of each loop.
+
+### The rule loop
+
+A rule is evaluated on its grid (a multiple of its interval), so the evaluation of a minute-rule is owed once a minute, whatever the rest of the pass is doing.
+When the rule step was one step of the serial pass over the projects, a rule was evaluated once per pass over its project. Under 100 records a second over 100
+projects the pass took 47 to 120 s (the `PassTimeout`: the pass ended at 60 to 85 projects), because the producers, the notification decisions and the delivery
+step of a project took 0.2 s each on average (up to 0.8 s) next to 0.04 s for its rules: 69 evaluations a minute for 100 rules, p50 lag 51 s. `Run` therefore
+serves the rule scheduling (`Workers.RuleTick`) in a loop of its own and the other stages (recording outputs, producers, conditions, notification decisions,
+ownership mode, delivery) in the other. `RuleTick` serves the next `MaxProjects` projects of each organization, `MaxRules` rules of each, by at most
+`RuleWorkers` projects at the same time (default 4); one goroutine serves a project, so the rules of a project are evaluated one after the other, in their
+rotation, and two rule passes never overlap. A rule's commit lands with the rule's own records; a lost race for the control revision is retried with the same
+command ID and counted (`PassReport.StaleRetries`, by writer: rules, outbox, conditions, incidents). Measured under the same ingest with four rule workers:
+103 evaluations a minute in each of six minutes, lag p50 2.2 s, p95 4.1 s, no retry by the rule writer, and the other writers' retries as many as with the
+serial pass (outbox 323 a minute against 350). Every effect is still validated by the lease; a goroutine that meets the loss stops the others between projects.
+What the loop does not change: a condition output a rule committed is consumed and decided at the next visit of the other loop to that project, so the
+time from a firing grid point to its notification is still one pass of the other loop.
+`PassReport.Took` and `PassReport.Steps` say where a pass spent its time (auth, rules with its evaluate and commit, outputs, produce, consume, submit, cutover,
+outbox; summed over the projects served). A `soundpost_faults` build also writes one line per pass and per project served to `<SOUNDPOST_FAULT_DIR>/workers.jsonl`.
+
+### Pass time grows with the number of projects
+
+Every stage of every project reads control state, and a control read (`control.Store.View`) decodes the whole committed control state, so the cost of one
+project's turn grows with the number of projects and a pass grows with their square. Measured on an 8-vCPU VM, one voter, idle projects (no evidence,
+every producer, routing and a sender configured; one pass over all of them, `MaxProjects` raised to the project count): 25 projects 0.9 s, 50 projects 3.3 s,
+100 projects 12 s, 200 projects 50 s (about 120 ms and 250 ms per project at 100 and 200). With the default `MaxProjects` of 64 a project is served once
+every `ceil(projects/64)` passes, and each pass takes the pass time plus `Interval`, so with a few hundred projects evidence takes minutes (not seconds) to
+become an issue, a job state or an incident. The bounds above (`MaxProjects`, `PassTimeout`) keep every pass finite; they do not make a large installation
+fast. Since lane 1 wave 15 the hot control reads share one decode of the committed state (`control.Store.ViewShared`: the decode is made once per committed
+revision and every concurrent reader gets it through the read-only interface `model.ReadOnlyControl`, which has no way to change it). The shared decode is
+kept per member of the state blob (`internal/control/core_members.go`): a commit marks, in its own transaction, the members it changed (the rule books and
+the outbox for a rule commit, the delivery books for an outbox write, the sessions for a login), and the next reader decodes those members from its own
+snapshot and nothing else; a read of one book through the read-only interface (`BookRecord`, `BookKeys`) decodes that book's member when it asks, so a
+reader that never opens the rule books pays nothing for the rule commits that went before it. The runner's reads (`ActiveDeletions` for every storage
+scan, `auth.Service.Revalidate`, `Authenticate`, `Authorize`, `AuthorizeSystem`, the delete generation of a query, the producer fence, the issue,
+condition, incident, job-catalogue, job-position, policy, cutover, rule-book, rule-definition and rule-output readers, the event, routing and
+retention producers) use it, the ones that need a `State` through `ViewCore` (no admission books, no job or issue books: those are ledger records);
+every other read, and every writer, still decodes its own copy with `View`. `control.Store.DecodeStats` (and `state_decodes`,
+`state_member_decodes` and `state_blob_decodes` of a diagnostic build) count what a load costs: whole-state decodes of the shared decode, members decoded
+after a commit, and every whole-blob decode of any reader.
+Measured runner pass time on one voter (lane 1 wave 15): 25 projects 0.85-0.98 s before, 0.25-0.38 s after; 100 projects 12.4-13.8 s
+before, 3.0-4.4 s after; 200 projects 48-52 s before, 11.9-17.0 s after. The pass still grows faster than linearly in the project
+count: the readers left on `View` and every writer still decode the whole state.
+
+## The worker principal
+
+`soundpost serve` runs the runner under an in-process **system principal per
+organization** (owner decision D1). `auth.Service.AuthorizeSystem` derives its
+scope; the audit actor is `system:runner` (the principal ID of an organization is
+the ASCII bytes of that name followed by three bytes of the organization's
+digest, so every audit row, command owner and timeline entry says who acted).
+
+* **Never a credential.** There is no token, session or user record. No route,
+  header, cookie or body field selects it: `Authenticate` never returns a system
+  credential, a scope cannot be decoded from JSON, and `create_user` refuses a
+  user ID that carries the system tag. A test hits every registered route with
+  every spelling of the principal and proves nothing is accepted or committed.
+* **Exactly the roles the runner needs.** Project read (the rule evaluator), the
+  organization-administrator scope of the control commits (rule evaluations,
+  conditions, delivery records, system-origin incident open/impact),
+  `issues.write` (issue producer) and `policy.write` (job producer). Raw reads,
+  artifacts, replay, profiles, source credentials, instance administration,
+  release registration, deletion, retention, legal holds and ownership cutover are
+  outside it; a system incident action other than a system-origin open or impact
+  is refused.
+* **Re-derived every pass.** Every pass derives its scopes afresh for each
+  project. An organization that is unknown or retired, or a project that is
+  retired, yields no scope at the next pass (the pass reports `auth`/`not_found`
+  and commits nothing); a scope already in hand ends at its next validation, and
+  so does one whose organization policy epoch moved.
+* **Audited as that actor.** Everything the runner commits (condition changes,
+  delivery transitions, incidents, issues, job books) carries
+  `auth.SystemPrincipal(org)` as its principal.
+
+With no `Orgs` configured the runner serves every organization in control state
+that is not retired, listed again at every pass. A project the scope cannot be
+derived for is reported as an `auth` stage error and skipped.
+
+## What the served process wires
+
+`soundpost serve` starts the runner next to the fences (leader only; a follower
+returns from each pass at once) with:
+
+* **Rules** (`App.RuleCatalogue`): the rule catalogue in control state. An organization
+  administrator saves rules over `POST /api/v1/rules` (see `docs/user/rules.md`); the runner
+  lists each project's active rules from the committed state at every pass, so a saved rule is
+  evaluated at the next pass and a retired one stops at it. There is no rule file and no
+  reload: control state is the one source.
+* **Producers** (`App.Producers`): turn ingested evidence into control state before
+  conditions are consumed (issues and incidents from ingested errors, job books from
+  ingested job attempts).
+* **Routing** (`App.OrgRouting`): the conditions and incidents of every project
+  notify every enabled destination of the project's organization, under the
+  approved default notification policy. The destinations are what the
+  `destination` admin command configures (type, https endpoint or address,
+  enabled, sealed secret); a destination enabled later is picked up at the next
+  pass.
+* **Sender** (`App.NotificationSender`): the signed webhook, Telegram Bot API and
+  SMTP providers behind the organization-scoped destination registry over committed
+  control state and the control store's sealed secrets. A destination whose channel
+  the node has not configured (SMTP without `--notify-smtp-host`) fails visibly with
+  `channel_unconfigured`, never silently.
+
+The node's own delivery environment is flags, validated before storage opens:
+`--public-origin`, `--notify-egress-allow` (private CIDRs only; loopback, link-local
+and metadata ranges can never be allowed), `--notify-ca-file`, `--notify-smtp-*`,
+`--notify-telegram-api`, `--notify-send-timeout` and `--worker-interval`. Webhook
+attempt timestamps are recorded once per attempt under `<data-dir>/notify`
+(node-local, 0700, removed after two days).
+
+## The recording source
+
+Alert rules need no credential: they read through the worker principal's project-scoped read
+scope and write only control state. A **recording rule** writes its result back as metric
+samples, which is a data-plane write, and the data plane is open only to a registered
+source: the node needs the credential of one. The operator onboards a source for the project
+(`POST /api/v1/sources`, a source policy that allows `metric`, a registered resource and the
+label values the rule's configured labels may take; the credential is returned once), writes the
+credential to a file readable only by the service user, and starts the node with
+`--recording-source-credential-file <file>`. The node authenticates it at start (a credential
+that is unknown, revoked or expired fails startup with a static reason that does not echo it),
+never stores it, and reads the source's project, resource registry and policy revision from
+control state at every evaluation, so a revoked, expired or re-versioned source applies at the
+next pass. With it the runner wires `OutputAdmission` (admission through the ordinary ingest
+path under that credential, receipt lookup after an ambiguous answer) and the producer resolver
+(one stable producer per source), and the rule route accepts recording rules for that source's
+project. Without it recording rules cannot be saved and `OutputAdmission` stays nil, so a
+recording output would stay pending: nothing is admitted on a node that was not given the
+credential. One node has one recording source, so recording rules are possible for exactly its
+project.
+
+## What is still not wired
+
+Each seam below is a nil interface in `WorkerConfig`, which switches that stage off. None is
+replaced by a stand-in that reports success.
+
+* `OutputAdmission` and `Producer` on a node started without
+  `--recording-source-credential-file` (see above).
+
+## Bounded retention of login and elevation state
+
+`POST /api/v1/oidc/start` needs no credential, and each elevated read leaves
+elevation bookkeeping, so both are bounded:
+
+* Live (unexpired) pending OIDC logins are capped at 1024. At the cap the start
+  route returns a retryable `unavailable` (HTTP 503, `Retry-After: 60`) before
+  any provider discovery fetch or state write.
+* `auth.Service.SweepExpired` (run on the 5-second reconcile tick of the fence
+  cadence) deletes pending OIDC records (5-minute life), elevation records
+  (15-minute life) and sessions (12-hour life) once expired; a start also
+  collects expired pending records. A session goes at the instant `Authenticate`
+  refuses it. The expiry instant is read by the proposing node and the result is
+  replicated as state, so replicas hold identical bytes. A tick with nothing
+  expired commits nothing. The commit that removes expired records goes through
+  `control.Store.UpdateSweepExpired` and does not move the control
+  `AuthorityRevision`: every use already refuses such a record at the same
+  instant, so removing it widens and narrows no access. The writer is guarded:
+  a sweep that removed a live record, added or altered one, or changed anything
+  else bumps the revision like an unclassified writer.
+* Which login and elevation writes move `AuthorityRevision` (10.29, each decided
+  from what the commit writes). Not moved, through guarded writers that bump on
+  any other difference: the pending OIDC record a start adds and its callback
+  consumes (`UpdatePendingLogin`; it authenticates nobody, the session is a
+  separate write); the `elevated_read` audit row of an elevated read
+  (`UpdateAuditAppend`) and the audit row of every released chunk of an
+  elevated response (`CommitElevatedRead`: the audit delta command once every
+  member declared protocol 4, `docs/operations/upgrade.md`, else the whole-state
+  commit of the same row; audit rows are never read back by an access decision);
+  and a login that consumes a TOTP step or a recovery code
+  (`UpdateSessionCreate`; only `User.LastTOTP`, raised, and `User.Recovery`,
+  losing a hash, change, and no decision reads either field). Moved, on
+  purpose: `Elevate` itself (the elevation record is the access grant that
+  `ResolveElevation` rebuilds a cross-organization read scope from), logout,
+  and every other write to a user, membership or grant.
+* Audit rows (`elevate`, `elevated_read` and the per-response release audit, about
+  300 bytes each) are not collected by this sweep. Decision D47, accepted as
+  proposed: elevation audits have no retention of their own;
+  they follow the one audit-log retention of the control state, which the
+  retention worker's hourly `ExpireControlLog` pass already applies (365 days by
+  default; an organization's own `audit` retention setting can only lengthen it;
+  the erasing and scrubbing audits are never expired). An elevation lives 15
+  minutes, so after the audit row is dropped nothing references it. Raising or
+  shortening the 365-day default is an owner decision on audit retention and a
+  one-line change to `retention.Defaults().AuditDays`.
+
+## Event producer
+
+`serve` appends the event producer (`appcore.EventProducer`) after the other producers: per project, under the leader lease, it announces committed incident,
+issue and release changes and console test requests as event webhook deliveries through the notification outbox (first pass baselines silently). It adds no flag.
+See `event-webhooks.md`.

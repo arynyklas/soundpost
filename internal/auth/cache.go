@@ -1,0 +1,579 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package auth
+
+import (
+	"container/list"
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
+	"slices"
+	"sort"
+	"sync"
+	"time"
+)
+
+// DeleteGenerations reports the monotonic deletion generation covering an
+// org's projects. Any deletion/retirement that can remove readable data MUST
+// advance it before the operation reports fencing complete; a cached result,
+// cursor, replay position or export bound to an older generation is dead.
+type DeleteGenerations interface {
+	DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error)
+}
+
+// SourceLifecycleGenerations derives the generation from authoritative control
+// state that exists today: revoked or retired sources. It is monotonic because
+// those flags never clear. A retention service that owns historical-range and
+// entity deletion supplies its own DeleteGenerations with the same contract.
+func (s *Service) SourceLifecycleGenerations() DeleteGenerations { return sourceLifecycle{s} }
+
+type sourceLifecycle struct{ service *Service }
+
+// StateDeleteGenerations is optionally implemented by a DeleteGenerations that can derive the
+// generation from a control state the caller already holds (the source-lifecycle base and the
+// retention service do). The cache binding then reads the control state once, linearizably, and
+// answers "is the scope still authorized" and "which generation" from that one snapshot, instead
+// of one read for the revalidation and one more for every component of the generation.
+// derived false means this implementation cannot answer from a state (a component it sums needs
+// its own read): the caller falls back to DeleteGeneration.
+type StateDeleteGenerations interface {
+	DeleteGenerationFromState(st model.ControlState, org model.ID, projects []model.ID) (generation uint64, derived bool, err error)
+}
+
+func (g sourceLifecycle) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
+	var out uint64
+	err := g.service.viewCore(ctx, func(st model.ControlState) (err error) {
+		out, _, err = g.DeleteGenerationFromState(st, org, projects)
+		return err
+	})
+	return out, err
+}
+func (g sourceLifecycle) DeleteGenerationFromState(st model.ControlState, org model.ID, _ []model.ID) (uint64, bool, error) {
+	if _, ok := st.Orgs[org.String()]; !ok {
+		return 0, true, model.Fail(model.NotFound)
+	}
+	var out uint64
+	for _, src := range st.Sources {
+		if src.Org == org && (src.Revoked || src.Retired) {
+			out++
+		}
+	}
+	return out, true, nil
+}
+
+const (
+	cacheValueLimit = 1 << 20
+	ticketMaxTTL    = 15 * time.Minute
+)
+
+// Cache keys every entry by (org, visibility fingerprint, policy epoch, delete
+// generation, profile, query, time params). Scope revalidation always precedes
+// any lookup, so a caller who cannot be authorized never reaches an entry, and
+// a positive or negative entry is only ever reachable with the identical
+// effective visibility (principal + every project/action/named-source grant).
+type Cache struct {
+	service *Service
+	deletes DeleteGenerations
+	secret  [32]byte
+	limit   int
+	ttl     time.Duration
+	mu      sync.Mutex
+	entries map[[32]byte]*list.Element
+	// order holds exactly the entries in map, oldest first. It is the single
+	// source of truth for eviction: every removal path deletes from both.
+	order *list.List
+	// counts is how many entries each owning visibility fingerprint holds.
+	counts map[string]int
+}
+type cacheEntry struct {
+	key      [32]byte
+	owner    string // visibility fingerprint that stored it, for fair eviction
+	value    []byte
+	negative bool
+	expires  time.Time
+}
+
+// CacheFill is the opaque proof returned by a miss; Store only accepts a value
+// computed under the same authorization state the miss observed.
+type CacheFill struct {
+	key         [32]byte
+	fingerprint string
+	epoch       uint64
+	deletion    uint64
+}
+type CacheResult struct {
+	Hit      bool
+	Negative bool
+	Value    []byte
+	Fill     CacheFill
+}
+
+func NewCache(service *Service, deletes DeleteGenerations, limit int, ttl time.Duration) (*Cache, error) {
+	if service == nil || deletes == nil || limit < 1 || limit > 1<<16 || ttl <= 0 || ttl > 5*time.Minute {
+		return nil, model.Fail(model.Invalid)
+	}
+	c := &Cache{service: service, deletes: deletes, limit: limit, ttl: ttl, entries: map[[32]byte]*list.Element{}, order: list.New(), counts: map[string]int{}}
+	if _, err := rand.Read(c.secret[:]); err != nil {
+		return nil, model.Fail(model.Unavailable)
+	}
+	return c, nil
+}
+
+type cacheBinding struct {
+	fingerprint string
+	epoch       uint64
+	deletion    uint64
+}
+
+// bind revalidates the scope (authoritative ReadIndex-backed read) and only
+// then consults the deletion generation. No cache or index is touched before.
+//
+// One control read answers both when the DeleteGenerations can derive its generation from a state
+// (StateDeleteGenerations): the generation is computed from the very snapshot the revalidation
+// accepted, so it can never be older than the authorization it is bound to, and a cached read
+// costs one ReadIndex and one decode instead of one for the revalidation and one per component of
+// the generation. Any other implementation keeps the two-step path.
+func (c *Cache) bind(ctx context.Context, scope Scope) (cacheBinding, error) {
+	if scope.service != c.service || scope.sourceCredential != nil || scope.fingerprint == "" {
+		return cacheBinding{}, model.Fail(model.NotFound)
+	}
+	var gen uint64
+	derived := false
+	if from, ok := c.deletes.(StateDeleteGenerations); ok {
+		if err := c.service.revalidate(ctx, scope, func(st model.ControlState) (err error) {
+			gen, derived, err = from.DeleteGenerationFromState(st, scope.org, scope.projects)
+			return err
+		}); err != nil {
+			return cacheBinding{}, err
+		}
+	} else if err := c.service.Revalidate(ctx, scope); err != nil {
+		return cacheBinding{}, err
+	}
+	if !derived {
+		var err error
+		if gen, err = c.deletes.DeleteGeneration(ctx, scope.org, scope.projects); err != nil {
+			return cacheBinding{}, err
+		}
+	}
+	return cacheBinding{scope.fingerprint, scope.epoch, gen}, nil
+}
+func (c *Cache) keyFor(scope Scope, b cacheBinding, profile, query, params string) [32]byte {
+	h := hmac.New(sha256.New, c.secret[:])
+	put := func(s string) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(s)))
+		h.Write(n[:])
+		h.Write([]byte(s))
+	}
+	projects := make([]string, len(scope.projects))
+	for i, p := range scope.projects {
+		projects[i] = p.String()
+	}
+	sort.Strings(projects)
+	put(scope.org.String())
+	put(b.fingerprint)
+	put(string(scope.action))
+	put(joinSorted(projects))
+	put(joinSorted(idStrings(scope.sources)))
+	var n [16]byte
+	binary.BigEndian.PutUint64(n[:8], b.epoch)
+	binary.BigEndian.PutUint64(n[8:], b.deletion)
+	h.Write(n[:])
+	put(profile)
+	put(query)
+	put(params)
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+func idStrings(ids []model.ID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
+}
+
+func (c *Cache) Lookup(ctx context.Context, scope Scope, profile, query, params string) (CacheResult, error) {
+	b, err := c.bind(ctx, scope)
+	if err != nil {
+		return CacheResult{}, err
+	}
+	key := c.keyFor(scope, b, profile, query, params)
+	out := CacheResult{Fill: CacheFill{key: key, fingerprint: b.fingerprint, epoch: b.epoch, deletion: b.deletion}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.entries[key]
+	if !ok {
+		return out, nil
+	}
+	e := el.Value.(*cacheEntry)
+	if !c.service.now().Before(e.expires) {
+		c.removeLocked(el)
+		return out, nil
+	}
+	out.Hit, out.Negative = true, e.negative
+	out.Value = append([]byte(nil), e.value...)
+	return out, nil
+}
+
+// Store records a computed result (or a negative result) only if the caller's
+// authorization state is still exactly the state its miss observed.
+func (c *Cache) Store(ctx context.Context, scope Scope, fill CacheFill, value []byte, negative bool) error {
+	if len(value) > cacheValueLimit || negative && len(value) != 0 {
+		return model.Fail(model.TooLarge)
+	}
+	b, err := c.bind(ctx, scope)
+	if err != nil {
+		return err
+	}
+	if b.fingerprint != fill.fingerprint || b.epoch != fill.epoch || b.deletion != fill.deletion {
+		return model.Fail(model.Stale)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := &cacheEntry{key: fill.key, owner: fill.fingerprint, value: append([]byte(nil), value...), negative: negative, expires: c.lifetimeEnd(scope, c.ttl)}
+	if el, exists := c.entries[fill.key]; exists {
+		c.counts[el.Value.(*cacheEntry).owner]--
+		el.Value = entry
+		c.order.MoveToBack(el)
+	} else {
+		c.entries[fill.key] = c.order.PushBack(entry)
+	}
+	c.counts[entry.owner]++
+	for c.order.Len() > c.limit {
+		c.removeLocked(c.evictionVictimLocked())
+	}
+	return nil
+}
+
+// evictionVictimLocked is the oldest entry of the principal holding the most entries, so a
+// tenant cycling many keys evicts its own warm entries first and never a quiet neighbour's.
+// Ties go to the owner of the oldest entry.
+func (c *Cache) evictionVictimLocked() *list.Element {
+	heaviest, most := "", -1
+	for owner, n := range c.counts {
+		if n > most {
+			heaviest, most = owner, n
+		}
+	}
+	for el := c.order.Front(); el != nil; el = el.Next() {
+		if el.Value.(*cacheEntry).owner == heaviest {
+			return el
+		}
+	}
+	return c.order.Front()
+}
+
+func (c *Cache) removeLocked(el *list.Element) {
+	entry := el.Value.(*cacheEntry)
+	delete(c.entries, entry.key)
+	if c.counts[entry.owner]--; c.counts[entry.owner] <= 0 {
+		delete(c.counts, entry.owner)
+	}
+	c.order.Remove(el)
+}
+
+// lifetimeEnd is now+ttl, never later than the instant the scope's own
+// clock-based authority (restricted-raw window) closes: nothing minted under a
+// scope may be held past the window that authorized it.
+func (c *Cache) lifetimeEnd(scope Scope, ttl time.Duration) time.Time {
+	end := c.service.now().Add(ttl)
+	if !scope.expiresAt.IsZero() && scope.expiresAt.Before(end) {
+		end = scope.expiresAt
+	}
+	return end
+}
+
+type ticketBody struct {
+	Kind        string   `json:"k"`
+	Org         model.ID `json:"o"`
+	Fingerprint string   `json:"f"`
+	Action      string   `json:"a"`
+	Projects    []string `json:"p"`
+	Sources     []string `json:"s"`
+	Epoch       uint64   `json:"e"`
+	Deletion    uint64   `json:"d"`
+	Subject     model.ID `json:"i"`
+	State       []byte   `json:"t"`
+	Expires     int64    `json:"x"`
+}
+
+// IssueTicket mints a short-lived opaque token (pagination cursor, live-replay
+// position, export grant) bound to the issuing scope's visibility fingerprint,
+// policy epoch and delete generation. state is caller-defined position data.
+func (c *Cache) IssueTicket(ctx context.Context, scope Scope, kind string, subject model.ID, state []byte, ttl time.Duration) (string, error) {
+	if kind == "" || len(kind) > 32 || len(state) > 8192 || ttl <= 0 || ttl > ticketMaxTTL {
+		return "", model.Fail(model.Invalid)
+	}
+	b, err := c.bind(ctx, scope)
+	if err != nil {
+		return "", err
+	}
+	projects := idStrings(scope.projects)
+	sort.Strings(projects)
+	sources := idStrings(scope.sources)
+	sort.Strings(sources)
+	raw, err := json.Marshal(ticketBody{Kind: kind, Org: scope.org, Fingerprint: b.fingerprint, Action: string(scope.action), Projects: projects, Sources: sources, Epoch: b.epoch, Deletion: b.deletion, Subject: subject, State: state, Expires: c.lifetimeEnd(scope, ttl).Unix()})
+	if err != nil {
+		return "", model.Fail(model.Unavailable)
+	}
+	h := hmac.New(sha256.New, c.secret[:])
+	h.Write(raw)
+	return base64.RawURLEncoding.EncodeToString(append(raw, h.Sum(nil)...)), nil
+}
+
+// OpenTicket validates the presenter's scope first, then the signature and
+// every binding. Any mismatch (other principal, other named-source grants,
+// older epoch, deleted since, expired, forged) is the same NotFound.
+func (c *Cache) OpenTicket(ctx context.Context, scope Scope, kind, token string) (model.ID, []byte, error) {
+	b, err := c.bind(ctx, scope)
+	if err != nil {
+		return model.ID{}, nil, err
+	}
+	denied := model.Fail(model.NotFound)
+	if len(token) > 16384 {
+		return model.ID{}, nil, denied
+	}
+	raw, e := base64.RawURLEncoding.DecodeString(token)
+	if e != nil || len(raw) < 33 {
+		return model.ID{}, nil, denied
+	}
+	body, sig := raw[:len(raw)-32], raw[len(raw)-32:]
+	h := hmac.New(sha256.New, c.secret[:])
+	h.Write(body)
+	if !hmac.Equal(sig, h.Sum(nil)) {
+		return model.ID{}, nil, denied
+	}
+	var t ticketBody
+	if json.Unmarshal(body, &t) != nil {
+		return model.ID{}, nil, denied
+	}
+	projects := idStrings(scope.projects)
+	sort.Strings(projects)
+	sources := idStrings(scope.sources)
+	sort.Strings(sources)
+	if t.Kind != kind || t.Org != scope.org || t.Fingerprint != b.fingerprint || t.Action != string(scope.action) || t.Epoch != b.epoch || t.Deletion != b.deletion || t.Expires <= c.service.now().Unix() || joinSorted(t.Projects) != joinSorted(projects) || joinSorted(t.Sources) != joinSorted(sources) {
+		return model.ID{}, nil, denied
+	}
+	return t.Subject, append([]byte(nil), t.State...), nil
+}
+
+// CommitElevatedRead durably audits one release of elevated bytes. It is a
+// no-op for non-elevated scopes. The caller MUST NOT release the bytes unless
+// it returns nil: the audit commits (and the scope is re-validated inside the
+// same control transaction) before the response/chunk.
+func (s *Service) CommitElevatedRead(ctx context.Context, scope Scope, action string, targets []model.ID) error {
+	if scope.service != s || scope.sourceCredential != nil || len(action) == 0 || len(action) > 64 || len(targets) > 64 {
+		return model.Fail(model.Forbidden)
+	}
+	if scope.elevation == (model.ID{}) {
+		return nil
+	}
+	a := model.ControlAudit{ID: model.NewID(), Principal: scope.credential.user, Action: action, Reason: "elevated response released", Time: s.now().UnixNano(), Org: scope.org.String(), PolicyEpoch: scope.epoch, Targets: append([]model.ID{scope.elevation}, targets...), RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
+	if d, ok := s.store.(auditDeltaAppender); ok && d.SharesUpdateOf(s.store) {
+		return d.AppendAudit(ctx, scope.ValidateControlStateRO, a)
+	}
+	return s.store.Update(ctx, func(st *model.ControlState) error {
+		if err := scope.ValidateControlState(*st); err != nil {
+			return err
+		}
+		st.Audits = append(st.Audits, a)
+		return nil
+	})
+}
+
+// VisibleSource is the closed public capability descriptor of one real source.
+// It never carries credentials, routing secrets, reader lists or policy text.
+type VisibleSource struct {
+	ID             model.ID       `json:"id"`
+	Project        model.ID       `json:"project"`
+	Class          string         `json:"class"`
+	Kinds          []model.Kind   `json:"kinds"`
+	Replay         bool           `json:"replay"`
+	PolicyRevision model.Revision `json:"policy_revision"`
+	State          string         `json:"state"`
+}
+
+// Source lifecycle states a VisibleSource reports. Only ingest ends with them (decision D11):
+// stored records stay readable under the unchanged scope and privacy rules.
+const (
+	SourceActive   = "active"
+	SourceClosing  = "closing"
+	SourceDisabled = "disabled"
+	SourceExpired  = "expired"
+	SourceRevoked  = "revoked"
+	SourceRetired  = "retired"
+)
+
+// sourceState names why a source no longer ingests, or SourceActive when it still does.
+func sourceState(src model.SourceAuthority, now time.Time) string {
+	switch {
+	case src.Retired:
+		return SourceRetired
+	case src.Revoked:
+		return SourceRevoked
+	case src.Closing:
+		return SourceClosing
+	case !src.Policy.Enabled:
+		return SourceDisabled
+	case int64(src.Expires) <= now.UnixNano() || src.Policy.Expires != 0 && int64(src.Policy.Expires) <= now.UnixNano():
+		return SourceExpired
+	}
+	return SourceActive
+}
+
+// sourceView is one visible source with the policy facts the derived service
+// catalogue needs. It never leaves this package.
+type sourceView struct {
+	VisibleSource
+	services     []model.ID
+	environments []model.ID
+	builds       []model.ID
+	dependencies []string
+}
+
+// VisibleSources lists the sources the scope may actually read, whatever their lifecycle state:
+// structured sources of its projects for telemetry.read, and restricted-raw sources only for a
+// raw.read scope whose principal is a named reader. A restricted-raw source whose clock window
+// has closed is the one exception (decision D6: raw eligibility ends by clock).
+func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSource, error) {
+	views, err := s.visibleSourceViews(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	var out []VisibleSource
+	for _, v := range views {
+		out = append(out, v.VisibleSource)
+	}
+	return out, nil
+}
+
+func (s *Service) visibleSourceViews(ctx context.Context, scope Scope) ([]sourceView, error) {
+	if scope.service != s || scope.sourceCredential != nil || scope.action != Read && scope.action != RawRead {
+		return nil, model.Fail(model.NotFound)
+	}
+	if err := s.Revalidate(ctx, scope); err != nil {
+		return nil, err
+	}
+	var out []sourceView
+	err := s.store.View(model.WithoutBooks(ctx), func(st model.ControlState) error {
+		if err := scope.ValidateControlState(st); err != nil {
+			return err
+		}
+		o := st.Orgs[scope.org.String()]
+		for _, src := range st.Sources {
+			if src.Org != scope.org || !scope.AllowsProject(src.Project) {
+				continue
+			}
+			if src.Policy.Class == "restricted_raw" {
+				if _, alive := rawWindowEnd(src, s.now()); !alive {
+					continue
+				}
+			}
+			restricted := src.Policy.Class == "restricted_raw"
+			if restricted != (scope.action == RawRead) || restricted && scope.elevation != (model.ID{}) {
+				continue
+			}
+			if restricted {
+				var cfg SourcePolicyConfig
+				if json.Unmarshal(o.Settings["source_policy:"+src.ID.String()], &cfg) != nil || !cfg.Enabled || cfg.ProjectID != src.Project || !hasID(cfg.Readers, scope.credential.user) {
+					continue
+				}
+				if len(scope.sources) != 0 && !hasID(scope.sources, src.ID) {
+					continue
+				}
+			}
+			out = append(out, sourceView{
+				VisibleSource: VisibleSource{ID: src.ID, Project: src.Project, Class: src.Policy.Class, Kinds: append([]model.Kind(nil), src.Policy.Kinds...), Replay: src.Policy.Replay, PolicyRevision: src.Policy.Revision, State: sourceState(src, s.now())},
+				services:      append([]model.ID(nil), src.Policy.Resources.Services...), environments: append([]model.ID(nil), src.Policy.Resources.Environments...),
+				builds: append([]model.ID(nil), src.Policy.Resources.Builds...), dependencies: append([]string(nil), src.Policy.Dependencies...),
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })
+	return out, nil
+}
+
+// VisibleService is one service the scope's sources are allowed to emit for
+// (D9): there is no separate registry, so a service exists exactly while an
+// active source policy of a project the scope may read lists its ID among the
+// resources it admits. Everything here is a fact of those policies, never an
+// observation: Dependencies are the dependency names the policies declare.
+type VisibleService struct {
+	ID           model.ID   `json:"id"`
+	Project      model.ID   `json:"project_id"`
+	Sources      []model.ID `json:"sources"`
+	Environments []model.ID `json:"environments"`
+	Builds       []model.ID `json:"builds"`
+	Dependencies []string   `json:"dependencies"`
+}
+
+// VisibleServices derives the service catalogue of the scope from its visible
+// sources, ordered by project then service ID. Each list is sorted and unique.
+func (s *Service) VisibleServices(ctx context.Context, scope Scope) ([]VisibleService, error) {
+	views, err := s.visibleSourceViews(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ project, service model.ID }
+	byKey := map[key]*VisibleService{}
+	for _, v := range views {
+		// D9: a service exists while an ACTIVE source policy admits it. D11 keeps a revoked, retired,
+		// closing, disabled or expired source listed and readable, but its policy no longer defines services.
+		if v.State != SourceActive {
+			continue
+		}
+		for _, svc := range v.services {
+			k := key{v.Project, svc}
+			e := byKey[k]
+			if e == nil {
+				e = &VisibleService{ID: svc, Project: v.Project, Sources: []model.ID{}, Environments: []model.ID{}, Builds: []model.ID{}, Dependencies: []string{}}
+				byKey[k] = e
+			}
+			e.Sources = addID(e.Sources, v.ID)
+			for _, id := range v.environments {
+				e.Environments = addID(e.Environments, id)
+			}
+			for _, id := range v.builds {
+				e.Builds = addID(e.Builds, id)
+			}
+			for _, name := range v.dependencies {
+				if !slices.Contains(e.Dependencies, name) {
+					e.Dependencies = append(e.Dependencies, name)
+				}
+			}
+		}
+	}
+	out := make([]VisibleService, 0, len(byKey))
+	for _, e := range byKey {
+		slices.SortFunc(e.Sources, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.SortFunc(e.Environments, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.SortFunc(e.Builds, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.Sort(e.Dependencies)
+		out = append(out, *e)
+	}
+	slices.SortFunc(out, func(a, b VisibleService) int {
+		if c := slices.Compare(a.Project[:], b.Project[:]); c != 0 {
+			return c
+		}
+		return slices.Compare(a.ID[:], b.ID[:])
+	})
+	return out, nil
+}
+
+func addID(ids []model.ID, id model.ID) []model.ID {
+	if slices.Contains(ids, id) {
+		return ids
+	}
+	return append(ids, id)
+}

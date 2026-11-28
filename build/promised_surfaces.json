@@ -1,0 +1,232 @@
+{
+  "schema": "soundpost-promised-surfaces/1",
+  "surfaces": [
+    {
+      "id": "identity-sso",
+      "claim": "Local identity, MFA/recovery, OIDC SSO, revocable sessions, audited elevation",
+      "source": "README: Local identity and administration",
+      "tasks": [
+        "01.01",
+        "05.01"
+      ]
+    },
+    {
+      "id": "durable-ingest",
+      "claim": "Typed admission/privacy contract; fsync-backed records with original receipts; owned segments and complete scans; org isolation",
+      "source": "README: Telemetry; design 'durable ACK'",
+      "tasks": [
+        "01.02",
+        "01.03",
+        "01.04",
+        "01.05"
+      ]
+    },
+    {
+      "id": "replicated-storage",
+      "claim": "Three-voter replicated data and control groups; durable ACK survives one node failure; snapshot repair",
+      "source": "plan 07 Goal / Global Constraints",
+      "tasks": [
+        "01.06",
+        "01.07",
+        "07.07"
+      ]
+    },
+    {
+      "id": "retention-backup",
+      "claim": "Retention, deletion, holds, disk-pressure admission; encrypted backup/export and isolated restore",
+      "source": "plan 07 Review Focus 4",
+      "tasks": [
+        "01.08",
+        "01.09",
+        "07.02"
+      ]
+    },
+    {
+      "id": "promql",
+      "claim": "Full version-pinned PromQL (3.1.0/3.13.5) language semantics, owned engine",
+      "source": "README: Query languages",
+      "tasks": [
+        "02.01",
+        "02.02",
+        "02.03",
+        "02.04"
+      ]
+    },
+    {
+      "id": "logql",
+      "claim": "Full version-pinned LogQL (3.5.2) language semantics, owned engine",
+      "source": "README: Query languages",
+      "tasks": [
+        "02.05",
+        "02.06",
+        "02.07"
+      ]
+    },
+    {
+      "id": "query-services",
+      "claim": "Input translators, owned execution services, live stream, fenced rule evaluation, persisted-path conformance gate",
+      "source": "README: Query languages",
+      "tasks": [
+        "02.08",
+        "02.09",
+        "02.10",
+        "02.11",
+        "02.12"
+      ]
+    },
+    {
+      "id": "sdk-capture",
+      "claim": "Policy-first Python/Node/Bun/browser capture with bounded durable delivery",
+      "source": "README: Policy-first Python/TypeScript capture",
+      "tasks": [
+        "03.01",
+        "03.02",
+        "03.03",
+        "03.04",
+        "03.05"
+      ]
+    },
+    {
+      "id": "releases-sourcemaps",
+      "claim": "Releases, real source maps, protected artifact upload, sandboxed symbolication, artifact retention",
+      "source": "README: Source-map decoder",
+      "tasks": [
+        "03.06",
+        "09.01",
+        "09.02",
+        "09.03",
+        "09.04"
+      ]
+    },
+    {
+      "id": "replay",
+      "claim": "Masked replay recorder, chain integrity, protected storage and inert rendering",
+      "source": "design: session replay (R-series)",
+      "tasks": [
+        "03.07",
+        "03.08",
+        "05.08",
+        "09.05"
+      ]
+    },
+    {
+      "id": "runtime-profiling",
+      "claim": "Runtime supplements, capability truth, measured whole-SDK overhead and the runtime/privacy qualification matrix",
+      "source": "plan 03 task 9, plan 07 task 6",
+      "tasks": [
+        "03.09",
+        "07.06"
+      ]
+    },
+    {
+      "id": "native-profiler",
+      "claim": "Linux native CPU/off-CPU profiler with kernel 6.1/6.6 amd64/arm64 qualification",
+      "source": "README: Linux native profiler",
+      "tasks": [
+        "04.01",
+        "04.02",
+        "04.03",
+        "04.04",
+        "04.05",
+        "04.06",
+        "04.07",
+        "04.08",
+        "04.09"
+      ]
+    },
+    {
+      "id": "investigation-ui",
+      "claim": "Scoped investigation, queue and incident workspace, errors/releases, metrics/logs/traces exploration, jobs, accessible end-to-end investigation",
+      "source": "design: investigation UI",
+      "tasks": [
+        "05.02",
+        "05.03",
+        "05.04",
+        "05.05",
+        "05.06",
+        "05.07",
+        "05.09"
+      ]
+    },
+    {
+      "id": "issues-jobs-conditions",
+      "claim": "Stable grouping, issue evidence and regression, job history/health, ordered conditions",
+      "source": "design: error and job model",
+      "tasks": [
+        "06.01",
+        "06.02",
+        "06.03",
+        "06.04"
+      ]
+    },
+    {
+      "id": "incidents-notifications",
+      "claim": "Incident actions, canonical urgency policy, durable fenced outbox, real SMTP/Telegram/webhook delivery, canonical-owner cutover",
+      "source": "design: response; README: incident/notification",
+      "tasks": [
+        "06.05",
+        "06.06",
+        "06.07",
+        "06.08",
+        "06.09"
+      ]
+    },
+    {
+      "id": "host-collection",
+      "claim": "Product-owned host/journal/syslog/file/scrape collection outside Kubernetes",
+      "source": "plan 07 task 3",
+      "tasks": [
+        "07.03"
+      ]
+    },
+    {
+      "id": "distribution",
+      "claim": "Reproducible static distribution with functional readiness; single-host and three-node installs",
+      "source": "plan 07 tasks 1-2",
+      "tasks": [
+        "07.01",
+        "07.02"
+      ]
+    },
+    {
+      "id": "reference-journeys",
+      "claim": "End-to-end generic reference journeys over real SDK/DB/dependency/replay/native paths",
+      "source": "plan 07 task 4",
+      "tasks": [
+        "07.04"
+      ]
+    },
+    {
+      "id": "language-campaign",
+      "claim": "Release-matrix orchestration of the complete PromQL/LogQL language gate",
+      "source": "plan 07 task 5",
+      "tasks": [
+        "07.05"
+      ]
+    },
+    {
+      "id": "failure-drills",
+      "claim": "Pipeline outage, partitions, deletion/restore and external deadman drills with real processes",
+      "source": "plan 07 task 7",
+      "tasks": [
+        "07.07"
+      ]
+    },
+    {
+      "id": "cross-module-evidence",
+      "claim": "Cross-module evidence and actual-browser acceptance",
+      "source": "plan 09 task 6",
+      "tasks": [
+        "09.06"
+      ]
+    },
+    {
+      "id": "release-gate",
+      "claim": "Release gate, SBOM, notices, signature metadata and installation verification",
+      "source": "plan 07 task 8",
+      "tasks": [
+        "07.08"
+      ]
+    }
+  ]
+}

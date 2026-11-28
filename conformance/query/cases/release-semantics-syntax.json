@@ -1,0 +1,706 @@
+{
+  "schema": "soundpost-authored-syntax-cases-v1",
+  "phase": "syntax",
+  "cases": [
+    {
+      "id": "promql-prometheus-3.1.0/primitive/backend-dialect/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(a)\\\\1\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/property-name-acceptance/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Assigned}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/unicode-table-membership/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Garay}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(\\xff)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-lookahead",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?=a)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-lookbehind",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?<=a)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-perl-groups-and-flags",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?P<n>a)(?:b)(?i)c(?s:.)\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-posix-class",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"[[:alpha:]\\\\d]\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-posix-unknown",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"[[:nosuch:]]\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-possessive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a++\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-repeat-1000",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a{1000}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-repeat-1001",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a{1001}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-repeat-nested",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(a{1000}){1000}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/dialect-ungreedy-flag",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?U)a+\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-any",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Any}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-assigned",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Assigned}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-cn",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Cn}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-greek",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Greek}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-lc",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{LC}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-lc-mixed-case",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Lc}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/release-semantics/extra/property-long-name",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Letter}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/at-offset/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m @ 10 @ 20"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/selector/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{job=~\".*\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/set-operators/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "a and on(job) group_left b"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/subquery/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "(1)[5s:1s]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/backend-dialect/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(a)\\\\1\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/property-name-acceptance/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Assigned}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/unicode-table-membership/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Garay}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(\\xff)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-lookahead",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?=a)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-lookbehind",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?<=a)\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-perl-groups-and-flags",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?P<n>a)(?:b)(?i)c(?s:.)\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-posix-class",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"[[:alpha:]\\\\d]\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-posix-unknown",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"[[:nosuch:]]\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-possessive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a++\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-repeat-1000",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a{1000}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-repeat-1001",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"a{1001}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-repeat-nested",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(a{1000}){1000}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/dialect-ungreedy-flag",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"(?U)a+\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-any",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Any}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-assigned",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Assigned}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-cn",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Cn}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-greek",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Greek}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-lc",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{LC}\"}"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-lc-mixed-case",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Lc}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/release-semantics/extra/property-long-name",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m{v=~\"\\\\p{Letter}\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/at-offset/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "m @ 10 @ 20"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/fill/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "a + fill(0) b"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/selector/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{job=~\".*\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/set-operators/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "a and on(job) group_left b"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/subquery/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "(1)[5s:1s]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    }
+  ]
+}

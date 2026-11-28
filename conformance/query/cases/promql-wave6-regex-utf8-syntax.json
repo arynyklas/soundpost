@@ -1,0 +1,560 @@
+{
+ "phase": "syntax",
+ "cases": [
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal-neg",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v!~\"\\xff\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal-prefix",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"a\\xff\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal-trunc",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xc3\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal-surrogate",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xed\\xa0\\x80\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/literal-with-valid",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xffa\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/alt-literals",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff|a\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/alt-literals-three",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"a|\\xff|x\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/alt-literals-neg",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v!~\"a|\\xff\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/alt-empty-member",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff|\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/with-eq",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff\",w=\"x\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/name-matcher",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{__name__=~\"\\xff\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/count-literal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "count(m{v=~\"\\xff\"})"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/range-selector",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "count_over_time(m{v=~\"\\xff\"}[1m])"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/valid-multibyte",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"é\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/valid-negated-class",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"[^a]\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/label-replace-valid",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "label_replace(m,\"d\",\"$1\",\"v\",\"(.*)\")"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/escaped-fffd-regex",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\ufffd\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/escaped-fffd-equal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=\"\\ufffd\"}"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/label-replace-literal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "label_replace(m,\"d\",\"x\",\"v\",\"\\xff\")"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/label-replace-alt",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "label_replace(m,\"d\",\"x\",\"v\",\"\\xff|a\")"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/accept/label-replace-group",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "label_replace(m,\"d\",\"$1\",\"v\",\"(\\xff)\")"
+   },
+   "expected": {
+    "accepted": true,
+    "type": "vector"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/dot-star",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff.*\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/plus",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff+\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/group",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"(\\xff)\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/class",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"[\\xff]\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/icase",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"(?i)\\xff\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/icase-valid",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"(?i)A\\xff\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/dotstar-lit",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\".*\\xff\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/alt-with-meta",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\xff|a.*\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/alt-meta-first",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"a.|\\xff\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/name-matcher-neg",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{__name__!~\"\\xff\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/escape-brace",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"\\x{FFFD}\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/raw-fffd-regex",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~\"�\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/raw-fffd-equal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=\"�\"}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/raw-fffd-backtick",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~`�`}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  },
+  {
+   "id": "wave6-regex-utf8-syntax/reject/raw-fffd-single",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "m{v=~'a�'}"
+   },
+   "expected": {
+    "accepted": false,
+    "category": "syntax"
+   }
+  }
+ ]
+}

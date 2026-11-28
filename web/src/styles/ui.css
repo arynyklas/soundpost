@@ -1,0 +1,249 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Shared components of the console design system (web/src/ui). State is always carried by words; colour and shape only reinforce it. */
+
+/* Buttons (anchors and buttons) */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--border-2);border-radius:7px;background:var(--raised);color:var(--text);font-weight:500;font-size:13px;line-height:1.2;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn:hover{background:var(--hover);text-decoration:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.btn-danger{border-color:var(--crit);color:var(--crit)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--text-2)}
+.btn-ghost:hover{background:var(--hover);color:var(--text)}
+.btn-icon{width:32px;padding:0}
+.btn-sm{min-height:28px;padding:0 9px;font-size:12.5px}
+.btn-sm.btn-icon{width:28px}
+.btn[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+.kbd{padding:1px 5px;border:1px solid var(--border-2);border-radius:4px;font:600 11px/1.3 inherit;color:var(--text-2);background:var(--panel)}
+.btn-primary .kbd{border-color:var(--on-accent);color:inherit;background:transparent}
+.need{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 11px;border-radius:14px;border:1px solid var(--accent);color:var(--accent-2);background:transparent;font-weight:600;font-size:12.5px;cursor:pointer;white-space:nowrap;flex:none;text-decoration:none}
+.need:hover{background:var(--accent-bg);text-decoration:none}
+a.need{min-height:28px}
+
+/* Segmented control and filter chips */
+.seg{display:inline-flex;gap:2px}
+.seg-item,.seg>button{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--text-2);font-weight:500;font-size:13px;cursor:pointer}
+.seg-item[aria-pressed=true],.seg>button[aria-pressed=true]{background:var(--active);color:var(--text)}
+.seg .count{font-size:12px;color:var(--text-3)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border:1px solid var(--border-2);border-radius:14px;background:var(--raised);color:var(--text-2);font-weight:500;font-size:12.5px;cursor:pointer}
+.chip:hover{color:var(--text)}
+.chip[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--text)}
+.chip .count{color:var(--text-3);font-variant-numeric:tabular-nums}
+
+/* Pills: one badge vocabulary. The text always says the state. Unknown/unassessed is outlined so it never reads as a verdict. */
+.pill{display:inline-flex;align-items:center;gap:5px;min-height:22px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;background:var(--unk-bg);color:var(--text-2);flex:none;vertical-align:middle}
+.pill .icon{width:12px;height:12px}
+.pill-crit{background:var(--crit-bg);color:var(--crit)}
+.pill-high{background:var(--high-bg);color:var(--high)}
+.pill-warn{background:var(--warn-bg);color:var(--warn)}
+.pill-ok{background:var(--ok-bg);color:var(--ok)}
+.pill-info{background:var(--info-bg);color:var(--info)}
+.pill-acc{background:var(--accent-bg);color:var(--accent-2)}
+.pill-unk{background:transparent;color:var(--unk);box-shadow:inset 0 0 0 1px var(--border-2)}
+.pill-line{background:transparent;color:var(--text-2);font-weight:500;box-shadow:inset 0 0 0 1px var(--border-2)}
+.sev{display:inline-grid;place-items:center;flex:none;width:22px;height:22px;border-radius:6px}
+.sev-crit{background:var(--crit-bg);color:var(--crit)}.sev-high{background:var(--high-bg);color:var(--high)}.sev-low{background:var(--info-bg);color:var(--info)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-3);flex:none}
+.dot-crit{background:var(--crit)}.dot-ok{background:var(--ok)}.dot-high{background:var(--high)}.dot-info{background:var(--info)}.dot-unk{background:transparent;box-shadow:inset 0 0 0 1.5px var(--unk)}
+
+/* Lineage: one row of chips, in the same order on every page. */
+.lineage{display:flex;align-items:center;gap:6px;flex-wrap:wrap;list-style:none;margin:0;padding:0}
+.lineage li{display:inline-flex;align-items:center;gap:6px}
+.lin-chip{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:0 11px;border:1px solid var(--border-2);border-radius:16px;background:var(--raised);color:var(--text);font-size:12.5px;white-space:nowrap;text-decoration:none}
+a.lin-chip:hover{background:var(--hover);text-decoration:none}
+.lin-chip[aria-current=true]{border-color:var(--accent);background:var(--accent-bg)}
+.lin-chip .lk{color:var(--text-3)}
+.lin-chip .ls{color:var(--text-2)}
+.lin-chip .icon{color:var(--text-3)}
+.lin-chip[aria-current=true] .icon{color:var(--accent-2)}
+.lin-chip.is-unavailable{border-style:dashed;color:var(--text-2)}
+.lin-arrow{color:var(--text-3);display:inline-flex}
+
+/* Cards */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-width:0;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border-bottom:1px solid var(--border)}
+.card-head h2,.card-head h3{font-size:14px}
+.card-body{padding:14px}
+.card-foot{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-3)}
+.card-urgent{border-color:var(--crit-solid)}
+.card-lead{padding:16px}
+.grid-side{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.grid-side>*,.grid-3>*,.grid-2>*{min-width:0}
+.kpis{display:flex;gap:28px;flex-wrap:wrap}
+.kpi{display:flex;flex-direction:column;gap:1px}
+.kpi .label{font-size:12px;color:var(--text-3);font-weight:500}
+.kpi .value{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .detail{font-size:12px;color:var(--text-3)}
+.stat{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:var(--panel);min-width:0}
+.stat .k,.eyebrow{font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em}
+.stat .v{font-size:15px;font-weight:600}
+.stat p{margin:0;font-size:13px;color:var(--text-2)}
+a.stat{color:inherit;text-decoration:none}
+a.stat:hover{background:var(--hover)}
+
+/* Tables: always inside a focusable, labelled scroll region. Below 820px a table of class "stack" becomes a list of rows (the same cells, no duplicates). */
+.table-region{overflow-x:auto;max-width:100%}
+.table-region:focus-visible{outline-offset:-2px}
+table.table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
+.table caption{text-align:left}
+.table th{position:sticky;top:0;z-index:1;height:36px;padding:0 12px;background:var(--raised);border-bottom:1px solid var(--border);color:var(--text-3);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;text-align:left;white-space:nowrap}
+.table td,.table tbody th{height:50px;padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:middle;text-align:left}
+.table tbody th{position:static;background:transparent;color:var(--text);font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;white-space:normal}
+.table.tight td,.table.tight tbody th{height:36px;padding:5px 12px}
+.table tbody tr:hover td,.table tbody tr:hover th{background:var(--hover)}
+.table tr.selected td,.table tr.selected th{background:var(--accent-bg)}
+.table td.right,.table th.right{text-align:right}
+.table tbody tr:last-child td,.table tbody tr:last-child th{border-bottom:0}
+/* An identifier (IdCode) is one short line, not a column of 4-character fragments; the full value is in the DOM and in its tooltip. Other code (metric names, labels, versions) is never clipped. */
+code.id{display:inline-block;max-width:13ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.idcode{display:inline-flex;align-items:center;gap:2px;max-width:100%}
+.idcode .btn-icon{border-color:transparent;background:transparent;color:var(--text-3)}
+.idcode .btn-icon:hover:not(:disabled){color:var(--text)}
+/* Tools and explanations folded under a summary (shell/Frames.tsx). */
+details.tools{border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+details.tools>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;font-weight:600;font-size:13px;color:var(--text-2)}
+details.tools>summary::-webkit-details-marker,.explain summary::-webkit-details-marker{display:none}
+details.tools>summary::before,.explain summary::before{content:"▸";font-size:10px}
+details.tools[open]>summary::before,.explain details[open]>summary::before{content:"▾"}
+details.tools>.tools-body{padding:0 14px 14px}
+details.tools .card{border:0;background:transparent}
+.explain>p{margin:0}
+.explain summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)}
+.explain details>p{margin:6px 0 0}
+/* Sentences in a cell keep a readable measure; the table scrolls inside its region instead of crushing them. */
+.table tbody td{min-width:12ch}
+.table tbody td:has(> ul),.table tbody td:has(> span.small){min-width:22ch}
+.table tr.sev-row-crit>:first-child{box-shadow:inset 3px 0 0 var(--crit)}
+.table tr.sev-row-high>:first-child{box-shadow:inset 3px 0 0 var(--high)}
+.table tr.sev-row-low>:first-child{box-shadow:inset 3px 0 0 var(--info)}
+.cell-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+.cell-title .a{font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.cell-title .m{font-weight:400;color:var(--text-2)}
+.cell-title .s{font-size:12.5px;color:var(--text-3);overflow-wrap:anywhere}
+.cell-title .s b{color:var(--text-2);font-weight:500}
+.unread{color:var(--accent-2);font-weight:600}
+.table-foot{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-3)}
+
+/* Feed lists */
+.feed{list-style:none;margin:0;padding:0}
+.feed>li{display:flex;align-items:center;gap:10px;min-height:50px;padding:8px 14px;border-bottom:1px solid var(--border)}
+.feed.tight>li{min-height:40px;padding:6px 14px}
+.feed>li:last-child{border-bottom:0}
+.feed>li:hover{background:var(--hover)}
+.feed>li>.need{margin-left:auto}
+
+/* Key/value */
+.props{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;font-size:13px;align-items:baseline;margin:0;width:100%}
+.props dt{color:var(--text-3)}
+.props dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:minmax(110px,40%) 1fr;font-size:12.5px;width:100%}
+.kv>div{padding:5px 8px;min-width:0;overflow-wrap:anywhere}
+.kv>div:nth-child(4n+1),.kv>div:nth-child(4n+2){background:var(--raised)}
+.kv .k,.kv .v{font-family:"Cascadia Mono",ui-monospace,Consolas,monospace;font-size:12px}
+.kv .k{color:var(--text-3)}
+details.more{width:100%}
+details.more>summary{color:var(--text-2);font-size:13px;list-style:none;display:flex;align-items:center;gap:6px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more[open]>summary{margin-bottom:10px}
+
+/* Callouts: a sentence with an icon; the sentence carries the meaning. */
+.callout{display:flex;align-items:center;gap:9px;min-height:36px;padding:8px 12px;border-radius:8px;font-size:13px;background:var(--warn-bg);color:var(--text);border:0}
+.callout>.icon{color:var(--warn);flex:none}
+.callout-crit{background:var(--crit-bg)}.callout-crit>.icon{color:var(--crit)}
+.callout-info{background:var(--info-bg)}.callout-info>.icon{color:var(--info)}
+.callout-high{background:var(--high-bg)}.callout-high>.icon{color:var(--high)}
+.callout-ok{background:var(--ok-bg)}.callout-ok>.icon{color:var(--ok)}
+.callout-unk{background:transparent;box-shadow:inset 0 0 0 1px var(--border-2)}.callout-unk>.icon{color:var(--unk)}
+.callout p{margin:0}
+
+/* Load state panel (every view shows its state in words) */
+.status{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-radius:8px;background:var(--raised);border:1px solid var(--border);font-size:13px}
+.status strong{font-weight:600;white-space:nowrap}
+.status-unauthorized,.status-error,.status-rate_limited{border-color:var(--crit);background:var(--crit-bg)}
+.status-incomplete,.status-stale,.status-unsupported{background:var(--warn-bg);border-color:var(--border-2)}
+.status-empty,.status-loading{background:var(--raised)}
+/* A ready answer is shown by the view itself; its state stays in the accessibility tree and the DOM contract, not as a banner. */
+.status-ready{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.sections{padding-left:20px}
+.sections-ok{font-size:12.5px;color:var(--text-3)}
+.sections-ok summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px}
+.sections-ok summary::-webkit-details-marker{display:none}
+.sections-ok summary::before{content:"▸";font-size:10px}
+.sections-ok[open] summary::before{content:"▾"}
+.sections-ok .sections{margin:6px 0 0}
+
+/* Events (timelines) */
+.events{list-style:none;margin:0;padding:0;width:100%}
+.events>li{display:grid;grid-template-columns:52px 24px minmax(0,1fr);gap:10px;padding:7px 0;font-size:13px;position:relative}
+.events>li:not(:last-child)::before{content:"";position:absolute;left:73px;top:32px;bottom:-7px;width:1px;background:var(--border-2)}
+.events .when{color:var(--text-3);font-variant-numeric:tabular-nums;padding-top:3px;text-align:right}
+.events .mark{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--raised);border:1px solid var(--border-2);color:var(--text-2)}
+.events .mark-sys{border-style:dashed}
+.events .mark-crit{color:var(--crit);border-color:var(--crit)}.events .mark-ok{color:var(--ok);border-color:var(--ok)}.events .mark-acc{color:var(--accent-2);border-color:var(--accent)}.events .mark-high{color:var(--high);border-color:var(--high)}.events .mark-dep{color:var(--c5);border-color:var(--c5)}
+.events .what{display:flex;flex-direction:column;gap:3px;padding-top:2px;min-width:0;overflow-wrap:anywhere}
+.events .quote{padding:6px 9px;border-radius:6px;background:var(--raised);color:var(--text-2)}
+.lane{display:inline-block;margin-right:6px;padding:0 6px;border-radius:4px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:1px;background:var(--unk-bg);color:var(--text-2)}
+.lane-rule{background:var(--crit-bg);color:var(--crit)}.lane-person{background:var(--accent-bg);color:var(--accent-2)}.lane-deploy{background:var(--info-bg);color:var(--info)}.lane-issue{background:var(--high-bg);color:var(--high)}
+
+/* Query / search bar */
+.searchbar{display:flex;align-items:center;gap:6px;min-height:36px;padding:3px 4px 3px 10px;border:1px solid var(--border-2);border-radius:8px;background:var(--panel);min-width:0}
+.searchbar:focus-within{border-color:var(--accent)}
+.searchbar input{flex:1;min-width:0;margin:0;border:0;background:transparent;outline:none;min-height:28px;padding:0 4px}
+.searchbar input:focus-visible{outline:none}
+.searchbar:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+
+/* Code */
+.code{margin:0;padding:6px 0;background:var(--code-bg);font:12.5px/1.65 "Cascadia Mono",ui-monospace,Consolas,monospace;overflow:auto}
+pre.snippet{margin:8px 0 0;padding:10px 12px;border-radius:7px;background:var(--code-bg);border:1px solid var(--border);font:12.5px/1.6 "Cascadia Mono",ui-monospace,Consolas,monospace;overflow:auto;color:var(--text)}
+
+/* Empty / onboarding */
+.empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:48px 20px;text-align:center;color:var(--text-2)}
+.empty h2{font-size:16px;color:var(--text)}
+.empty p{margin:0}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.steps>li{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:start;padding:16px;border-bottom:1px solid var(--border)}
+.steps>li:last-child{border-bottom:0}
+.steps .no{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;border:1px solid var(--border-2);font-weight:700;font-size:12px;color:var(--text-2)}
+.steps .no-ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.steps .no-cur{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-2)}
+
+/* Dialogs: native <dialog>, modal, centred. */
+dialog.modal{width:min(640px,92vw);max-height:88vh;padding:0;border:1px solid var(--border-2);border-radius:12px;background:var(--panel);color:var(--text);box-shadow:var(--shadow);overflow:auto}
+dialog.modal::backdrop{background:var(--scrim)}
+dialog.modal.modal-top{margin:11vh auto auto}
+dialog.modal.modal-tall{width:min(720px,94vw)}
+.modal-head{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 14px;border-bottom:1px solid var(--border)}
+.modal-head h2{font-size:14px}
+.modal-body{padding:14px;display:flex;flex-direction:column;gap:12px}
+.modal-body label{margin:0}
+.consequences{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--text-2);width:100%}
+.consequences>li{display:grid;grid-template-columns:18px 1fr;gap:8px;align-items:start}
+.option{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:7px;font-size:13.5px;cursor:pointer;margin:0;font-weight:400}
+.option:hover{background:var(--hover)}
+.option .count{font-size:12px;color:var(--text-3)}
+
+/* Narrow: a "stack" table becomes a list of rows. Explicit ARIA roles on the table elements keep their semantics when display changes. */
+@media (max-width:820px){
+ .grid-3,.grid-2,.grid-side{grid-template-columns:1fr}
+ table.table.stack,.table.stack tbody,.table.stack tr,.table.stack td,.table.stack th[scope=row]{display:block}
+ .table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+ .table.stack tr{padding:10px 12px;border-bottom:1px solid var(--border)}
+ .table.stack tbody tr:last-child{border-bottom:0}
+ .table.stack td,.table.stack tbody th{height:auto;padding:2px 0;border:0;background:transparent!important}
+ .table.stack td[data-label]::before{content:attr(data-label);display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3)}
+ .table.stack td:empty{display:none}
+ .table.stack tr>:first-child{box-shadow:none!important}
+ .table.stack tr.sev-row-crit{box-shadow:inset 3px 0 0 var(--crit)}
+ .table.stack tr.sev-row-high{box-shadow:inset 3px 0 0 var(--high)}
+ .table.stack tr.sev-row-low{box-shadow:inset 3px 0 0 var(--info)}
+ .feed>li{flex-wrap:wrap}
+ .feed>li>.need,.feed>li>.btn{flex-basis:100%;justify-self:start;margin-left:0}
+ .lineage{flex-wrap:nowrap;overflow-x:auto;max-width:100%;padding-bottom:4px}
+ .lin-chip{max-width:280px}
+ .steps>li{grid-template-columns:28px 1fr;gap:8px 12px}
+ .steps>li>:last-child{grid-column:2}
+}
+@media (max-width:1300px){.table .xl-only{display:none}}
+@media (forced-colors:active){.pill,.btn,.card,.callout,.need,.lin-chip,.chip,.status{border:1px solid CanvasText}}

@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": ["node"],
+    "typeRoots": ["../../../packages/build/node_modules/@types"]
+  },
+  "include": ["vite.config.ts"]
+}

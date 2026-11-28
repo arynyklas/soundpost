@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status: DRAFT — design and implementation plan only.** Product execution requires Aryn Yklas's full-design and shared-contract approval plus an explicit execution-method choice. This document authorizes no implementation, installation, deployment, customer cutover or disruptive drill.
+**Status:** APPROVED for product implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Customer cutover and disruptive customer drills remain separately authorized. Planned commands are not executed results.
 
 **Goal:** Build Soundpost-owned error/job/condition lifecycles and one canonical incident/notification workflow that preserves evidence, respects human actions and reports delivery uncertainty honestly.
 

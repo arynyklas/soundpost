@@ -1,0 +1,35 @@
+{
+  "primitive": "Go 1.27.3 portable math.Log, math.Log10, math.Log2 and math.Exp2 algorithms, with every product rounded separately (no fused multiply-add) so results match across architectures",
+  "license": "BSD-3-Clause",
+  "approved_by": "Owner (Aryn Yklas) delegated the decision on 2026-11-13; approved by the integration parent under that delegation: generic BSD-3-Clause numeric primitives from the Go standard library, same approval class as third_party/format/go124 and third_party/timezone/go124; needed because Go's own math package is compiled with fused multiply-add on arm64 and amd64 results must be reproduced bit for bit. Fully reversible by deleting this directory and the value.Log2/Exp2/Log10/Ln wrappers.",
+  "upstream_release": "go1.27.3",
+  "not_telemetry_code": true,
+  "files": [
+    {
+      "path": "log.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.27.3/src/math/log.go",
+      "also_derived_from": "https://raw.githubusercontent.com/golang/go/go1.27.3/src/math/log10.go (log2)",
+      "original_sha256": "d8675d3d9c665ec0db5cc15478c03efb244301bfa1268d02ae1861bf6f2812ab",
+      "original_sha256_log10_go": "936bbdfbe82a5b8028bd55b92666792954f3b8908a8e4e27008ec23935c96e37",
+      "adapted_sha256": "afd193364430134ab22731c8fc8cba3a5436601339fce019c3f425fbc935fec0",
+      "adaptations": [
+        "Package renamed to portablemath; only the unexported log algorithm (exported as Log) and Log10 and Log2 are carried.",
+        "Standard-library identifiers are qualified with the math package.",
+        "Every floating-point product that feeds an addition or subtraction is wrapped in an explicit float64 conversion so no architecture fuses it; the arithmetic is otherwise unchanged.",
+        "log dispatch through haveArchLog/archLog is removed so the portable algorithm is always used."
+      ]
+    },
+    {
+      "path": "exp2.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.27.3/src/math/exp.go",
+      "original_sha256": "75d415ac8eca1afc796cd621b393153ff82d342c24f5b391dfdd6a6e70303f2b",
+      "adapted_sha256": "9118ebe32aa637d510e566e2436e5ad44a407e677ecb36236b1283f70aa2b74c",
+      "adaptations": [
+        "Package renamed to portablemath; only exp2 (exported as Exp2) and expmulti are carried.",
+        "Standard-library identifiers are qualified with the math package.",
+        "Every floating-point product is wrapped in an explicit float64 conversion so no architecture fuses it; the arithmetic is otherwise unchanged.",
+        "Dispatch through haveArchExp2/archExp2 (assembly on arm64, loong64, riscv64) is removed so the portable algorithm is always used."
+      ]
+    }
+  ]
+}

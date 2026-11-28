@@ -1,0 +1,5 @@
+# 11.15 persisted worker: adapter/native/logs/cache+fault persisted-path stages
+./internal/conformance/query/smoke TestPersistedPathAnswersAreIdenticalAtEveryStage
+./internal/conformance/query/smoke TestDistributedPersistedPathAnswersAreIdenticalAtEveryStage
+./internal/conformance/query/smoke TestProfileCrossProductsEachProfileKeepsItsOwnExpectation
+./internal/conformance/query/smoke TestDistributedProfileCrossProductsKeepEachProfilesExpectation

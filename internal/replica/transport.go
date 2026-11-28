@@ -1,0 +1,394 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package replica
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"io"
+	"net"
+	"net/http"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/model"
+	raft "go.etcd.io/raft/v3"
+	pb "go.etcd.io/raft/v3/raftpb"
+	"google.golang.org/protobuf/proto"
+)
+
+const raftPath = "/internal/raft/v1/"
+
+type outbound struct {
+	group   model.ID
+	message *pb.Message
+	// supersedable, when nonzero, marks the placeholder of a lane's heartbeat (1) or heartbeat response (2):
+	// the message to deliver is whatever newest one the lane holds when the placeholder is reached.
+	supersedable int
+	// apps is how many appends the message stands for (queued appends that continue each other are one message) and size the
+	// entry bytes it carries (transport_flow.go); zero for any other message.
+	apps int
+	size uint64
+}
+
+// A delivery lane is one ordered queue and one worker per (peer, group). A
+// peer's groups share its HTTP/2 connection but never an ordered lane: a
+// request that waits on the receiving group (a slow disk, an applier parked on
+// a lock) delays only that group's later messages. One queue per peer would
+// make every group's heartbeats, votes and appends to that peer wait out the
+// request's timeout, so leaders lose their quorum on a healthy network.
+type deliveryLane struct {
+	peer  uint64
+	group model.ID
+}
+
+const laneDepth = 128
+
+// laneQueue is the ordered queue of one delivery lane plus one slot for the newest undelivered heartbeat
+// and one for the newest undelivered heartbeat response. A heartbeat is superseded by the next one (it
+// carries the leader's commit index and the context of the newest pending read-index round, a response
+// only echoes that context), so a lane that cannot deliver as fast as the group ticks keeps one of each
+// instead of a standing queue of stale ones. Without this a CPU-starved or slow receiver left up to
+// laneDepth stale heartbeats ahead of every read-index, vote and append message of the group: a
+// read-index round took seconds and a read failed with a 504 on a two-vCPU host.
+type laneQueue struct {
+	items    []outbound    // the queue, oldest first; mu guards it
+	wake     chan struct{} // the worker's wake-up (one pending signal is enough)
+	mu       sync.Mutex
+	slot     [2]*pb.Message
+	held     [2]bool // a placeholder for the slot is in the queue
+	highSent uint64  // the last log index a MsgApp of the lane carried (transport_stats.go)
+	// The appends the lane holds, queued or in flight (transport_flow.go): how many, the lowest index any of them
+	// continues from and the highest entry any carries.
+	apps             int
+	appsLow, appsEnd uint64
+	appsTerm         uint64
+	// What the lane's worker is doing: 0 idle, 1 waiting for the group lock, 2 sending (curType, since), 3 reporting the delivery.
+	phase, curType atomic.Int32
+	since          atomic.Int64
+}
+
+type MTLS struct {
+	mu          sync.RWMutex
+	id          uint64
+	identity    string
+	certificate tls.Certificate
+	roots       *x509.CertPool
+	dialer      *net.Dialer
+	groups      map[model.ID]*Group
+	queues      map[deliveryLane]*laneQueue
+	batchers    map[uint64]*peerBatcher // the coalesced heartbeats of each peer (transport_batch.go)
+	clients     map[string]*http.Client
+	stop        chan struct{}
+	once        sync.Once
+	closing     bool
+	workers     sync.WaitGroup
+	// dmu guards deferred, the batched messages waiting for a busy group's lock.
+	dmu      sync.Mutex
+	deferred map[deferKey]*deferredStep
+	// layoutSupport answers QueryLayout of the other members (layout_query.go); nil: the route is forbidden.
+	layoutSupport atomic.Pointer[func() (uint64, bool)]
+	// transfers are the messages being received in parts (transport_parts.go), at most one per sending member and group.
+	partMu    sync.Mutex
+	transfers map[transferKey]*transfer
+	// counters are the replication counters of each peer (transport_stats.go).
+	counters sync.Map // peer id -> *peerCounters
+	// budgets bound the bytes of messages in flight to each peer (transport_flow.go).
+	budgets sync.Map // peer id -> *byteBudget
+}
+
+func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x509.CertPool, sourceIP string) (*MTLS, error) {
+	if id == 0 || identity == "" || len(certificate.Certificate) == 0 || roots == nil {
+		return nil, ErrInvalid
+	}
+	cert, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil || certificateIdentity(cert) != identity {
+		return nil, ErrInvalid
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	if sourceIP != "" {
+		ip := net.ParseIP(sourceIP)
+		if ip == nil {
+			return nil, ErrInvalid
+		}
+		dialer.LocalAddr = &net.TCPAddr{IP: ip}
+	}
+	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]*laneQueue{}, batchers: map[uint64]*peerBatcher{}, deferred: map[deferKey]*deferredStep{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
+}
+func certificateIdentity(c *x509.Certificate) string {
+	if c == nil {
+		return ""
+	}
+	found := ""
+	for _, u := range c.URIs {
+		if u.Scheme == "spiffe" && u.Host == "soundpost" && strings.HasPrefix(u.Path, "/node/") && u.RawQuery == "" && u.Fragment == "" {
+			name := strings.TrimPrefix(u.Path, "/node/")
+			if name == "" || strings.Contains(name, "/") || found != "" {
+				return ""
+			}
+			found = name
+		}
+	}
+	return found
+}
+func (t *MTLS) ServerTLS() *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{t.certificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: t.roots, NextProtos: []string{"h2", "http/1.1"}}
+}
+func (t *MTLS) Register(g *Group) error {
+	if g == nil || g.id != t.id {
+		return ErrInvalid
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.groups[g.group] != nil {
+		return ErrConflict
+	}
+	t.groups[g.group] = g
+	return nil
+}
+func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if strings.HasPrefix(r.URL.Path, proposalPath) {
+		t.serveProposal(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, callPath) {
+		t.serveCall(w, r)
+		return
+	}
+	if r.URL.Path == layoutPath {
+		t.serveLayout(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, readinessPath) {
+		t.serveReadiness(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, snapshotPartPath) {
+		t.serveSnapshotPart(w, r)
+		return
+	}
+	if r.URL.Path == batchPath {
+		t.serveBatch(w, r)
+		return
+	}
+	if r.Method != "POST" || !strings.HasPrefix(r.URL.Path, raftPath) || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	g, sender, ok := t.authenticatePeer(w, r, raftPath)
+	if !ok {
+		return
+	}
+	limit := maxReady()
+	raw, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
+	if err != nil || len(raw) > limit {
+		http.Error(w, "invalid", http.StatusBadRequest)
+		return
+	}
+	t.stepMessage(w, r, g, sender, raw)
+}
+func (t *MTLS) Send(group model.ID, m *pb.Message) error {
+	if m == nil {
+		return ErrInvalid
+	}
+	key := deliveryLane{peer: m.GetTo(), group: group}
+	t.mu.RLock()
+	g, lane := t.groups[group], t.queues[key]
+	t.mu.RUnlock()
+	if g == nil || m.GetFrom() != t.id {
+		return ErrInvalid
+	}
+	kind := supersedableKind(m.GetType())
+	if kind != 0 {
+		// Heartbeats and their responses travel with every other group's to the peer (transport_batch.go):
+		// one that carries a read-index position is sent at once, the others wait for the batch window.
+		select {
+		case <-t.stop:
+			return ErrUnavailable
+		default:
+		}
+		if b := t.batcher(m.GetTo()); b != nil && b.offer(group, kind, m) {
+			return nil
+		}
+	}
+	if lane == nil {
+		t.mu.Lock()
+		if t.closing {
+			t.mu.Unlock()
+			return ErrUnavailable
+		}
+		if lane = t.queues[key]; lane == nil {
+			lane = newLane()
+			t.queues[key] = lane
+			t.workers.Add(1)
+			go t.deliver(lane)
+		}
+		t.mu.Unlock()
+	}
+	select {
+	case <-t.stop:
+		return ErrUnavailable
+	default:
+	}
+	if kind != 0 {
+		lane.mu.Lock()
+		defer lane.mu.Unlock()
+		if lane.held[kind-1] {
+			lane.slot[kind-1] = m
+			return nil
+		}
+		if !lane.pushLocked(outbound{group: group, supersedable: kind}) {
+			return ErrUnavailable
+		}
+		lane.held[kind-1], lane.slot[kind-1] = true, m
+		return nil
+	}
+	if m.GetType() == pb.MsgApp {
+		return t.enqueueApp(lane, group, m)
+	}
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	if !lane.pushLocked(outbound{group: group, message: m}) {
+		t.peerStats(m.GetTo()).queueFull.Add(1)
+		return ErrUnavailable
+	}
+	return nil
+}
+
+// supersedableKind is 1 for a heartbeat, 2 for a heartbeat response and 0 for every message that must be
+// delivered in order and in full.
+func supersedableKind(t pb.MessageType) int {
+	switch t {
+	case pb.MsgHeartbeat:
+		return 1
+	case pb.MsgHeartbeatResp:
+		return 2
+	}
+	return 0
+}
+func (t *MTLS) deliver(lane *laneQueue) {
+	defer t.workers.Done()
+	for {
+		out, ok := lane.pop(t.stop)
+		if !ok {
+			return
+		}
+		if out.supersedable != 0 {
+			lane.mu.Lock()
+			out.message = lane.slot[out.supersedable-1]
+			lane.slot[out.supersedable-1], lane.held[out.supersedable-1] = nil, false
+			lane.mu.Unlock()
+		}
+		t.mu.RLock()
+		g := t.groups[out.group]
+		t.mu.RUnlock()
+		if g == nil || out.message == nil {
+			lane.finishApps(out.apps)
+			continue
+		}
+		lane.phase.Store(1)
+		members := g.transportMembers()
+		var target Member
+		for _, m := range members.Nodes {
+			if m.ID == out.message.GetTo() {
+				target = m
+			}
+		}
+		lane.phase.Store(2)
+		lane.since.Store(time.Now().UnixNano())
+		lane.curType.Store(int32(out.message.GetType()))
+		err := t.sendOne(out, target)
+		// Before the report: the report may make raft resend, and that resend must not find this append still pending.
+		lane.finishApps(out.apps)
+		lane.phase.Store(3)
+		g.ReportDelivery(out.message.GetTo(), out.message.GetType() == pb.MsgSnap, err)
+		lane.phase.Store(0)
+	}
+}
+func (t *MTLS) sendOne(out outbound, target Member) error {
+	client, err := t.peerClient(target)
+	if err != nil {
+		return err
+	}
+	raw, err := proto.Marshal(out.message)
+	if err != nil {
+		return err
+	}
+	// A message larger than the whole budget (a snapshot) is not held to it, and one in parts pays for each part (sendParts).
+	if len(raw) >= flowThreshold && len(raw) <= peerBudgetBytes {
+		release, ok := t.budget(target.ID).acquire(int64(len(raw)), t.stop)
+		if !ok {
+			return ErrUnavailable
+		}
+		defer release()
+	}
+	began := time.Now()
+	err = t.sendEncoded(client, out, target, raw)
+	t.recordSent(out.message, len(raw), time.Since(began), err)
+	return err
+}
+func (t *MTLS) sendEncoded(client *http.Client, out outbound, target Member, raw []byte) error {
+	if len(raw) > maxReady() {
+		return t.sendParts(client, target, out.group, raw)
+	}
+	// A request is given 5 s and one more second for every 256 KiB it carries: a message that takes a slow link a while to
+	// carry is waited for, not sent again from the start when it nearly arrived.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(5+len(raw)>>18)*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, "POST", strings.TrimSuffix(target.Address, "/")+raftPath+out.group.String(), bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/x-protobuf")
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return ErrUnavailable
+	}
+	return nil
+}
+func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
+	g.mu.Lock()
+	if g.failed || g.closed {
+		g.mu.Unlock()
+		return
+	}
+	if err != nil {
+		g.noteUnreachable(to)
+		g.raw.ReportUnreachable(to)
+	}
+	if snapshot {
+		status := raft.SnapshotFinish
+		if err != nil {
+			status = raft.SnapshotFailure
+		} else {
+			g.sendSnap = nil // delivered: a later recipient gets a fresh cut
+		}
+		g.raw.ReportSnapshot(to, status)
+	}
+	g.wakeLocked()
+	g.mu.Unlock()
+	_ = g.settle() // a failure has failed the group
+}
+func (t *MTLS) Close() error {
+	t.mu.Lock()
+	t.closing = true
+	t.mu.Unlock()
+	t.once.Do(func() { close(t.stop) })
+	t.budgets.Range(func(_, v any) bool { v.(*byteBudget).wake(); return true })
+	t.workers.Wait()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, client := range t.clients {
+		client.CloseIdleConnections()
+	}
+	return nil
+}

@@ -1,0 +1,1540 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package storage
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	bolt "go.etcd.io/bbolt"
+)
+
+// replicatedEngine is the 64 data groups of a replicated engine. The identifier of each group is
+// fixed for as long as the groups are (InstallReplicationIdentity refuses once repl is set), and it
+// is a SHA-256 to derive, so the engine derives them once, when it builds the groups: owners is the
+// group by identifier. The per-page release barrier and the before-cursor check of every read
+// resolve a mark to its group through it; deriving the identifier of every slot per mark was
+// 64 x 64 hashes for each page released.
+type replicatedEngine struct {
+	groups [64]*replica.Group
+	owners map[model.ID]*replica.Group
+}
+
+// owner is the group named id, or nil when no group of this engine has that identifier.
+func (r *replicatedEngine) owner(id model.ID) *replica.Group { return r.owners[id] }
+
+// slotRetryMax is how many applied commands of a slot its replication group keeps in the retry table
+// (replica.Config.RetryMax; the 24 h window of replica.DefaultRetryWindow also applies). The table
+// answers a command retried under the ID it was proposed with, which only the proposer's own call
+// (seconds long) does, and every slot command also carries the application index it expects, so a
+// retry the table no longer recognizes is refused as stale, never applied twice. The table keeps a
+// fixed-size record per command (slotMachine.RetryByDigest), so a slot's snapshot envelope and its
+// journal head are bounded by this number, not by the slot's history.
+var slotRetryMax = 1024
+
+// RetryByDigest makes the slot machine a replica.DigestRetryMachine for every kind of command: the
+// retry table keeps the receipt and the digest of the proposed payload, never the payload (a batch
+// or an artifact fragment is up to hundreds of KiB, which the table kept for every command ever
+// committed).
+func (m *slotMachine) RetryByDigest(replica.Kind) bool { return true }
+
+var _ replica.DigestRetryMachine = (*slotMachine)(nil)
+
+type slotMachine struct {
+	// validated is the last artifact fragment that Validate decoded: the proposer validates the
+	// payload and Apply decodes the same bytes once they commit, and a fragment is hundreds of KiB.
+	// Apply reuses it only when its payload is byte-identical, so a payload that differs in any
+	// byte is decoded and checked from scratch.
+	validated struct {
+		mu      sync.Mutex
+		payload []byte
+		entry   walEntry
+	}
+	engine    *Engine
+	slot      uint16
+	authority ReplicatedAuthority
+	// snaps is the group's snapshot store (UseSnapshotStore), read and written under engine.mu.
+	snaps *replica.SnapshotStore
+}
+type slotSnapshot struct {
+	Version     uint16            `json:"version"`
+	Identity    model.ID          `json:"identity"`
+	Slot        uint16            `json:"slot"`
+	Application model.Uint64      `json:"application"`
+	Entries     []json.RawMessage `json:"entries"`
+}
+type ReplicationSeed struct {
+	Identity     model.ID         `json:"identity"`
+	Slots        [64][]byte       `json:"slots"`
+	Applications [64]model.Uint64 `json:"applications"`
+	Physical     [64]model.Uint64 `json:"physical"`
+	Terms        [64]model.Uint64 `json:"terms"`
+}
+type ReplicatedAuthority interface {
+	ValidateReplicatedBatch(context.Context, model.NormalizedBatch) error
+	ValidateReplicatedFragment(context.Context, model.ArtifactFragment) error
+	ValidateReplicatedGC(context.Context, model.ArtifactGC) error
+	ValidateReplicatedFence(context.Context, model.SourceFence) error
+	ValidateReplicatedCancellation(context.Context, model.CancelReservation) error
+	ValidateReplicatedDeleteBarrier(context.Context, model.DeleteBarrier) error
+}
+
+func storageReplicaFault(err error) error {
+	if err == nil {
+		return nil
+	}
+	var fault *model.Fault
+	if errors.As(err, &fault) {
+		return err
+	}
+	if errors.Is(err, replica.ErrConflict) {
+		return model.Fail(model.Conflict)
+	}
+	if errors.Is(err, replica.ErrStale) {
+		// A fence that was waited for and not reached (no quorum, no leader in time) is retryable as it is; the
+		// refusal of a command that names an old revision is not, and keeps the plain fault.
+		f := model.Fail(model.Stale)
+		f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+		return f
+	}
+	if errors.Is(err, replica.ErrInvalid) {
+		return model.Fail(model.Invalid)
+	}
+	// A moment without a leader is the retryable unavailable; a group that failed closed or was closed is not.
+	f := model.Fail(model.Unavailable)
+	f.Retryable = errors.Is(err, replica.ErrNoLeader)
+	return f
+}
+
+// replicaFaultUnder is storageReplicaFault for the error of a call made under ctx. Group.ReadIndex
+// answers replica.ErrStale when ctx ends before its freshness fence is reached: that is the caller
+// giving up, not evidence that the data moved, and it reads as the caller's cancellation or deadline.
+// A query that has failed one project cancels the others, and a typed Stale from one of them is fatal
+// for the whole request and, when that project sorts first, would replace the failure that caused the
+// cancellation (a corrupt page answered as stale).
+func replicaFaultUnder(ctx context.Context, err error) error {
+	if errors.Is(err, replica.ErrStale) {
+		switch cerr := ctx.Err(); {
+		case errors.Is(cerr, context.DeadlineExceeded):
+			f := model.Fail(model.Timeout) // waiting for a quorum that did not answer in time is retryable
+			f.Retryable = errors.Is(err, replica.ErrNoQuorum)
+			return f
+		case cerr != nil:
+			return model.Fail(model.Cancelled)
+		}
+	}
+	return storageReplicaFault(err)
+}
+
+// failLocked marks the engine failed; e.mu is held. One engine backs all 64 data groups of the
+// node, so a failed engine can apply nothing for any of them: the node's replica groups are
+// failed closed with it (replica.FailDomain), from another goroutine because the caller holds
+// e.mu and a group lock is never taken under it. Without that, a group that has not tried to
+// apply yet keeps answering heartbeats and keeps its leadership of a node that serves nothing.
+func (e *Engine) failLocked() {
+	e.failed = true
+	e.payloadDirty.Store(true) // an append of this process may have logged records that no commit names (payload_sweep.go)
+	if r := e.repl; r != nil {
+		go r.groups[0].FailStop(replica.FailEngine)
+	}
+}
+func metaKey(slot uint16, name string) []byte {
+	return append(append([]byte(nil), slotKey(slot)...), []byte(name)...)
+}
+
+// getCounter reads the application, physical or term counter of slot (replica_data).
+func getCounter(tx *bolt.Tx, slot uint16, name string) uint64 {
+	return getUint(tx.Bucket([]byte("replica_data")), metaKey(slot, name))
+}
+
+// putCounter writes a counter of slot into meta (the replica_data bucket of tx).
+func putCounter(tx *bolt.Tx, meta *bolt.Bucket, slot uint16, name string, value uint64) error {
+	return putUint(meta, metaKey(slot, name), value)
+}
+func commandKey(slot uint16, index uint64) []byte {
+	var key [10]byte
+	binary.BigEndian.PutUint16(key[:2], slot)
+	binary.BigEndian.PutUint64(key[2:], index)
+	return key[:]
+}
+func getUint(b *bolt.Bucket, key []byte) uint64 {
+	if b == nil {
+		return 0
+	}
+	raw := b.Get(key)
+	if len(raw) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(raw)
+}
+func putUint(b *bolt.Bucket, key []byte, value uint64) error {
+	var raw [8]byte
+	binary.BigEndian.PutUint64(raw[:], value)
+	return b.Put(key, raw[:])
+}
+
+// This marker is written only after a fully recovered legacy prefix has been
+// imported. Its loss is corruption, not permission to create a new authority.
+func (e *Engine) validateReplicaNamespaces() error {
+	return e.db.View(func(tx *bolt.Tx) error {
+		return validateReplicaNamespacesTx(tx, nil, e.verifiedFrom, &e.ver.commands, e.verifiedRec() != nil)
+	})
+}
+
+// validateReplicaNamespacesTx checks the replica namespaces. With bounded set, only commands from
+// from(slot, applied) up to the slot's applied index are looked up and the global key count is not
+// re-derived: the verified record vouches for the prefix and the background pass re-checks it. A poll that reports cancellation
+// stops it between two commands (the background passes, which Close waits for); a nil poll never does.
+func validateReplicaNamespacesTx(tx *bolt.Tx, poll *cancelPoll, from func(uint16, uint64) uint64, count *atomic.Uint64, bounded ...bool) error {
+	limited := len(bounded) > 0 && bounded[0]
+	marker := tx.Bucket([]byte("meta")).Get([]byte("replica_format"))
+	meta, commands := tx.Bucket([]byte("replica_data")), tx.Bucket([]byte("replica_commands"))
+	if marker == nil {
+		if meta != nil || commands != nil {
+			return model.Fail(model.Corrupt)
+		}
+		return nil
+	}
+	if !bytes.Equal(marker, []byte{1}) || meta == nil || commands == nil {
+		return model.Fail(model.Corrupt)
+	}
+	var expected uint64
+	for slot := range uint16(64) {
+		for _, name := range []string{"legacy", "physical", "application", "term"} {
+			if len(meta.Get(metaKey(slot, name))) != 8 {
+				return model.Fail(model.Corrupt)
+			}
+		}
+		applied := getCounter(tx, slot, "application")
+		cursor := tx.Bucket([]byte("cursors")).Get(slotKey(slot))
+		if applied != 0 && (len(cursor) != 8 || binary.BigEndian.Uint64(cursor) != applied) || applied == 0 && len(cursor) != 0 && getUint(tx.Bucket([]byte("cursors")), slotKey(slot)) != 0 {
+			return model.Fail(model.Corrupt)
+		}
+		if applied < getUint(meta, metaKey(slot, "legacy")) || applied > ^uint64(0)-expected || getCounter(tx, slot, "physical") == 0 && applied > getUint(meta, metaKey(slot, "legacy")) {
+			return model.Fail(model.Corrupt)
+		}
+		expected += applied
+		first := uint64(1)
+		if limited && from != nil {
+			first = from(slot, applied)
+		}
+		for index := first; index <= applied; index++ {
+			if err := poll.tick(); err != nil {
+				return err
+			}
+			if commands.Get(commandKey(slot, index)) == nil {
+				return model.Fail(model.Corrupt)
+			}
+			if count != nil {
+				count.Add(1)
+			}
+			if index == ^uint64(0) {
+				return model.Fail(model.Corrupt)
+			}
+		}
+		if limited && commands.Get(commandKey(slot, applied+1)) != nil {
+			return model.Fail(model.Corrupt)
+		}
+	}
+	if !limited && uint64(commands.Stats().KeyN) != expected {
+		return model.Fail(model.Corrupt)
+	}
+	return nil
+}
+func (e *Engine) replicatedLegacyCut(slot uint16) (bool, uint64, error) {
+	var replicated bool
+	var legacy uint64
+	err := e.db.View(func(tx *bolt.Tx) error {
+		replicated = tx.Bucket([]byte("meta")).Get([]byte("replica_format")) != nil
+		if replicated {
+			legacy = getUint(tx.Bucket([]byte("replica_data")), metaKey(slot, "legacy"))
+		}
+		return nil
+	})
+	return replicated, legacy, err
+}
+func legacyHistory(dir string, slot uint16, expected uint64) ([]json.RawMessage, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, walName(slot)))
+	if os.IsNotExist(err) && expected == 0 {
+		return []json.RawMessage{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	reader := bytes.NewReader(raw)
+	entries := make([]json.RawMessage, 0)
+	for index := uint64(1); reader.Len() > 0; index++ {
+		var header [walHeader]byte
+		if _, err := io.ReadFull(reader, header[:]); err != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		if string(header[:4]) != "SPW1" || binary.BigEndian.Uint16(header[4:6]) != 1 || binary.BigEndian.Uint16(header[6:8]) != slot || binary.BigEndian.Uint64(header[16:24]) != 1 || binary.BigEndian.Uint64(header[24:32]) != index || headerChecksum(header[:]) != binary.BigEndian.Uint32(header[32:36]) || binary.BigEndian.Uint32(header[36:40]) != 0 {
+			return nil, model.Fail(model.Corrupt)
+		}
+		size := binary.BigEndian.Uint32(header[8:12])
+		if size == 0 || size > 8<<20 || int(size) > reader.Len() {
+			return nil, model.Fail(model.Corrupt)
+		}
+		payload := make([]byte, size)
+		if _, err = io.ReadFull(reader, payload); err != nil || checksum(header[:], payload) != binary.BigEndian.Uint32(header[12:16]) {
+			return nil, model.Fail(model.Corrupt)
+		}
+		var entry walEntry
+		if json.Unmarshal(payload, &entry) != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		entries = append(entries, json.RawMessage(payload))
+	}
+	if uint64(len(entries)) != expected {
+		return nil, model.Fail(model.Corrupt)
+	}
+	return entries, nil
+}
+func (e *Engine) historyLocked(slot uint16) ([]json.RawMessage, error) {
+	var entries []json.RawMessage
+	initialized := false
+	err := e.db.View(func(tx *bolt.Tx) error {
+		commands := tx.Bucket([]byte("replica_commands"))
+		if commands == nil {
+			return nil
+		}
+		initialized = true
+		entries = make([]json.RawMessage, 0)
+		for index := uint64(1); index <= e.indexes[slot]; index++ {
+			raw := commandAt(commands, commandKey(slot, index))
+			if raw == nil {
+				return model.Fail(model.Corrupt)
+			}
+			entries = append(entries, json.RawMessage(bytes.Clone(raw)))
+			if index == ^uint64(0) {
+				return model.Fail(model.Corrupt)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !initialized {
+		return legacyHistory(e.dir, slot, e.indexes[slot])
+	}
+	return entries, nil
+}
+func (e *Engine) initializeReplicaNamespace() error {
+	var initialized bool
+	if err := e.db.View(func(tx *bolt.Tx) error {
+		initialized = tx.Bucket([]byte("meta")).Get([]byte("replica_format")) != nil
+		return nil
+	}); err != nil {
+		return err
+	}
+	if initialized {
+		return e.validateReplicaNamespaces()
+	}
+	var histories [64][]json.RawMessage
+	for slot := range uint16(64) {
+		entries, err := legacyHistory(e.dir, slot, e.indexes[slot])
+		if err != nil {
+			return err
+		}
+		histories[slot] = entries
+	}
+	return e.db.Update(func(tx *bolt.Tx) error {
+		if tx.Bucket([]byte("replica_data")) != nil || tx.Bucket([]byte("replica_commands")) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		meta, err := tx.CreateBucket([]byte("replica_data"))
+		if err != nil {
+			return err
+		}
+		commands, err := tx.CreateBucket([]byte("replica_commands"))
+		if err != nil {
+			return err
+		}
+		for slot := range uint16(64) {
+			for _, name := range []string{"legacy", "application"} {
+				if err = putUint(meta, metaKey(slot, name), e.indexes[slot]); err != nil {
+					return err
+				}
+			}
+			for _, name := range []string{"physical", "term"} {
+				if err = putUint(meta, metaKey(slot, name), 0); err != nil {
+					return err
+				}
+			}
+			for index, raw := range histories[slot] {
+				if err = commands.Put(commandKey(slot, uint64(index+1)), raw); err != nil {
+					return err
+				}
+			}
+		}
+		return tx.Bucket([]byte("meta")).Put([]byte("replica_format"), []byte{1})
+	})
+}
+
+func (e *Engine) ReplicationSeed() (ReplicationSeed, error) {
+	e.proposalMu.Lock()
+	defer e.proposalMu.Unlock()
+	out := ReplicationSeed{Identity: e.identity}
+	for slot := range uint16(64) {
+		raw, err := (&slotMachine{engine: e, slot: slot}).Snapshot()
+		if err != nil {
+			return ReplicationSeed{}, err
+		}
+		out.Slots[slot] = raw
+		out.Applications[slot] = model.Uint64(e.indexes[slot])
+		if e.repl != nil {
+			status := e.repl.groups[slot].Status()
+			out.Physical[slot] = model.Uint64(status.Applied)
+			out.Terms[slot] = model.Uint64(status.Term)
+		}
+	}
+	return out, nil
+}
+func (e *Engine) InstallReplicationIdentity(identity model.ID) error {
+	e.proposalMu.Lock()
+	defer e.proposalMu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.repl != nil || identity == (model.ID{}) {
+		return model.Fail(model.Conflict)
+	}
+	if identity == e.identity {
+		return nil
+	}
+	for _, index := range e.indexes {
+		if index != 0 {
+			return model.Fail(model.Conflict)
+		}
+	}
+	if err := e.db.Update(func(tx *bolt.Tx) error {
+		meta := tx.Bucket([]byte("meta"))
+		if meta.Get([]byte("segment_manifest")) != nil || meta.Get([]byte("replica_format")) != nil {
+			return model.Fail(model.Conflict)
+		}
+		return meta.Put([]byte("identity"), identity[:])
+	}); err != nil {
+		return err
+	}
+	e.identity = identity
+	e.catalog.Manifest.Group = identity
+	// The verified record names the old identity's groups: it is dropped, and the background
+	// verification, which may be running beside this install, is asked to record the new point.
+	e.dropVerifiedLocked()
+	e.kickVerify()
+	return nil
+}
+
+// DefaultSlotCadence is when each of the 64 data groups cuts a snapshot and compacts its journal by
+// itself, independent of the worker's hourly schedule: a restart replays the journal of every group
+// since its last cut (each entry decoded and compared with the command the store already holds),
+// which at the single-host load (2,000 records/s) was 1.3 GB and ~45 s of the 99-139 s graceful
+// restart (L2w20Admission7). A cut decodes the open window again (computeWindow), so the bound is a whole
+// window of 4096 commands: a tighter one costs more than it saves (1024 commands / 3 MiB took 42 % of the
+// server's CPU at the load, perf of the r2 run).
+// The entries a cut compacts are kept in memory for replica.DefaultRetain (at most 24 MiB a group): a node that was
+// down for the startup budget is sent them, not the state of every group (60 MB each, over a 100 Mbit/s card).
+var DefaultSlotCadence = replica.Cadence{Commands: 4096, Bytes: 16 << 20, Retain: replica.DefaultRetain, RetainBytes: 24 << 20}
+
+// slotStagger is the share of the cadence's bounds, in replica.StaggerBase ths, after which the data group of
+// slot cuts: half of them for slot 0 up to all but 1/128th for slot 63, so the 64 groups of a node, loaded alike,
+// do not all reach their bound at the same instant (the cuts of the 64 together took a minute of CPU and the
+// acknowledgements waited for them, L2w20Admission19), and the journal a restart replays is at most the bound.
+func slotStagger(slot uint16) uint16 {
+	return replica.StaggerBase/2 + (slot%64)*(replica.StaggerBase/2)/64
+}
+
+func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, authority ReplicatedAuthority) ([]*replica.Group, error) {
+	defer e.ver.starting.Store(false)
+	defer e.releaseFirstPass()
+	e.proposalMu.Lock()
+	defer e.proposalMu.Unlock()
+	if e.repl != nil || authority == nil {
+		return nil, model.Fail(model.Conflict)
+	}
+	if seed != nil {
+		if seed.Identity != e.identity {
+			return nil, model.Fail(model.Conflict)
+		}
+		for slot := range uint16(64) {
+			if seed.Physical[slot] == ^model.Uint64(0) || seed.Terms[slot] == ^model.Uint64(0) {
+				return nil, model.Fail(model.Invalid)
+			}
+		}
+	} else if len(c.Members.Nodes) != 1 {
+		return nil, model.Fail(model.Invalid)
+	}
+	if err := e.initializeReplicaNamespace(); err != nil {
+		return nil, err
+	}
+	if err := os.RemoveAll(filepath.Join(e.dir, "snapshot-stage")); err != nil { // window files of a cut a crash interrupted
+		return nil, err
+	}
+	if err := e.loadRestoreHold(); err != nil {
+		return nil, err
+	}
+	prefetchOnOpen(&e.closing, filepath.Join(e.dir, "apply.db")) // the replay below faults it page by page when it is cold (open_prefetch.go)
+	if e.erasure.wake == nil {
+		e.erasure.wake = make(chan struct{}, 1)
+	}
+	r := &replicatedEngine{}
+	out := make([]*replica.Group, 0, 64)
+	for _, m := range c.Members.Nodes {
+		if m.ID == c.ID {
+			e.self.Store(&selfRef{node: m.ID, identity: m.NodeIdentity}) // before any group can receive a snapshot
+		}
+	}
+	fail := func(err error) ([]*replica.Group, error) {
+		e.self.Store(nil)
+		for _, group := range out {
+			group.Close()
+		}
+		return nil, err
+	}
+	// The 64 groups replay their journals at open, each entry decoded and compared with the command the
+	// store already holds: opened one after the other that was 45 of the 99-139 s of a graceful restart
+	// after the single-host load (L2w20Admission7). The groups apply concurrently at run time, so they
+	// open concurrently; the result is placed by slot.
+	var opened [64]*replica.Group
+	var failed atomic.Pointer[error]
+	var wg sync.WaitGroup
+	next := make(chan uint16)
+	for range min(runtime.GOMAXPROCS(0), 8) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for slot := range next {
+				if failed.Load() != nil {
+					continue
+				}
+				cfg := c
+				cfg.Group = e.group(slot)
+				cfg.Directory = filepath.Join(c.Directory, "slot-"+strconv.Itoa(int(slot)))
+				machine := &slotMachine{engine: e, slot: slot, authority: authority}
+				cfg.Machine = machine
+				cfg.Validate = machine.Validate
+				cfg.Fault = e.trip
+				cfg.LeaderSpread, cfg.LeaderSeed = !e.leadersPlaced, uint64(slot) // the 64 groups are led evenly by the voters (replica/balance.go)
+				if cfg.RetryMax <= 0 {
+					cfg.RetryMax = slotRetryMax
+				}
+				if !cfg.Cadence.Enabled() {
+					cfg.Cadence = DefaultSlotCadence
+					cfg.Cadence.Stagger = slotStagger(slot)
+				}
+				if seed != nil {
+					cfg.Seed = seed.Slots[slot]
+					cfg.Application = uint64(seed.Applications[slot])
+					cfg.SeedIndex = uint64(seed.Physical[slot]) + 1
+					cfg.SeedTerm = uint64(seed.Terms[slot]) + 1
+				} else {
+					cfg.SeedFunc = machine.Snapshot // only a fresh journal needs the whole history
+					cfg.Application = e.indexes[slot]
+				}
+				group, err := replica.Open(cfg)
+				if err != nil {
+					failed.CompareAndSwap(nil, &err)
+					continue
+				}
+				opened[slot] = group
+			}
+		}()
+	}
+	for slot := range uint16(64) {
+		next <- slot
+	}
+	close(next)
+	wg.Wait()
+	r.owners = make(map[model.ID]*replica.Group, 64)
+	for slot, group := range opened {
+		if group != nil {
+			r.groups[slot] = group
+			group.HandleCall(appendCall, e.serveAppend)
+			id := e.group(uint16(slot))
+			if _, taken := r.owners[id]; !taken { // the first slot of an identifier wins, as a scan by slot did
+				r.owners[id] = group
+			}
+			out = append(out, group)
+		}
+	}
+	if err := failed.Load(); err != nil {
+		return fail(*err)
+	}
+	e.mu.Lock()
+	e.repl = r
+	e.mu.Unlock()
+	e.seedSnapshotCoverage(out)
+	e.registerDiag(r)
+	// Every slot is reconciled once at open: an erasure whose redaction a crash cut short, and a
+	// node whose retry table came from a cut older than the commands it has redacted, converge
+	// before any snapshot is cut or proposal accepted.
+	for slot := range e.redact.dirty {
+		e.redact.dirty[slot].Store(true)
+	}
+	if err := e.redactReplica(context.Background()); err != nil {
+		e.mu.Lock()
+		e.repl = nil
+		e.mu.Unlock()
+		return fail(err)
+	}
+	e.layoutAuthority.Store(&authority)
+	if err := e.adoptRunsLayoutIfContracted(context.Background()); err != nil {
+		e.mu.Lock()
+		e.repl = nil
+		e.mu.Unlock()
+		return fail(err)
+	}
+	e.startErasureLoop()
+	return out, nil
+}
+func (e *Engine) replicaBeforeWrite(ctx context.Context, slot uint16) error {
+	if slot >= 64 {
+		return model.Fail(model.Invalid)
+	}
+	if e.repl == nil || e.snap.hold.Load() || e.tomb.gate.Load() {
+		return model.Fail(model.Unavailable)
+	}
+	_, err := e.repl.groups[slot].ReadIndex(ctx)
+	return storageReplicaFault(err)
+}
+
+// proposalMu is held before e.mu. The applier takes only e.mu, and control apply
+// never invokes an engine callback. Ready WAL is the only new-write WAL.
+func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) error {
+	if e.repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	if slot >= 64 || index == 0 || index != e.indexes[slot]+1 {
+		return model.Fail(model.Stale)
+	}
+	group, command, err := e.slotCommand(slot, index, entry)
+	if err != nil {
+		return err
+	}
+	e.mu.Unlock()
+	err = proposeSlotCommand(group, command)
+	e.mu.Lock()
+	return err
+}
+
+// slotCommand is the replicated command that carries entry as the application index of slot. It
+// reads no engine state but the group table (written under proposalMu).
+func (e *Engine) slotCommand(slot uint16, index uint64, entry walEntry) (*replica.Group, replica.Entry, error) {
+	raw, err := e.encodeProposal(entry)
+	if err != nil {
+		return nil, replica.Entry{}, model.Fail(model.Invalid)
+	}
+	kind := replica.Data
+	var reservation *model.ID
+	switch entry.Type {
+	case "batch":
+		if entry.Batch == nil {
+			return nil, replica.Entry{}, model.Fail(model.Invalid)
+		}
+		id := entry.Batch.Reservation.ID
+		reservation = &id
+	case "cancel":
+		kind = replica.Cancellation
+		if entry.Cancel == nil {
+			return nil, replica.Entry{}, model.Fail(model.Invalid)
+		}
+		id := entry.Cancel.ReservationID
+		reservation = &id
+	case "fence", "delete_barrier", "erase_ack", "erase_unack", "erase_notice":
+		kind = replica.Barrier
+	case "artifact_fragment":
+		kind = replica.Artifact
+	case "artifact_gc":
+		kind = replica.ArtifactGC
+	default:
+		return nil, replica.Entry{}, model.Fail(model.Invalid)
+	}
+	return e.repl.groups[slot], replica.Entry{ID: model.NewID(), Kind: kind, Payload: raw, ReservationID: reservation, ApplicationIndex: index}, nil
+}
+
+// proposeSlotCommand returns once the command is committed on a quorum and applied here.
+func proposeSlotCommand(group *replica.Group, command replica.Entry) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := group.Propose(ctx, command)
+	return storageReplicaFault(err)
+}
+func (m *slotMachine) Applied() uint64 {
+	var applied uint64
+	_ = m.engine.db.View(func(tx *bolt.Tx) error {
+		applied = getCounter(tx, m.slot, "physical")
+		return nil
+	})
+	return applied
+}
+func (m *slotMachine) decode(payload []byte) (walEntry, error) {
+	m.validated.mu.Lock()
+	if len(payload) > 0 && bytes.Equal(payload, m.validated.payload) {
+		entry := m.validated.entry
+		m.validated.mu.Unlock()
+		return entry, nil
+	}
+	m.validated.mu.Unlock()
+	return decodeWAL(payload)
+}
+func (m *slotMachine) adaptedEntry(c replica.CommittedEntry) (walEntry, error) {
+	entry, err := m.decode(c.Entry.Payload)
+	if err != nil {
+		return entry, model.Fail(model.Corrupt)
+	}
+	if entry.Type == "erase_ack" || entry.Type == "erase_unack" || entry.Type == "erase_notice" {
+		// The author of a statement about a voter's own stores is the proposer the replica layer
+		// recorded, whatever the payload claimed; a command committed before attribution has none.
+		entry.Proposer = c.Entry.Proposer
+	}
+	if entry.Type == "cancel" {
+		if c.Entry.CommitSet == nil || entry.Cancel == nil || c.Entry.CommitSet.Group != c.Group || c.Entry.CommitSet.Reservation != entry.Cancel.ReservationID || c.Entry.CommitSet.PhysicalLast >= c.Index {
+			return entry, model.Fail(model.Corrupt)
+		}
+		entry.CommitSet = c.Entry.CommitSet
+	}
+	return entry, nil
+}
+
+// applyPlan is what Apply decided under e.mu and writes outside it.
+type applyPlan struct {
+	entry    walEntry
+	payload  []byte
+	logical  uint64
+	rejected bool
+	// prep is what the commit of a batch derives from it alone (prepareBatch), built outside every lock.
+	prep *batchPrep
+	// ref is the payload reference the command is stored as (paylog.go); nil when it is stored inline.
+	ref []byte
+}
+
+// Apply installs one committed entry. The decisions that read engine state are taken under e.mu; the
+// bolt commit (two fdatasyncs) runs outside it, folded with the commits of the other slot groups
+// that apply at the same moment (updateGrouped), so the applier of one slot never holds the engine
+// across a disk flush and N concurrent applies cost one flush, not N. The slot group applies its
+// entries one at a time, so nothing else moves this slot's index between the plan and the commit.
+func (m *slotMachine) Apply(c replica.CommittedEntry) error {
+	e := m.engine
+	e.mu.Lock()
+	plan, err := m.planApply(c)
+	e.mu.Unlock()
+	if err != nil || plan == nil {
+		return err
+	}
+	if plan.entry.Type == "batch" && !plan.rejected && plan.entry.Batch != nil && plan.entry.Receipt != nil {
+		plan.prep = prepareBatch(*plan.entry.Batch, *plan.entry.Receipt)
+	}
+	if e.payloadOn.Load() {
+		if err = e.externalize(plan); err != nil {
+			e.mu.Lock()
+			e.failLocked()
+			e.mu.Unlock()
+			return err
+		}
+	}
+	err = e.db.updateGrouped(func(tx *bolt.Tx) error {
+		meta := tx.Bucket([]byte("replica_data"))
+		if c.Entry.Kind != replica.Noop {
+			if err := e.applyTxPrepared(tx, m.slot, plan.logical, plan.entry, plan.prep); err != nil {
+				return err
+			}
+			stored := plan.payload
+			if plan.ref != nil {
+				stored = plan.ref
+			}
+			commands := tx.Bucket([]byte("replica_commands"))
+			ck := commandKey(m.slot, plan.logical)
+			if err := owePayloadScrub(tx, commands.Get(ck)); err != nil { // a command stored again leaves its first record unnamed
+				return err
+			}
+			if err := commands.Put(ck, stored); err != nil {
+				return err
+			}
+			if err := putUint(meta, metaKey(m.slot, "logical:"+strconv.FormatUint(plan.logical, 10)), c.Index); err != nil {
+				return err
+			}
+		}
+		if err := putCounter(tx, meta, m.slot, "application", plan.logical); err != nil {
+			return err
+		}
+		if err := putCounter(tx, meta, m.slot, "physical", c.Index); err != nil {
+			return err
+		}
+		return putCounter(tx, meta, m.slot, "term", c.Term)
+	})
+	e.mu.Lock()
+	hook, published := e.afterApplyPublished, false
+	defer func() {
+		e.mu.Unlock()
+		if published && hook != nil {
+			hook()
+		}
+	}()
+	if err != nil {
+		e.failLocked()
+		return err
+	}
+	if c.Entry.Kind != replica.Noop {
+		e.indexes[m.slot] = plan.logical
+		if !plan.rejected {
+			e.publishCommittedLocked(m.slot, plan.logical, plan.entry)
+			published = true
+			if plan.entry.Type == "delete_barrier" {
+				go e.noteDeletion() // never under e.mu or a group lock: Abort releases journal pins
+			}
+		}
+	}
+	if plan.rejected {
+		return replica.ErrConflict
+	}
+	return nil
+}
+
+// batchEntryPrefix opens the encoding of every batch command (encodeWAL: the type is the first member).
+var batchEntryPrefix = []byte(`{"type":"batch",`)
+
+// planApply is the part of Apply that reads engine state. It returns a nil plan, with the outcome of
+// the entry, when there is nothing to write (a replay of a command the store already holds). e.mu is held.
+func (m *slotMachine) planApply(c replica.CommittedEntry) (*applyPlan, error) {
+	e := m.engine
+	if e.closed || e.failed {
+		return nil, model.Fail(model.Unavailable)
+	}
+	logical := uint64(c.ApplicationCursor.Index)
+	var physical uint64
+	var stored []byte
+	held := false // the store holds this entry's command in the payload log, and the reference names exactly the journal's bytes
+	if err := e.db.View(func(tx *bolt.Tx) error {
+		physical = getCounter(tx, m.slot, "physical")
+		if c.Entry.Kind != replica.Noop {
+			commands := tx.Bucket([]byte("replica_commands"))
+			raw := commands.Get(commandKey(m.slot, logical))
+			if c.Index <= physical && bytes.HasPrefix(c.Entry.Payload, batchEntryPrefix) && e.payload.refNames(raw, c.Entry.Payload) {
+				held = true
+				return nil
+			}
+			stored = bytes.Clone(storedValue(commands, raw))
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if held {
+		return nil, nil
+	}
+	// A restart replays every committed entry since the last cut through here, 64 groups of up to a
+	// whole window of them, and each used to be decoded twice and encoded once to be compared with the
+	// command the store holds (47 s of CPU of a 79 s restart, L2w20Admission8/r6). A batch the store
+	// holds byte for byte as the journal carries it is that command: the bytes were validated, strictly
+	// decoded and applied when the entry was first applied, and nothing a decode could add is left to check.
+	// A command in the payload log is compared by its reference (length and CRC32C, and the file reaching the end of the record,
+	// payloadLog.refNames) and not read back: at the single-host gate the replay of a cold start was one random read of the log per
+	// entry, up to 4,096 for each of the 64 groups, under e.mu (L2w20Admission30); the record's bytes are checked by every read of
+	// it and by the full pass of the background verification.
+	if c.Index <= physical && c.Entry.Kind != replica.Noop && bytes.HasPrefix(stored, batchEntryPrefix) && bytes.Equal(stored, c.Entry.Payload) {
+		return nil, nil
+	}
+	entry := walEntry{}
+	var err error
+	if c.Entry.Kind != replica.Noop {
+		entry, err = m.adaptedEntry(c)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if c.Index <= physical {
+		if c.Entry.Kind == replica.Noop {
+			return nil, nil
+		}
+		var original walEntry
+		if len(stored) == 0 || json.Unmarshal(stored, &original) != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		if original.Type == "rejected" && original.Rejection != nil && *original.Rejection == c.Entry.ID {
+			return nil, replica.ErrConflict
+		}
+		expected, err := encodeWAL(entry)
+		if err != nil || !sameCommand(stored, expected) {
+			return nil, model.Fail(model.Corrupt)
+		}
+		return nil, nil
+	}
+	if c.Index != physical+1 && physical != 0 {
+		return nil, model.Fail(model.Corrupt)
+	}
+	rejected := false
+	if c.Entry.Kind != replica.Noop {
+		if logical != e.indexes[m.slot]+1 {
+			return nil, model.Fail(model.Corrupt)
+		}
+		if entry.Batch != nil {
+			err = e.db.View(func(tx *bolt.Tx) error {
+				if tx.Bucket([]byte("cancelled")).Get([]byte(entry.Batch.Reservation.ID.String())) != nil {
+					return model.Fail(model.Conflict)
+				}
+				return validateOrdered(tx, *entry.Batch)
+			})
+			if err != nil {
+				var fault *model.Fault
+				if !errors.As(err, &fault) || fault.Code != model.Conflict && fault.Code != model.Stale {
+					return nil, err
+				}
+				rejected = true
+				entry = walEntry{Type: "rejected", Rejection: &c.Entry.ID}
+			}
+		}
+		if entry.Artifact != nil && !rejected {
+			err = e.db.View(func(tx *bolt.Tx) error {
+				return validateTombstoneBlob(tx, entry.Artifact.Manifest, m.slot)
+			})
+			var deterministic bool
+			if deterministic, err = orderedRejection(err); err != nil {
+				return nil, err
+			}
+			if deterministic {
+				rejected = true
+				entry = walEntry{Type: "rejected", Rejection: &c.Entry.ID}
+			}
+		}
+		if err = e.trip("before_apply"); err != nil {
+			e.failLocked()
+			return nil, err
+		}
+	}
+	var payload []byte
+	if c.Entry.Kind != replica.Noop {
+		payload, err = encodeWAL(entry)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &applyPlan{entry: entry, payload: payload, logical: logical, rejected: rejected}, nil
+}
+func (m *slotMachine) Snapshot() ([]byte, error) {
+	e := m.engine
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.failed || e.closed {
+		return nil, model.Fail(model.Unavailable)
+	}
+	entries, err := e.historyLocked(m.slot)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(slotSnapshot{Version: 1, Identity: e.identity, Slot: m.slot, Application: model.Uint64(e.indexes[m.slot]), Entries: entries})
+}
+
+// UseSnapshotStore hands the machine the group's snapshot store (replica.SnapshotStoreUser): a
+// compact state is resolved from, and an incremental cut reuses files of, its selected snapshot.
+func (m *slotMachine) UseSnapshotStore(s *replica.SnapshotStore) {
+	m.engine.mu.Lock()
+	m.snaps = s
+	m.engine.mu.Unlock()
+}
+
+func (m *slotMachine) VerifySnapshot(raw []byte) error {
+	if stateVersion(raw) == 2 {
+		return m.verifyCompact(raw)
+	}
+	var snapshot slotSnapshot
+	if model.StrictJSON(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Identity != m.engine.identity || snapshot.Slot != m.slot || uint64(len(snapshot.Entries)) != uint64(snapshot.Application) {
+		return model.Fail(model.Corrupt)
+	}
+	e := m.engine
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.indexes[m.slot] < uint64(snapshot.Application) {
+		return nil
+	}
+	return e.db.View(func(tx *bolt.Tx) error {
+		commands := tx.Bucket([]byte("replica_commands"))
+		// At startup the verified record vouches for the commands up to its index (the
+		// background pass re-checks them); a snapshot received while running is compared whole.
+		first := 0
+		if e.ver.starting.Load() {
+			first = int(e.verifiedFrom(m.slot, e.indexes[m.slot])) - 1
+		}
+		for index := first; index < len(snapshot.Entries); index++ {
+			if !sameCommand(commandAt(commands, commandKey(m.slot, uint64(index+1))), snapshot.Entries[index]) {
+				return model.Fail(model.Corrupt)
+			}
+			e.ver.commands.Add(1)
+		}
+		return nil
+	})
+}
+
+// verifyCompact checks a compact state against the local commands by window: every window's
+// identity (the redaction-invariant digest of its commands) must equal the local one. A sealed
+// window's local identity is its persisted record; only an unsealed, missing or foreign-sized
+// window is derived from the commands, so the check is bounded by the table and one window. The
+// persisted records themselves are re-derived by the background full verification (VerifyFull).
+// The derivation holds no engine lock (cutMu shared, as a cut does): the 64 groups verify their
+// snapshots while they open, each deriving the open window of its slot (a second of CPU at 4,096
+// commands of 10 KB), and under the engine lock they did so one after the other: 27 s of the 34 s
+// restart after the single-host load (L2w20Admission21).
+// At a start the window is not derived at all when the verified record covers its last command
+// (verifiedThrough, decision D15: a start verifies what was written since the verified point, the
+// background pass re-checks the rest): the open window of each of the 64 groups was a random read
+// of the payload log for each of up to 4,096 commands, 842 MB and 130,000 reads on the cold disk of
+// the single-host gate before the node could answer (L2w20Admission32), while the verified point of
+// a node killed under load is at most a minute (verifyAdvanceInterval) behind its last command.
+func (m *slotMachine) verifyCompact(raw []byte) error {
+	var st slotSnapshotV2
+	e := m.engine
+	if model.StrictJSON(raw, &st) != nil || st.checkWindows() != nil || st.Identity != e.identity || st.Slot != m.slot {
+		return model.Fail(model.Corrupt)
+	}
+	e.cutMu.RLock()
+	defer e.cutMu.RUnlock()
+	e.mu.Lock()
+	behind := e.indexes[m.slot] < uint64(st.Application)
+	e.mu.Unlock()
+	if behind {
+		return nil
+	}
+	return e.db.View(func(tx *bolt.Tx) error {
+		meta, commands := tx.Bucket([]byte("replica_data")), tx.Bucket([]byte("replica_commands"))
+		for _, w := range st.Windows {
+			if uint64(st.Span) == snapshotWindow && w.Count == snapshotWindow {
+				var rec windowRecord
+				if v := meta.Get(wrecKey(m.slot, w.N)); v != nil && json.Unmarshal(v, &rec) == nil && rec.fits(w.N, w.First, w.Count) {
+					if rec.Identity != w.Identity {
+						return model.Fail(model.Corrupt)
+					}
+					continue
+				}
+			}
+			if e.ver.starting.Load() && e.verifiedThrough(m.slot, w.First+w.Count-1) {
+				continue // D15: a start verifies what lies above the verified point, and every command of this window is below it
+			}
+			identity, err := windowIdentity(commands, m.slot, w.First, w.Count)
+			if err != nil || identity != w.Identity {
+				return model.Fail(model.Corrupt)
+			}
+			e.ver.commands.Add(w.Count)
+		}
+		return nil
+	})
+}
+
+// compactSource resolves a compact state to the selected snapshot of the group's store, which
+// must be the very snapshot the state belongs to.
+func (m *slotMachine) compactSource(raw []byte) (slotSnapshotV2, replica.Snapshot, error) {
+	var st slotSnapshotV2
+	if model.StrictJSON(raw, &st) != nil || st.checkWindows() != nil || st.Slot != m.slot {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	m.engine.mu.Lock()
+	store := m.snaps
+	m.engine.mu.Unlock()
+	if store == nil {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Unavailable)
+	}
+	snap, ok := store.Current()
+	if !ok {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Unavailable)
+	}
+	have, isCompact, err := compactState(snap)
+	if err != nil || !isCompact || uint64(have.Application) != uint64(st.Application) {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	want, _ := json.Marshal(st)
+	got, _ := json.Marshal(have)
+	if !bytes.Equal(want, got) {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	return st, snap, nil
+}
+func (m *slotMachine) Restore(raw []byte, physical uint64) error {
+	var snapshot slotSnapshot
+	var compact *slotSnapshotV2
+	var source replica.Snapshot
+	if stateVersion(raw) == 2 {
+		st, from, err := m.compactSource(raw)
+		if err != nil {
+			return err
+		}
+		compact, source = &st, from
+		snapshot = slotSnapshot{Version: 1, Identity: st.Identity, Slot: st.Slot, Application: st.Application}
+	} else if model.StrictJSON(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Slot != m.slot || uint64(len(snapshot.Entries)) != uint64(snapshot.Application) {
+		return model.Fail(model.Corrupt)
+	}
+	e := m.engine
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if snapshot.Identity != e.identity || e.indexes[m.slot] > uint64(snapshot.Application) {
+		return model.Fail(model.Conflict)
+	}
+	// An install that replays data commands can put erased rows back into the live buckets, so
+	// the facts "this voter erased the operation" and "this voter acknowledged it" stop being
+	// true with the bytes. A command replayed from the snapshot that creates records, or a
+	// redacted one that keeps the records of other operations, makes the install such a replay.
+	dataBearing, owesWithdrawal := false, false
+	err := e.db.Update(indexRunTx(func(tx *bolt.Tx) error {
+		meta := tx.Bucket([]byte("replica_data"))
+		commands := tx.Bucket([]byte("replica_commands"))
+		install := func(logical uint64, raw []byte) error {
+			var entry walEntry
+			if json.Unmarshal(raw, &entry) != nil {
+				return model.Fail(model.Corrupt)
+			}
+			if logical <= e.indexes[m.slot] {
+				if !sameCommand(commandAt(commands, commandKey(m.slot, logical)), raw) {
+					return model.Fail(model.Corrupt)
+				}
+			} else {
+				if err := e.applyTx(tx, m.slot, logical, entry); err != nil {
+					return err
+				}
+				if err := commands.Put(commandKey(m.slot, logical), raw); err != nil {
+					return err
+				}
+				switch entry.Type {
+				case "batch", "batch_redacted", "artifact_fragment":
+					dataBearing = true
+				}
+			}
+			if entry.Cancel != nil {
+				if err := putUint(meta, metaKey(m.slot, "logical:"+strconv.FormatUint(logical, 10)), physical); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if compact != nil {
+			for _, w := range compact.Windows {
+				if err := readWindowFile(source, w, install); err != nil {
+					return err
+				}
+			}
+		} else {
+			for index, raw := range snapshot.Entries {
+				if err := install(uint64(index+1), raw); err != nil {
+					return err
+				}
+			}
+		}
+		if dataBearing {
+			var err error
+			if owesWithdrawal, err = invalidateErasureTx(tx); err != nil {
+				return err
+			}
+		}
+		if err := putCounter(tx, meta, m.slot, "physical", physical); err != nil {
+			return err
+		}
+		return putCounter(tx, meta, m.slot, "application", uint64(snapshot.Application))
+	}))
+	if err == nil {
+		if owesWithdrawal {
+			e.erasure.wakeLoop()
+		}
+		previous := e.indexes[m.slot]
+		e.indexes[m.slot] = uint64(snapshot.Application)
+		if previous < e.indexes[m.slot] {
+			e.snapshotGapLocked(m.slot)
+		}
+		// The installed retry table comes from the sender's cut, which may predate commands this
+		// node already redacted: the next reconciliation repeats the redaction.
+		e.markRedact(m.slot)
+	}
+	return err
+}
+
+// BeforeSnapshotSend and AdmitSnapshot make the slot machine a replica.SnapshotGate (erase_notice.go).
+func (m *slotMachine) BeforeSnapshotSend(ctx context.Context, to uint64) ([]byte, error) {
+	return m.engine.beforeSnapshotSend(ctx, to)
+}
+func (m *slotMachine) AdmitSnapshot(token []byte) (func(), error) {
+	return m.engine.admitSnapshot(token)
+}
+func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error {
+	entry, err := m.decode(command.Payload)
+	if err != nil || !m.validRouting(command, entry) {
+		return model.Fail(model.Invalid)
+	}
+	switch command.Kind {
+	case replica.Data:
+		if entry.Type != "batch" || entry.Batch == nil {
+			return model.Fail(model.Invalid)
+		}
+		if err := m.authority.ValidateReplicatedBatch(ctx, *entry.Batch); err != nil {
+			return err
+		}
+		// The proposer applies the command it just validated: Apply reuses this decode (one decode
+		// and one strict parse of the canonical batch per append instead of two).
+		m.validated.mu.Lock()
+		m.validated.payload, m.validated.entry = bytes.Clone(command.Payload), entry
+		m.validated.mu.Unlock()
+	case replica.Artifact:
+		if entry.Type != "artifact_fragment" || entry.Artifact == nil {
+			return model.Fail(model.Invalid)
+		}
+		if err := m.authority.ValidateReplicatedFragment(ctx, *entry.Artifact); err != nil {
+			return err
+		}
+		m.validated.mu.Lock()
+		m.validated.payload, m.validated.entry = bytes.Clone(command.Payload), entry
+		m.validated.mu.Unlock()
+	case replica.ArtifactGC:
+		if entry.Type != "artifact_gc" || entry.ArtifactGC == nil {
+			return model.Fail(model.Invalid)
+		}
+		if err := m.authority.ValidateReplicatedGC(ctx, *entry.ArtifactGC); err != nil {
+			return err
+		}
+	case replica.Barrier:
+		if entry.Type == "delete_barrier" {
+			if entry.DeleteBarrier == nil {
+				return model.Fail(model.Invalid)
+			}
+			if err := m.authority.ValidateReplicatedDeleteBarrier(ctx, *entry.DeleteBarrier); err != nil {
+				return err
+			}
+			break
+		}
+		if entry.Type == "erase_ack" {
+			if entry.EraseAck == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
+		if entry.Type == "erase_unack" {
+			if entry.EraseUnack == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
+		if entry.Type == "erase_notice" {
+			if entry.EraseNotice == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
+		if entry.Type != "fence" || entry.Fence == nil {
+			return model.Fail(model.Invalid)
+		}
+		if err := m.authority.ValidateReplicatedFence(ctx, *entry.Fence); err != nil {
+			return err
+		}
+	case replica.Cancellation:
+		if entry.Type != "cancel" || entry.Cancel == nil {
+			return model.Fail(model.Invalid)
+		}
+		if err := m.authority.ValidateReplicatedCancellation(ctx, *entry.Cancel); err != nil {
+			return err
+		}
+	default:
+		return model.Fail(model.Invalid)
+	}
+	e := m.engine
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || e.failed {
+		return model.Fail(model.Unavailable)
+	}
+	if command.ApplicationIndex != e.indexes[m.slot]+1 {
+		return model.Fail(model.Stale)
+	}
+	return e.db.View(func(tx *bolt.Tx) error {
+		if entry.Batch != nil {
+			return validateOrdered(tx, *entry.Batch)
+		}
+		if entry.Artifact != nil {
+			return validateBlobFence(tx, entry.Artifact.Manifest, m.slot)
+		}
+		return nil
+	})
+}
+
+// readIndexEach runs one ReadIndex round on every listed group and returns the cut and the error of
+// each, in the order of groups. The rounds run concurrently: every one costs the leader a heartbeat to
+// each follower and a response from each, and run one after another (as they did) a fence was 64
+// round trips of 4 peer requests each (256), ~75 % of all the peer requests of the distributed smoke
+// campaign; together, the transport (internal/replica/transport_batch.go) sends the heartbeats of the
+// groups that are waiting in one request to each peer. (A concurrent fence was once tried with a
+// transport that sent each heartbeat on its own request, and a voter that had just led or rejoined
+// refused its erasure checkpoint as unavailable for over 30 s; the erasure tests of this package run
+// the concurrent fence now.)
+func readIndexEach(ctx context.Context, groups []*replica.Group) ([]model.Cursor, []error) {
+	cuts := make([]model.Cursor, len(groups))
+	errs := make([]error, len(groups))
+	var wg sync.WaitGroup
+	for i, group := range groups {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cuts[i], errs[i] = group.ReadIndex(ctx)
+		}()
+	}
+	wg.Wait()
+	return cuts, errs
+}
+func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, allowPartial bool) ([]model.Cursor, bool, error) {
+	if e.repl == nil {
+		return nil, false, model.Fail(model.Unavailable)
+	}
+	cuts, errs := readIndexEach(ctx, e.repl.groups[:])
+	marks := make([]model.Cursor, 0, 64)
+	partial := false
+	for i, mark := range cuts {
+		if errs[i] != nil {
+			if !allowPartial {
+				return nil, false, replicaFaultUnder(ctx, errs[i])
+			}
+			partial = true
+			continue
+		}
+		marks = append(marks, mark)
+	}
+	for _, min := range minimum {
+		found := false
+		for i := range marks {
+			if marks[i].Group != min.Group {
+				continue
+			}
+			if marks[i].Index < min.Index {
+				// A cursor is a command its group acknowledged or published, not one ahead of the group: the
+				// group may not have recorded it as applied yet. Wait for it, within the replica layer's bounded
+				// wait; only a group that stays behind for that long is stale.
+				if owner := e.repl.owner(min.Group); owner != nil {
+					cut, err := owner.ReadIndexAtLeast(ctx, min)
+					if err == nil {
+						marks[i] = cut
+					} else if !allowPartial {
+						return nil, false, replicaFaultUnder(ctx, err)
+					}
+				}
+			}
+			found = marks[i].Index >= min.Index
+		}
+		if !found {
+			if !allowPartial {
+				return nil, false, model.Fail(model.Stale)
+			}
+			partial = true
+			for i, mark := range marks {
+				if mark.Group == min.Group {
+					marks = append(marks[:i], marks[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+	return marks, partial, nil
+}
+func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cursor) error {
+	repl := e.repl
+	if repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	e.mu.Unlock()
+	defer e.mu.Lock()
+	if hook := e.duringReleaseFence; hook != nil {
+		hook()
+	}
+	owners := make([]*replica.Group, len(marks))
+	for i, mark := range marks {
+		if owners[i] = repl.owner(mark.Group); owners[i] == nil {
+			return model.Fail(model.Stale)
+		}
+	}
+	cuts, errs := readIndexEach(ctx, owners)
+	for i, mark := range marks {
+		if errs[i] != nil {
+			return replicaFaultUnder(ctx, errs[i])
+		}
+		if cuts[i].Index < mark.Index {
+			// A mark is the cursor of a commit that a slot machine's Apply published, and a group records the
+			// command as applied (and a lone voter's reads see it) only after Apply returns: a fence that
+			// runs in that gap sees the group a command behind its own mark. The group is not stale, it has
+			// not caught up with its Apply yet; wait for it (g.mu is held across the whole of it). Only a
+			// group that stays behind for the wait is stale.
+			if err := owners[i].WaitApplied(ctx, mark); err != nil {
+				return replicaFaultUnder(ctx, err)
+			}
+		}
+	}
+	return nil
+}
+func (e *Engine) replicaBeforeCursor(ctx context.Context, cursor model.Cursor) error {
+	if e.repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	group := e.repl.owner(cursor.Group)
+	if group == nil {
+		return model.Fail(model.Stale)
+	}
+	if _, err := group.ReadIndexAtLeast(ctx, cursor); err != nil { // a cursor the group has not applied yet is waited for, not refused
+		return replicaFaultUnder(ctx, err)
+	}
+	return nil
+}
+
+// AdmissionOutcomes is the durable outcome of every batch the data holds. It reads the whole consumed bucket,
+// which grows with every batch ever appended: the reconciliation of outcomes asks AdmissionOutcomesFor
+// about the open reservations instead (control.Store.ReconcileAdmissions), and this stays for an owner
+// interface that cannot ask by ID. The engine lock is held only to see that the engine is usable, not
+// across the read.
+func (e *Engine) AdmissionOutcomes(ctx context.Context) ([]model.FinalizeAdmission, error) {
+	if _, _, err := e.replicaReadFence(ctx, nil, false); err != nil {
+		return nil, err
+	}
+	if e.unusable() {
+		return nil, model.Fail(model.Unavailable)
+	}
+	out := []model.FinalizeAdmission{}
+	err := e.db.View(func(tx *bolt.Tx) error {
+		return tableForEach(tx, tblConsumed, func(_, raw []byte) error {
+			var reservation model.AdmissionReservation
+			if json.Unmarshal(raw, &reservation) != nil || reservation.State != "consumed" || reservation.Cursor == nil {
+				return model.Fail(model.Corrupt)
+			}
+			out = append(out, model.FinalizeAdmission{ReservationID: reservation.ID, Cursor: *reservation.Cursor})
+			return nil
+		})
+	})
+	return out, err
+}
+
+// AdmissionOutcomesFor is the durable outcome of the batches that consumed the named reservations, those the
+// data holds one for: one read fence and a lookup per ID, so what it costs is what is asked and not the
+// history of the engine.
+func (e *Engine) AdmissionOutcomesFor(ctx context.Context, ids []model.ID) ([]model.FinalizeAdmission, error) {
+	if _, _, err := e.replicaReadFence(ctx, nil, false); err != nil {
+		return nil, err
+	}
+	if e.unusable() {
+		return nil, model.Fail(model.Unavailable)
+	}
+	out := make([]model.FinalizeAdmission, 0, len(ids))
+	err := e.db.View(func(tx *bolt.Tx) error {
+		rs, err := rowsOf(tx)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			raw := rs.Get(tblConsumed, []byte(id.String()))
+			if raw == nil {
+				continue
+			}
+			var reservation model.AdmissionReservation
+			if json.Unmarshal(raw, &reservation) != nil || reservation.State != "consumed" || reservation.Cursor == nil || reservation.ID != id {
+				return model.Fail(model.Corrupt)
+			}
+			out = append(out, model.FinalizeAdmission{ReservationID: id, Cursor: *reservation.Cursor})
+		}
+		return rs.Err()
+	})
+	return out, err
+}
+func (e *Engine) ReplicaGroups() []*replica.Group {
+	if e.repl == nil {
+		return nil
+	}
+	return append([]*replica.Group(nil), e.repl.groups[:]...)
+}
+
+// publishManifestLocked requires e.mu for the whole call and holds it: it takes
+// no group lock and makes no quorum round trip, so a voter publishes its own
+// layout whether it leads every group, some groups or none (see
+// publishManifestLocalLocked). A publication is allowed only once replication is
+// installed; before that no node-local layout is authoritative.
+func (e *Engine) publishManifestLocked(ctx context.Context, group model.ID, expected model.Revision, replacement Manifest, updates []pageRef) (model.Revision, error) {
+	if e.repl == nil {
+		return 0, model.Fail(model.Unavailable)
+	}
+	revision, err := e.publishManifestLocalLocked(ctx, group, expected, replacement, updates)
+	if err != nil {
+		return 0, storageReplicaFault(err)
+	}
+	return revision, nil
+}
+
+// Bind the ledger reservation and embedded C05 cursor to this installed slot
+// before ordering; malformed peers cannot poison a different group's applier.
+func (m *slotMachine) validRouting(command replica.Entry, entry walEntry) bool {
+	owner := m.engine.group(m.slot)
+	index := model.Uint64(command.ApplicationIndex)
+	switch command.Kind {
+	case replica.Data:
+		batch, receipt := entry.Batch, entry.Receipt
+		return batch != nil && receipt != nil && batch.Version == 1 && len(batch.Records) > 0 && len(batch.Records) <= 512 && batch.RouteSlot == m.slot && receipt.Cursor.Group == owner && receipt.Cursor.Index == index && receipt.Hash == batch.Hash && receipt.BatchID == batch.ID && command.ReservationID != nil && *command.ReservationID == batch.Reservation.ID
+	case replica.Cancellation:
+		return entry.Cancel != nil && entry.Cancel.OwnerGroup == owner && entry.Cancel.Fence.Group == owner && entry.Cancel.Fence.Index == index && command.ReservationID != nil && *command.ReservationID == entry.Cancel.ReservationID
+	case replica.Barrier:
+		if entry.Type == "delete_barrier" {
+			b := entry.DeleteBarrier
+			return b != nil && entry.Fence == nil && command.ReservationID == nil && b.Cursor == (model.Cursor{Group: owner, Index: index}) && b.Predicate.Validate() == nil
+		}
+		if entry.Type == "erase_ack" {
+			a := entry.EraseAck
+			return m.slot == eraseAckSlot && a.valid() && entry.EraseUnack == nil && entry.Proposer == nil && proposedBy(command.Proposer, a.Node, a.Identity) && entry.Fence == nil && command.ReservationID == nil && a.Cursor == (model.Cursor{Group: owner, Index: index})
+		}
+		if entry.Type == "erase_unack" {
+			u := entry.EraseUnack
+			return m.slot == eraseAckSlot && u.valid() && entry.EraseAck == nil && entry.Proposer == nil && proposedBy(command.Proposer, u.Node, u.Identity) && entry.Fence == nil && command.ReservationID == nil && u.Cursor == (model.Cursor{Group: owner, Index: index})
+		}
+		if entry.Type == "erase_notice" {
+			n := entry.EraseNotice
+			return m.slot == eraseAckSlot && n.valid() && entry.EraseAck == nil && entry.EraseUnack == nil && entry.Proposer == nil && command.Proposer != nil && entry.Fence == nil && command.ReservationID == nil && n.Cursor == (model.Cursor{Group: owner, Index: index})
+		}
+		return entry.Fence != nil && command.ReservationID == nil && len(entry.Fence.Barriers) == 1 && entry.Fence.Barriers[0].Group == owner && entry.Fence.Barriers[0].Index == index
+	case replica.Artifact:
+		return entry.Artifact != nil && command.ReservationID == nil && model.BlobOwnerSlot(entry.Artifact.Manifest.Org, entry.Artifact.Manifest.Project, entry.Artifact.Manifest.Root) == m.slot && entry.Artifact.Cursor.Group == owner && entry.Artifact.Cursor.Index == index
+	case replica.ArtifactGC:
+		return entry.ArtifactGC != nil && command.ReservationID == nil && entry.ArtifactGC.Cursor != nil && model.BlobOwnerSlot(entry.ArtifactGC.Manifest.Org, entry.ArtifactGC.Manifest.Project, entry.ArtifactGC.Manifest.Root) == m.slot && entry.ArtifactGC.Cursor.Group == owner && entry.ArtifactGC.Cursor.Index == index
+	}
+	return false
+}
+
+// Snapshot installation can skip an incremental delivery interval. Expose a
+// certified catch-up gap instead of silently losing a committed live event.
+func (e *Engine) snapshotGapLocked(slot uint16) {
+	if len(e.subscribers) == 0 {
+		return
+	}
+	cursor := model.Cursor{Group: e.group(slot), Index: model.Uint64(e.indexes[slot])}
+	for iterator := range e.subscribers {
+		advanceWatermark(iterator.marks, cursor)
+	drain:
+		for {
+			select {
+			case <-iterator.events:
+			default:
+				break drain
+			}
+		}
+		iterator.pending = nil
+		iterator.offset = 0
+		iterator.handed, iterator.pendingReplay, iterator.handedRows = 0, false, nil
+		if iterator.replay != nil {
+			// The gap below tells the consumer to recover everything up to marks, the window of an active
+			// replay included: reading that window afterwards would hand its rows a second time and put a
+			// page's cursors behind the cut the gap advertised. The consumer resumes after the gap.
+			iterator.replay = nil
+			iterator.settledLocked(1)
+		}
+		iterator.epoch++
+		after := iterator.delivered
+		if iterator.gap != nil {
+			after = iterator.gap.After // an untaken gap already owes the consumer everything after its After
+		}
+		iterator.gap = &ChangeGap{After: append([]model.Cursor(nil), after...), Through: append([]model.Cursor(nil), iterator.marks...), Reason: "catch_up_required"}
+		iterator.events <- committedEvent{Epoch: iterator.epoch}
+	}
+}

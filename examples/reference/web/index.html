@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Copyright 2026 Aryn Yklas -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Soundpost reference store</title>
+  </head>
+  <body>
+    <main>
+      <h1>Place an order</h1>
+      <label for="item">Item</label>
+      <select id="item">
+        <option value="sku-100">sku-100</option>
+        <option value="sku-404">sku-404</option>
+      </select>
+      <label for="note">Note</label>
+      <textarea id="note" rows="3" cols="40"></textarea>
+      <button id="place-order" type="button" disabled>Place order</button>
+      <div id="result" role="status"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

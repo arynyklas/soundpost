@@ -1,0 +1,244 @@
+{
+ "capabilities": [
+  {
+   "id": "5a030000000000000000000000000000",
+   "value": {
+    "runtime": "native_linux",
+    "version": "1",
+    "build": "owned",
+    "os": "linux",
+    "arch": "amd64",
+    "signal": "profile_chunk",
+    "method": "native_cpu",
+    "status": "supported",
+    "reason": "coverage_unmeasured",
+    "coverage": {
+     "frames": "unknown",
+     "threads": "unknown",
+     "workers": "none",
+     "tasks": "unknown"
+    },
+    "clock_domain": {
+     "host": "04000000000000000000000000000000",
+     "boot": "05000000000000000000000000000000",
+     "runtime": "06000000000000000000000000000000"
+    },
+    "expires_ns": "1730086400000000000"
+   }
+  },
+  {
+   "id": "cc24e3b2832d5f5c1cd0cdd97f4bd0b7",
+   "value": {
+    "runtime": "native_linux",
+    "version": "1",
+    "build": "owned",
+    "os": "linux",
+    "arch": "amd64",
+    "signal": "profile_chunk",
+    "method": "native_offcpu",
+    "status": "supported",
+    "reason": "coverage_unmeasured",
+    "coverage": {
+     "frames": "unknown",
+     "threads": "unknown",
+     "workers": "none",
+     "tasks": "unknown"
+    },
+    "clock_domain": {
+     "host": "04000000000000000000000000000000",
+     "boot": "05000000000000000000000000000000",
+     "runtime": "06000000000000000000000000000000"
+    },
+    "expires_ns": "1730086400000000000"
+   }
+  },
+  {
+   "id": "23f53f8590d24f02b3416f020c854992",
+   "value": {
+    "runtime": "native_linux",
+    "version": "1",
+    "build": "owned",
+    "os": "linux",
+    "arch": "amd64",
+    "signal": "profile_chunk",
+    "method": "native_runqueue_split",
+    "status": "denied",
+    "reason": "permission_denied",
+    "coverage": {
+     "frames": "unknown",
+     "threads": "unknown",
+     "workers": "none",
+     "tasks": "unknown"
+    },
+    "clock_domain": {
+     "host": "04000000000000000000000000000000",
+     "boot": "05000000000000000000000000000000",
+     "runtime": "06000000000000000000000000000000"
+    },
+    "expires_ns": "1730086400000000000"
+   }
+  }
+ ],
+ "chunk": {
+  "profile_id": "5a010000000000000000000000000000",
+  "process_id": "5a020000000000000000000000000000",
+  "capability_id": "5a030000000000000000000000000000",
+  "method": "native_cpu",
+  "units": "samples",
+  "start_ns": "1730000000000000000",
+  "end_ns": "1730000000000001000",
+  "clock": {
+   "wall_ns": "1730000000000000000",
+   "mono_ns": "0",
+   "domain": {
+    "host": "04000000000000000000000000000000",
+    "boot": "05000000000000000000000000000000",
+    "runtime": "06000000000000000000000000000000"
+   },
+   "uncertainty_ns": "0"
+  },
+  "frames": [
+   {
+    "module_id": "",
+    "function": "",
+    "artifact_id": "",
+    "offset": "0",
+    "reason": "frame_unresolved"
+   },
+   {
+    "module_id": "",
+    "function": "",
+    "artifact_id": "",
+    "offset": "0",
+    "reason": "missing_frame_pointer_or_callchain"
+   }
+  ],
+  "stacks": [
+   {
+    "frames": [
+     0
+    ]
+   },
+   {
+    "frames": [
+     1
+    ]
+   }
+  ],
+  "samples": [
+   {
+    "at_ns": "10",
+    "stack": 0,
+    "count": "1",
+    "thread": "8",
+    "native": {
+     "task": {
+      "boot_id": "boot",
+      "pid_namespace": "1",
+      "tgid": 7,
+      "tid": 8,
+      "process_start_ns": "1",
+      "generation": "1"
+     },
+     "method": "software_cpu_clock",
+     "unit": "cpu_clock_nanoseconds",
+     "requested_hz": 99,
+     "period": "901"
+    }
+   },
+   {
+    "at_ns": "20",
+    "stack": 0,
+    "count": "1",
+    "thread": "8",
+    "native": {
+     "task": {
+      "boot_id": "boot",
+      "pid_namespace": "1",
+      "tgid": 7,
+      "tid": 8,
+      "process_start_ns": "1",
+      "generation": "1"
+     },
+     "method": "software_cpu_clock",
+     "unit": "cpu_clock_nanoseconds",
+     "requested_hz": 99,
+     "period": "901"
+    }
+   },
+   {
+    "at_ns": "30",
+    "stack": 0,
+    "count": "1",
+    "thread": "8",
+    "native": {
+     "task": {
+      "boot_id": "boot",
+      "pid_namespace": "1",
+      "tgid": 7,
+      "tid": 8,
+      "process_start_ns": "1",
+      "generation": "1"
+     },
+     "method": "software_cpu_clock",
+     "unit": "cpu_clock_nanoseconds",
+     "requested_hz": 99,
+     "period": "901"
+    }
+   }
+  ],
+  "intervals": [
+   {
+    "start_ns": "100",
+    "end_ns": "160",
+    "stack": 1,
+    "kind": "blocked",
+    "thread": "8",
+    "censored": false,
+    "native_task": {
+     "boot_id": "boot",
+     "pid_namespace": "1",
+     "tgid": 7,
+     "tid": 8,
+     "process_start_ns": "1",
+     "generation": "1"
+    },
+    "unit": "nanoseconds",
+    "reason": "missing_switch_callchain"
+   },
+   {
+    "start_ns": "200",
+    "end_ns": "230",
+    "stack": 1,
+    "kind": "runnable",
+    "thread": "8",
+    "censored": false,
+    "native_task": {
+     "boot_id": "boot",
+     "pid_namespace": "1",
+     "tgid": 7,
+     "tid": 8,
+     "process_start_ns": "1",
+     "generation": "1"
+    },
+    "unit": "nanoseconds",
+    "reason": "missing_switch_callchain"
+   }
+  ],
+  "loss": "0",
+  "truncated": false,
+  "native_domain": {
+   "host_id": "host",
+   "boot_id": "boot"
+  },
+  "policy_revision": "1",
+  "sequence": "1",
+  "complete": true,
+  "native_capabilities": [
+   "5a030000000000000000000000000000",
+   "cc24e3b2832d5f5c1cd0cdd97f4bd0b7",
+   "23f53f8590d24f02b3416f020c854992"
+  ]
+ },
+ "source": "internal/httpapi TestWriteProfileFixture: nativeperf.AssembleProfile over sanitized synthetic events"
+}

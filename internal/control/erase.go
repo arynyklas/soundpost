@@ -1,0 +1,1065 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package control
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/model"
+	bolt "go.etcd.io/bbolt"
+)
+
+// This file is what makes a committed deletion reach the control books that
+// carry payloads derived from telemetry: RuleBooks and RuleOutputs (a recording
+// intent holds a whole batch), IncidentBooks, ConditionBooks and DeliveryBooks.
+// The C12 saga hides and erases the data groups; without this, the values those
+// groups held stayed readable here, in control.db and in the control snapshot.
+//
+// The erasure is one deterministic function of (state, predicate, time) that
+// runs INSIDE the transition that begins a deletion (beginDeletion), completes
+// it (completeDeletion: it catches an effect that committed between the two) or
+// re-applies it from the restore authority (ImportDeletions). Control commands
+// replicate the whole resulting state, so every replica, every snapshot restore
+// and every journal replay installs the same bytes the proposer computed.
+
+// Residual store names Store.ResidualStores reports, in the vocabulary of
+// storage.ResidualStores.
+const (
+	// ResidualControlState is control.db: bbolt never zeroes a page it frees, so
+	// the state an erasure replaced still sits in free pages of the file until
+	// ScrubErased zeroes them.
+	ResidualControlState = "control_state"
+	// ResidualControlJournal is the control group's Raft journal and snapshots:
+	// every control command carries the whole control state, and the group
+	// retains every command (and so its payload) in the journal until a later
+	// cut compacts it onto a snapshot (the retry table keeps a digest, not the
+	// payload: replica.DigestRetryMachine). RedactRetainedControlCommands
+	// removes the covered payloads from this node's copy; ResidualStores names
+	// it until that is proven.
+	ResidualControlJournal = "control_raft_journal"
+)
+
+const (
+	controlErasedAction = "delete.control_erased"
+	controlErasedReason = "control_payloads_erased"
+	// controlScrubbedAction settles the control.db scrub an erasing audit owes:
+	// it is appended after ScrubErased zeroed every free page, and names the
+	// operations whose erasing audits the scrub covered.
+	controlScrubbedAction = "delete.control_scrubbed"
+	controlScrubbedReason = "control_db_free_pages_zeroed"
+)
+
+// eraseControlPayloads drops every control payload the operation's predicate
+// covers and audits the fact when it dropped any. at is the deterministic time
+// of the transition; it never reads a clock. While the operation is fencing, a
+// delivery it covers only loses its body and stays paused (deliveryGate); once
+// it is complete or failed the unsent ones are settled. It is the begin,
+// complete and import erasure: an opaque state is covered by stateErased. The
+// opaque states it erased without a recorded window are added to op.OverErased
+// (CD-9): op is the caller's copy of the operation record, which the caller
+// stores afterwards.
+func eraseControlPayloads(st *State, op *model.DeletionOperation, at model.UnixNano) error {
+	_, err := eraseControlPayloadsBy(st, op, at, stateErased)
+	return err
+}
+
+// eraseControlPayloadsBy is eraseControlPayloads with the rule that covers an
+// opaque state. recorded reports that op.OverErased changed, so a caller that
+// does not store op in the same breath knows it must.
+func eraseControlPayloadsBy(st *State, op *model.DeletionOperation, at model.UnixNano, rule stateRule) (recorded bool, err error) {
+	dropped, over, err := eraseBooks(st, *op, at, rule)
+	if err != nil {
+		return false, err
+	}
+	if dropped > 0 {
+		audit(st, op.Principal, op.Predicate.Org, controlErasedAction, controlErasedReason, at, []model.ID{op.Predicate.Operation})
+	}
+	return over.addTo(op), nil
+}
+
+// eraseLateEffect runs inside every transition that commits an effect derived
+// from telemetry (a rule evaluation, an incident or condition action, a job
+// update, issue evidence, a delivery enqueue) of project. The barrier saga lets
+// a worker that read its batch before the barrier finish its write, so such an
+// effect can commit AFTER a deletion completed (or failed); the erasure that ran
+// when the operation completed has long passed. For every committed deletion
+// that covers the project and has finished (complete or failed: a fencing one
+// erases at its completion, and a held one has not begun) the erasure runs
+// again over the state the effect just changed, so the covered payload never
+// reaches the committed state, the snapshot or control.db.
+//
+// It is NOT the begin/complete erasure over again: that one drops an opaque
+// state (incident, condition, job) whose newest time is at or after the range's
+// start with no end bound, because the payloads under it really were old. Run on
+// every later commit that rule would tombstone a brand-new state in the very
+// transition that commits it, forever (09.06 review C-1). The late pass uses
+// stateErasedLate, which covers an opaque state only when it names evidence
+// inside the range's [start,end); the other books (rule evaluations, issue
+// evidence, deliveries) already are half-open and are unchanged. The pass is
+// idempotent and adds an erasing audit (and so owes a scrub) only when it
+// dropped something, like every erasure; the transition time is the
+// operation's own completion time, so it stays a pure function of (state,
+// predicate), identical on every replica.
+func eraseLateEffect(st *State, org, project model.ID) error {
+	if len(st.Deletions) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(st.Deletions))
+	for id := range st.Deletions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		op := st.Deletions[id]
+		if op.Phase != model.DeletePhaseComplete && op.Phase != model.DeletePhaseFailed || !op.Predicate.CoversProject(org, project) {
+			continue
+		}
+		recorded, err := eraseControlPayloadsBy(st, &op, op.CompletedAt, stateErasedLate)
+		if err != nil {
+			return err
+		}
+		if recorded {
+			putDeletion(st, op)
+		}
+	}
+	return nil
+}
+
+// overErased counts, per opaque book, the states one erasure pass dropped
+// without a recorded window (CD-9): fail-closed erasures a reader of the
+// receipt would otherwise take for exact ones.
+type overErased struct{ incidents, conditions, jobs int }
+
+// addTo adds the counts to the operation record, in the fixed book order and
+// only for books with a non-zero total, and reports whether it changed anything.
+func (o overErased) addTo(op *model.DeletionOperation) bool {
+	changed := false
+	for _, b := range []struct {
+		book string
+		n    int
+	}{{model.OverErasedIncident, o.incidents}, {model.OverErasedCondition, o.conditions}, {model.OverErasedJob, o.jobs}} {
+		if b.n == 0 {
+			continue
+		}
+		changed = true
+		found := false
+		for i := range op.OverErased {
+			if op.OverErased[i].Book == b.book {
+				op.OverErased[i].Count += model.Uint64(b.n)
+				found = true
+			}
+		}
+		if !found {
+			op.OverErased = append(op.OverErased, model.OverErased{Book: b.book, Count: model.Uint64(b.n)})
+		}
+	}
+	if changed {
+		order := map[string]int{model.OverErasedIncident: 0, model.OverErasedCondition: 1, model.OverErasedJob: 2}
+		sort.Slice(op.OverErased, func(i, j int) bool { return order[op.OverErased[i].Book] < order[op.OverErased[j].Book] })
+	}
+	return changed
+}
+
+// eraseBooks is the erasure of every control book, one call each, in a fixed
+// order, with the rule that covers an opaque state. It returns how many payloads
+// it dropped and how many opaque states of those it dropped without a window.
+func eraseBooks(st *State, op model.DeletionOperation, at model.UnixNano, rule stateRule) (dropped int, over overErased, err error) {
+	p := op.Predicate
+	_, dropped, err = eraseRuleFacts(st, p, false)
+	if err != nil {
+		return 0, overErased{}, err
+	}
+	settle := op.Phase == model.DeletePhaseComplete || op.Phase == model.DeletePhaseFailed
+	for _, erase := range []func() (int, error){
+		func() (n int, err error) { n, over.incidents, err = eraseIncidentsBy(st, p, rule); return },
+		func() (n int, err error) { n, over.conditions, err = eraseConditionsBy(st, p, rule); return },
+		func() (int, error) { return eraseDeliveries(st, p, at, settle, op.Principal) },
+		func() (int, error) { return eraseIssueBooks(st, p, at) },
+		func() (n int, err error) { n, over.jobs, err = eraseJobBooksBy(st, p, at, rule); return },
+		func() (int, error) { return eraseCutoverBooks(st, p, at) },
+		func() (int, error) { return eraseSavedViews(st, p) },
+		func() (int, error) { return eraseRuleDefinitions(st, p) },
+		func() (int, error) { return eraseJobDefinitions(st, p) },
+		func() (int, error) { return eraseJobPositions(st, p) },
+		func() (int, error) { return eraseControlText(st, p) },
+	} {
+		n, err := erase()
+		if err != nil {
+			return 0, overErased{}, err
+		}
+		dropped += n
+	}
+	return dropped, over, nil
+}
+
+// RedactControlCommand is the control machine's half of redacting the control
+// group's retained commands. Every control command carries the whole control
+// state, so a command committed before a deletion still carries the payloads the
+// deletion erased, in the journal and every snapshot built from it (the retry
+// table keeps a digest of the command, not its payload: replica.DigestRetryMachine). Given the
+// retained payload of one control command it returns the payload to retain
+// instead: the same command (same expected revision, state and keys) with every
+// payload covered by a deletion this node has committed removed, by the same
+// functions the live erasure runs. changed is false when nothing was covered.
+// The replacement applies to the same state: it differs only in erased books.
+//
+// RedactRetainedControlCommands is the driver that hands this function the retained commands
+// of the control Raft group; this method is the one-payload form of the same rule.
+func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, changed bool, err error) {
+	current, err := s.localState()
+	if err != nil {
+		return nil, false, err
+	}
+	return redactControlPayload(current, payload)
+}
+
+// redactControlPayload is RedactControlCommand against an explicit current state.
+func redactControlPayload(current State, payload []byte) (replacement []byte, changed bool, err error) {
+	return redactControlPayloadWith(current, &liveBooks{state: current}, payload)
+}
+
+// redactControlPayloadWith is redactControlPayload with the reader of the committed state a patch is
+// compared with, so a pass that redacts many commands encodes the state once.
+func redactControlPayloadWith(current State, live *liveBooks, payload []byte) (replacement []byte, changed bool, err error) {
+	cmd, derr := decodeControlCommand(payload)
+	if derr != nil {
+		return nil, false, model.Fail(model.Corrupt)
+	}
+	if cmd.delta != nil || cmd.scoped != nil {
+		// An audit delta carries audit rows (ids, action, reason), and a scoped delta user and session
+		// records besides: no book a deletion erases. It is retained as it is. The audit log is
+		// append-only evidence (eraseControlText).
+		return payload, false, nil
+	}
+	if cmd.patch != nil {
+		return redactPatch(current, live, *cmd.patch, payload)
+	}
+	next := *cmd.replacement
+	ids := make([]string, 0, len(current.Deletions))
+	for id := range current.Deletions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		op := current.Deletions[id]
+		if op.Phase == model.DeletePhaseHeld {
+			continue // a held deletion has not begun: nothing of it is erased
+		}
+		at := op.CompletedAt
+		if at == 0 {
+			at = op.RequestedAt
+		}
+		// A command whose own state already has the deletion finished was committed
+		// after it, so the live apply screened its effect with the late rule: the
+		// redaction must not drop what that apply kept.
+		rule := stateRule(stateErased)
+		if committed, ok := next.State.Deletions[id]; ok && (committed.Phase == model.DeletePhaseComplete || committed.Phase == model.DeletePhaseFailed) {
+			rule = stateErasedLate
+		}
+		n, _, err := eraseBooks(&next.State, op, at, rule)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = changed || n > 0
+	}
+	if !changed {
+		return payload, false, nil
+	}
+	replacement, err = json.Marshal(next)
+	if err != nil {
+		return nil, false, model.Fail(model.Invalid)
+	}
+	return replacement, true, nil
+}
+
+// stateRule decides whether the opaque state of one record is covered by a
+// predicate: stateErased when a deletion begins, completes or is imported,
+// stateErasedLate in the transition of an effect that commits after it finished.
+type stateRule func(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool
+
+// stateErased decides whether the opaque state of one record is covered when a
+// deletion begins, completes or is imported (CD-9, decision D3). A retirement
+// covers every record of its projects. A range covers exactly the records whose
+// recorded window (the span from the oldest to the newest evidence time the state
+// names, see rangeCover) intersects the range's half-open [start,end), the same
+// interval the data rows and the precise books use: a state whose evidence all
+// lies after the end, before the start or at the end is kept, whatever it
+// accumulated later. A state with no recorded window (it names no evidence time,
+// or one that cannot be read) cannot be attributed to anything, so it is dropped
+// whole, fail-closed; the erasure counts those (overErasure) so the receipt can
+// say so. An entity deletion names replay and profile roots, which these records
+// only link by ID: it covers none. A tombstone is never covered again.
+//
+// A state that carries a provenance (provenanceKey: the earliest and the latest
+// record time its producer ever folded into it, 09.08x-W1) is also covered when
+// that interval meets [start,end), whatever times the state still names: that is
+// what closes the evidence that rolled out of a bounded part of the state. It
+// never narrows the window rule.
+func stateErased(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool {
+	if !p.CoversProject(org, project) || stateIsTombstone(raw) {
+		return false
+	}
+	switch p.Mode {
+	case model.DeleteRetireOrg, model.DeleteRetireProject:
+		return true
+	case model.DeleteHistoricalRange:
+		covered, _ := rangeCover(p, raw, false)
+		return covered
+	}
+	return false
+}
+
+// overErasure reports whether a state the rule just covered was covered without
+// a recorded window: a range erased it fail-closed. Retirements erase every
+// state exactly, and an entity deletion covers none.
+func overErasure(p model.DeletePredicate, raw json.RawMessage) bool {
+	if p.Mode != model.DeleteHistoricalRange {
+		return false
+	}
+	_, failClosed := rangeCover(p, raw, false)
+	return failClosed
+}
+
+// rangeCover is the rule of a historical range over one opaque state. covered is
+// the verdict; failClosed says it was reached without an attributable window.
+//
+// The state is attributable by the times it names (zero or negative times and the
+// duration keys are not instants; the provenance member is not read as times) and
+// by its provenance, when it has one. A time that cannot be read, or a provenance
+// that is present but is not one a producer could have written, makes the state
+// unattributable: covered, fail-closed. A provenance that meets [start,end) covers
+// the state. Otherwise the state is covered when its named times do: at begin
+// (late false) when their window, the span from the oldest to the newest, meets
+// the range; in the late pass (late true) only when a named time lies inside
+// [start,end), because a state first committed after the deletion from evidence
+// that merely spans the range is not an accumulation of older evidence. A state
+// that names no time is covered fail-closed unless its provenance attributes it.
+func rangeCover(p model.DeletePredicate, raw json.RawMessage, late bool) (covered, failClosed bool) {
+	prov, present, provOK := stateProvenance(raw)
+	if present && !provOK {
+		return true, true
+	}
+	var lo, hi model.UnixNano
+	named, inside := false, false
+	readable := stateTimes(raw, func(key string, at model.UnixNano) {
+		if at <= 0 || durationKeys[key] {
+			return
+		}
+		if !named || at < lo {
+			lo = at
+		}
+		if !named || at > hi {
+			hi = at
+		}
+		named = true
+		inside = inside || at >= p.Start && at < p.End
+	})
+	switch {
+	case !readable:
+		return true, true
+	case present && prov.Meets(p.Start, p.End):
+		return true, false
+	case !named:
+		return !present, !present
+	case late:
+		return inside, false
+	}
+	return hi >= p.Start && lo < p.End, false
+}
+
+// provenanceKey is the top-level member under which the producers of an opaque
+// state (conditions.State, jobs.JobState) record its model.Provenance.
+const provenanceKey = "provenance"
+
+// stateProvenance reads the provenance of an opaque state. present is false for a
+// state without one (written before the member existed, or not a JSON object): the
+// window of the times it names decides alone. When the member is there but is not a
+// provenance a producer could have written (not an object, an unset or backwards
+// interval, an unknown member), ok is false: the state cannot be attributed and
+// the rule drops it whole, fail-closed.
+func stateProvenance(raw json.RawMessage) (p *model.Provenance, present, ok bool) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return nil, false, false
+	}
+	member, has := top[provenanceKey]
+	if !has || string(member) == "null" {
+		return nil, false, false
+	}
+	var v model.Provenance
+	if model.StrictJSON(member, &v) != nil || v.Validate() != nil {
+		return nil, true, false
+	}
+	return &v, true, true
+}
+
+// stateErasedLate is stateErased for the late re-erasure (eraseLateEffect): the
+// state was just written by an effect that may have been read before the
+// deletion's barrier, so what decides is whether it names evidence INSIDE the
+// range's half-open [start,end), exactly the interval the books that are
+// precise already use (CoversOrigin). A range covers the state when a named time
+// lies in [start,end), and, as at begin, when the state names no evidence time
+// at all or one that cannot be read (unattributable, dropped whole). Evidence
+// before start or at and after end derives from data the range did not delete: a
+// state first committed from such data is kept, whatever else it names (the
+// action's own time, a watermark, the evaluation time). Durations
+// (durationKeys) and unset times (zero or negative) are no evidence of an
+// instant and are not read as one. A retirement covers every record of its
+// projects and an entity deletion none, as in stateErased. The signal list is
+// ignored, as in stateErased: a state does not name the signal its evidence came
+// from.
+//
+// A state that carries a provenance is also covered when its interval (the
+// earliest and the latest record time folded into it) meets [start,end), as at
+// begin: a rolled-out record inside the range still covers it. The interval cannot
+// tell a state that spans the range from one with a record inside it, so a state
+// with a provenance that spans the range is covered here too, where the same state
+// without one is kept.
+func stateErasedLate(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool {
+	if !p.CoversProject(org, project) || stateIsTombstone(raw) {
+		return false
+	}
+	switch p.Mode {
+	case model.DeleteRetireOrg, model.DeleteRetireProject:
+		return true
+	case model.DeleteHistoricalRange:
+		covered, _ := rangeCover(p, raw, true)
+		return covered
+	}
+	return false
+}
+
+// durationKeys are the keys under which an opaque state carries a length of
+// time (job definition revisions), not an instant, though they end in "_ns".
+var durationKeys = map[string]bool{"grace_ns": true, "max_runtime_ns": true, "observer_stale_after_ns": true}
+
+// tombstoneState is what an erased record keeps in place of its state: the
+// closed header and the erasing operation, nothing derived from telemetry.
+func tombstoneState(idKey string, id, org, project model.ID, version model.Revision, operation model.ID) json.RawMessage {
+	v, _ := json.Marshal(version)
+	return json.RawMessage(fmt.Sprintf(`{%q:%q,"org_id":%q,"project_id":%q,"version":%s,"erased":%q}`, idKey, id.String(), org.String(), project.String(), v, operation.String()))
+}
+
+func stateIsTombstone(raw json.RawMessage) bool {
+	var t struct {
+		Erased string `json:"erased"`
+	}
+	return json.Unmarshal(raw, &t) == nil && t.Erased != ""
+}
+
+// stateTimes calls visit, in sorted key order, for every time a state names:
+// every number or numeric string under a key "at", "*_at" or "*_ns", at any
+// depth, with that key. readable is false when the state is not JSON or a named
+// time cannot be read.
+func stateTimes(raw json.RawMessage, visit func(key string, at model.UnixNano)) (readable bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var root any
+	if dec.Decode(&root) != nil {
+		return false
+	}
+	if top, ok := root.(map[string]any); ok {
+		// The provenance is read by stateProvenance, as a closed interval, not as times the state names.
+		delete(top, provenanceKey)
+	}
+	bad := false
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(t))
+			for k := range t {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if k == "at" || strings.HasSuffix(k, "_at") || strings.HasSuffix(k, "_ns") {
+					var text string
+					switch n := t[k].(type) {
+					case json.Number:
+						text = n.String()
+					case string:
+						text = n
+					case nil:
+						continue
+					default:
+						bad = true
+						continue
+					}
+					ns, err := strconv.ParseInt(text, 10, 64)
+					if err != nil {
+						bad = true
+						continue
+					}
+					visit(k, model.UnixNano(ns))
+					continue
+				}
+				walk(t[k])
+			}
+		case []any:
+			for _, e := range t {
+				walk(e)
+			}
+		}
+	}
+	walk(root)
+	return !bad
+}
+
+// scrubDebt is the control.db scrub one operation still owes: the ordinal of its newest
+// erasing audit among the erasing audits of the log (0 for the first one ever committed) and
+// that audit's time. It is an ordinal of erasing audits, not a position in the audit log: the
+// log is expired (ExpireControlLog) and a position would shift under a scrub that read the log
+// before an expiry and settles after it, while erasing audits are never expired.
+type scrubDebt struct {
+	last int
+	at   model.UnixNano
+}
+
+// owedScrubs reads, from the audit log alone, which operations still owe a scrub
+// of control.db: an erasing audit makes its operation owe one, and a scrubbed
+// audit for the operation settles everything before it. The log is append-only
+// and ordered by commit, so the answer is a function of committed state, survives
+// restart and snapshot restore, and does not depend on the operation's phase (a
+// failed operation, whose physical step is never recorded, owes it too).
+func owedScrubs(audits []model.ControlAudit) map[model.ID]scrubDebt {
+	debts := map[model.ID]scrubDebt{}
+	erasures := 0
+	for _, a := range audits {
+		switch a.Action {
+		case controlErasedAction:
+			for _, id := range a.Targets {
+				debts[id] = scrubDebt{last: erasures, at: model.UnixNano(a.Time)}
+			}
+			erasures++
+		case controlScrubbedAction:
+			for _, id := range a.Targets {
+				delete(debts, id)
+			}
+		}
+	}
+	return debts
+}
+
+// namesErasure reports whether the audit log holds an erasing audit.
+func namesErasure(audits []model.ControlAudit) bool {
+	return erasureCount(audits) != 0
+}
+
+// erasureCount is the number of erasing audits in the log.
+func erasureCount(audits []model.ControlAudit) int {
+	n := 0
+	for _, a := range audits {
+		if a.Action == controlErasedAction {
+			n++
+		}
+	}
+	return n
+}
+
+// controlErasures reads what is still owed on this node: control.db while an erasing audit
+// has no scrubbed audit after it (the debt the replicated log records) or while this file
+// has applied an erasure that no scrub of this file has zeroed since (localScrub, a fact
+// about this file only); the journal residue from the first erasure on.
+func controlErasures(st State, local localScrub) (stateOwed, journalOwed bool) {
+	return len(owedScrubs(st.Audits)) != 0 || local.owed, namesErasure(st.Audits)
+}
+
+// localScrubKey is where THIS file records that it owes a scrub: it has applied an erasure
+// (a live commit, a replayed one, or a snapshot install whose log names one) and no
+// ScrubErased has zeroed its free pages since. It lives in the control bucket beside the
+// state but outside everything a snapshot, a seed or a command carries (the State, the
+// replica_control metadata, the key files), so no leader can transplant it. No state
+// transition READS it (what every voter computes is the same with or without it); the
+// writers are Apply (in the transaction that adds an erasing audit), Restore (through
+// oweInstalledScrub, when an install owes) and Open and OpenSeed (markOpenedFile, and the
+// settled key of a file they create), and Restore also reads it to decide whether an
+// install owes. Open writes it into every file it opens or creates, once: its presence
+// says that a build with the marker has seen the file.
+// Value: 8 bytes big-endian generation, then one byte, 1 owed and 0 settled; nine zero bytes
+// is the settled key of a file that owes nothing, and reads as localScrub{}.
+var localScrubKey = []byte("local_scrub")
+
+// localScrub is the node-local half of the control.db scrub debt.
+//
+// owedScrubs derives a debt from the audit log, and the log is replicated: the leader
+// writes `delete.control_scrubbed` after zeroing ITS file, and every voter receives that
+// record, by replaying the log or inside an installed snapshot, while its own file was
+// never scrubbed. bbolt is copy-on-write: the commit that applies an erasure (and an
+// install that replaces the state) frees the pages that held the covered payload and
+// zeroes none of them. So each file keeps its own fact: Apply (the commit that adds an
+// erasing audit) and Restore (an install that names one, or over a file that already owed
+// one) bump it, only a ScrubErased that zeroed the free pages after that clears it, and a
+// replicated scrubbed audit from any node never does. generation comes from the bucket's
+// own sequence, so it never repeats, and a scrub clears only the debt it started with: an
+// erasure or install that lands while it runs frees pages it may already have passed.
+type localScrub struct {
+	generation uint64
+	owed       bool
+}
+
+func readLocalScrub(control *bolt.Bucket) localScrub {
+	raw := control.Get(localScrubKey)
+	switch {
+	case raw == nil:
+		return localScrub{}
+	case len(raw) != 9 || raw[8] > 1:
+		return localScrub{owed: true} // unreadable: fail closed, the next scrub rewrites it
+	}
+	return localScrub{generation: binary.BigEndian.Uint64(raw), owed: raw[8] == 1}
+}
+
+func writeLocalScrub(control *bolt.Bucket, v localScrub) error {
+	raw := make([]byte, 9)
+	binary.BigEndian.PutUint64(raw, v.generation)
+	if v.owed {
+		raw[8] = 1
+	}
+	return control.Put(localScrubKey, raw)
+}
+
+// oweLocalScrub marks this file as owing a scrub under a generation no earlier debt had. It
+// writes and never reads the marker, inside the transaction that changes the state.
+func oweLocalScrub(control *bolt.Bucket) error {
+	generation, err := control.NextSequence()
+	if err != nil {
+		return err
+	}
+	return writeLocalScrub(control, localScrub{generation: generation, owed: true})
+}
+
+// markOpenedFile runs inside the write transaction of Open on a file that exists. The marker
+// key is the fact that a build with the marker has seen this file; a file without it was
+// written by an earlier build, which applied erasures and recorded nowhere that its free pages
+// still hold their payload. Its replicated log is NOT a complete memory of those erasures: the
+// leader's scrubbed audit may already be in it, and an install from another lineage by an
+// earlier build could have dropped the erasing audit altogether, leaving the payload in the
+// free pages under a log that names no erasure (a review reproduced this with 24 payload
+// copies and a clean receipt). Nothing can tell such a file from one that never held a
+// payload, so EVERY existing file without the key owes one scrub, whatever its log names: a
+// bounded, redundant scrub for a node that had already scrubbed or never erased anything, and
+// the key is written either way so no later Open owes it again. A file Open creates gets the
+// settled key in Open itself. A key that is already there is never rewritten: an owed marker
+// stays owed under its generation, a settled one stays settled.
+//
+// A downgrade is detected through the state seal (stateSealKey): every state write of this
+// build stores the SHA-256 of the exact state bytes beside them, so an earlier build that
+// commits on the file (it knows no seal and leaves it as it was) makes the stored state differ
+// from the seal, and Open refuses the file with Unsupported instead of trusting a settled key
+// that build never maintained. A file that has no seal yet (written before this build) gets
+// one here. An earlier build that opened the file and committed nothing leaves state and seal
+// equal and is not detectable, and needs no detection: nothing changed.
+func markOpenedFile(control *bolt.Bucket) error {
+	if seal := control.Get(stateSealKey); seal != nil {
+		sum := sha256.Sum256(control.Get([]byte("state")))
+		if !bytes.Equal(seal, sum[:]) {
+			return model.Fail(model.Unsupported)
+		}
+	} else if err := sealState(control); err != nil {
+		return err
+	}
+	if control.Get(localScrubKey) != nil {
+		return nil
+	}
+	return oweLocalScrub(control)
+}
+
+// stateSealKey holds the SHA-256 of the bytes stored under "state" by the last write of a
+// build that knows the seal. It is local to the file like localScrubKey.
+var stateSealKey = []byte("state_seal")
+
+// putState writes the state and its seal in the caller's transaction; every state write goes
+// through it. raw is the encoding of the whole state; a file of layout 2 keeps its revision outside the
+// blob (state_layout.go) and putState splits it. It marks the write as one that changed the blob
+// (coreState): a write that only steps the revision and the clock (putStateKeep of a file that keeps them
+// in the blob, putStep of layout 2) is the one exception.
+func putState(control *bolt.Bucket, raw []byte) error {
+	if ledgerLayout(control) {
+		return putStateLayout(control, raw)
+	}
+	markCoreChanged(control.Tx())
+	return putStateKeep(control, raw)
+}
+
+// putStateKeep is putState for a write that changes nothing in the blob but its revision and its
+// revision clock.
+func putStateKeep(control *bolt.Bucket, raw []byte) error {
+	if err := control.Put([]byte("state"), raw); err != nil {
+		return err
+	}
+	return sealState(control)
+}
+
+func sealState(control *bolt.Bucket) error {
+	sum := sha256.Sum256(control.Get([]byte("state")))
+	if err := control.Put(ledgerSealKey, sum[:]); err != nil {
+		return err
+	}
+	return control.Put(stateSealKey, sum[:])
+}
+
+// oweInstalledScrub runs inside the write transaction that installs a snapshot, before it
+// replaces the state. The file owes a local scrub when the installed log names an erasure
+// (its payload was in this file's state or free pages, or never reached it, and this file
+// cannot tell which), or when it already owed one: the marker is still set, or the log
+// about to be replaced holds an erasing audit nothing settled (an install from another
+// lineage can drop that audit). A file whose old and new logs owe nothing and name no
+// erasure holds no payload an erasure covers, and its marker is left as it is.
+//
+// An install replaces nothing when the file already holds exactly the installed state, which
+// is what the replication group's first open does with the seed OpenSeed wrote. The marker is
+// authoritative for "this file owes nothing" (Open and OpenSeed write the key into every file,
+// and every erasure or install that could leave a payload behind owes), and installing the
+// same decoded state frees only pages that hold that same state. So a file whose marker key
+// is present and settled, whose current log owes nothing, and whose current state equals the
+// installed one after canonical re-encoding owes nothing, whatever the log names. Every other
+// install over a clean file whose log names an erasure still owes, even over a different state
+// of the same lineage: a cost this rule does not remove, one bounded scrub per such install.
+//
+// installed is the whole logical state, the admission ledger included, and so is the file's own state
+// it is compared with (the ledger's records assembled): an install that differs from what the file
+// holds in the ledger alone is a different state and owes like any other.
+func oweInstalledScrub(tx *bolt.Tx, installed State) error {
+	control := tx.Bucket([]byte("control"))
+	local := readLocalScrub(control)
+	var current State
+	readable := readState(control, &current) == nil
+	if control.Get(localScrubKey) != nil && !local.owed && readable && len(owedScrubs(current.Audits)) == 0 {
+		if ledgerLayout(control) {
+			l, err := openLedger(tx)
+			if err != nil {
+				return err
+			}
+			held, err := l.members()
+			if err != nil {
+				return err
+			}
+			attachLedger(&current, held)
+		}
+		normalizeLedger(&current)
+		normalizeLedger(&installed)
+		if sameState(current, installed) {
+			return nil
+		}
+	}
+	owed := local.owed || namesErasure(installed.Audits) || !readable || len(owedScrubs(current.Audits)) != 0
+	if !owed {
+		return nil
+	}
+	return oweLocalScrub(control)
+}
+
+// sameState reports whether two control states are the same after canonical re-encoding.
+func sameState(a, b State) bool {
+	ca, err := model.CanonicalJSON(a)
+	if err != nil {
+		return false
+	}
+	cb, err := model.CanonicalJSON(b)
+	return err == nil && bytes.Equal(ca, cb)
+}
+
+// settleLocalScrub records that a scrub that started at the given generation zeroed the
+// free pages: it clears the marker unless a later erasure or install bumped it meanwhile.
+func (s *Store) settleLocalScrub(generation uint64) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		control := tx.Bucket([]byte("control"))
+		if local := readLocalScrub(control); !local.owed || local.generation != generation {
+			return nil
+		}
+		return writeLocalScrub(control, localScrub{generation: generation})
+	})
+}
+
+// scrubState reads the committed state and this file's scrub marker in one transaction.
+func (s *Store) scrubState() (st State, local localScrub, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		control := tx.Bucket([]byte("control"))
+		if readState(control, &st) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		local = readLocalScrub(control)
+		return nil
+	})
+	return
+}
+
+// localState is the committed state, the admission ledger included.
+func (s *Store) localState() (st State, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error { return loadLogical(tx, &st) })
+	return
+}
+
+// localCore is the committed state without any member of the ledger (the books, the grouping issues, the
+// applied-command log): what a reader of the audit log, the deletions and the attestation records needs.
+// It does not read the ledger, which at the size of a busy installation is most of the file.
+func (s *Store) localCore() (st State, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error { return readState(tx.Bucket([]byte("control")), &st) })
+	return
+}
+
+// localStateAt is localState together with the physical index of the replicated command that
+// produced it, read in one transaction (a command's state and its index commit together).
+func (s *Store) localStateAt() (st State, physical uint64, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		if err := loadLogical(tx, &st); err != nil {
+			return err
+		}
+		physical = appliedPhysical(tx)
+		return nil
+	})
+	return
+}
+
+// appliedPhysical is the physical index of the last replicated command the store applied (0 for
+// a store that applied none).
+func appliedPhysical(tx *bolt.Tx) uint64 {
+	if meta := tx.Bucket([]byte("replica_control")); meta != nil {
+		return readWatermark(meta.Get([]byte("physical")))
+	}
+	return 0
+}
+
+// appliedIndex is appliedPhysical in a read transaction of its own.
+func (s *Store) appliedIndex() (physical uint64, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		physical = appliedPhysical(tx)
+		return nil
+	})
+	return
+}
+
+// ResidualStores names the local control stores that can still hold a copy of
+// erased control payloads right now (same contract as storage.Engine.
+// ResidualStores; it reads this node only and never blocks on consensus):
+//
+//   - ResidualControlState from an erasure until ScrubErased has zeroed the free
+//     pages of control.db after it (any erasure: begin, completion, failure,
+//     import, or an effect erased as it committed after its operation finished),
+//     and, whatever the replicated log says has been scrubbed, from the commit,
+//     replayed or live, or the snapshot install that gave this file an erasure until
+//     a ScrubErased that ran on this file after it (localScrub: a record that
+//     ANOTHER node's file was scrubbed settles nothing here, and the debt survives a
+//     restart);
+//   - ResidualControlJournal from the first erasing deletion on, until
+//     RedactRetainedControlCommands has proven, for every erasure committed so
+//     far, that this node's control Raft group holds none of the covered
+//     payloads (replica.Group.MachineResidue is empty). A group that cannot be
+//     measured, a pass that did not complete, a live backup pin and a node that
+//     has not run the pass all keep it named.
+//
+// It is the answer of THIS node about its own files. The deletion receipt carries
+// ClusterResidualStores (attest.go), which adds the stores of every other node of the
+// control group that has not attested its own copy.
+//
+// A state that cannot be read is reported as both.
+func (s *Store) ResidualStores() []string {
+	st, local, err := s.scrubState()
+	if err != nil {
+		return []string{ResidualControlJournal, ResidualControlState}
+	}
+	stateOwed, journalOwed := controlErasures(st, local)
+	var out []string
+	if journalOwed {
+		if residue, err := s.controlJournalResidue(st); err != nil || len(residue) != 0 {
+			out = append(out, ResidualControlJournal)
+		}
+	}
+	if stateOwed {
+		out = append(out, ResidualControlState)
+	}
+	return out
+}
+
+const (
+	scrubChunkPages  = 8192 // 32 MiB at 4 KiB pages per write transaction
+	scrubAttempts    = 40
+	scrubBackoff     = 25 * time.Millisecond
+	scrubZeroRunPage = 256
+)
+
+var errScrubBusy = errors.New("read transaction open")
+
+// ScrubErased overwrites every free page of control.db with zeros while a scrub
+// is owed, then records that it did, so the owed state clears and a later
+// erasure owes a new scrub. Two debts are owed: the replicated one, derived from
+// the audit log (an erasing audit with no scrubbed audit after it), which a scrub
+// settles by appending a `delete.control_scrubbed` audit (settleScrub); and the
+// local one of this file (localScrub: it applied an erasure, by commit, replay or
+// snapshot install, and was not scrubbed since), which the scrub clears in this
+// file only and which commits nothing replicated. bbolt is copy-on-write and
+// never zeroes a page it frees, so the state that an erasure (or an install)
+// replaced would otherwise stay in the file. It does not depend on the
+// operation's phase: a completed operation's physical step runs it first
+// (RecordPhysicalCleanup), and the retention worker runs it on every pass, which
+// is the only way the scrub of a FAILED operation (whose physical step is never
+// recorded), of an effect that was erased after its operation's physical step, or
+// of a voter's own file after it replayed an erasure or installed a snapshot ever runs.
+// It is a no-op, and does not touch the file, when nothing is owed.
+//
+// Safety (the storage engine's argument, which this mirrors): inside a bbolt
+// write transaction, the single writer, a page the freelist reports free is
+// referenced by no committed tree provided no read transaction is open; so each
+// chunk runs in its own write transaction and defers while a reader is open. A
+// crash leaves some free pages zeroed and others not, the file valid, and the
+// scrub still owed (both debts are derived from committed state, the local one
+// is cleared only after the last chunk), so the next call redoes it. It does not
+// touch the Raft journal or its snapshots (ResidualControlJournal).
+func (s *Store) ScrubErased(ctx context.Context) error {
+	st, local, err := s.scrubState()
+	if err != nil {
+		return err
+	}
+	// The scrub covers exactly the erasures committed before it read the state:
+	// an erasure committed while it runs freed pages it may have passed.
+	through := scrubCoverage(st.Audits)
+	replicated := len(owedScrubs(st.Audits)) != 0
+	if !replicated && !local.owed {
+		return nil
+	}
+	file, err := os.OpenFile(s.db.Path(), os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	// The page size is read inside a transaction: Info reads the mapping, which only a transaction
+	// keeps from being remapped (a grow, or a Close) while it is read.
+	var pageSize, high uint64
+	if err = s.db.View(func(tx *bolt.Tx) error {
+		pageSize = uint64(tx.DB().Info().PageSize)
+		high = uint64(tx.Size()) / pageSize
+		return nil
+	}); err != nil {
+		return err
+	}
+	for first := uint64(2); first < high; first += scrubChunkPages {
+		if err = ctx.Err(); err != nil {
+			return model.Fail(model.Cancelled)
+		}
+		if err = s.scrubChunk(ctx, file, first, min(first+scrubChunkPages, high), pageSize); err != nil {
+			return err
+		}
+	}
+	if local.owed {
+		// Cleared only if no erasure or install landed since the state was read.
+		if err = s.settleLocalScrub(local.generation); err != nil {
+			return err
+		}
+	}
+	if !replicated {
+		return nil // nothing replicated is owed: this file's scrub is not a committed fact
+	}
+	return s.settleScrub(ctx, through)
+}
+
+// scrubCoverage is what a scrub carries from its read of the log to its settle: how many erasing
+// audits it saw (see scrubDebt: an ordinal of erasing audits, which no expiry shifts).
+func scrubCoverage(audits []model.ControlAudit) int { return erasureCount(audits) }
+
+// settleScrub appends one scrubbed audit per operation whose erasing audits all
+// precede erasing audit number `through` (the scrub's coverage: how many erasing audits the log
+// held when the scrub read it) and are not settled yet. The audit's time is the newest erasure's
+// own time (the scrub knows no clock of its own and no transition reads one), so what is
+// appended is a function of the committed state and `through` only.
+func (s *Store) settleScrub(ctx context.Context, through int) error {
+	err := s.Update(ctx, func(st *State) error {
+		debts := owedScrubs(st.Audits)
+		ids := make([]model.ID, 0, len(debts))
+		for id, d := range debts {
+			if d.last < through {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return errNothingToSettle // another pass settled them first: commit nothing
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+		for _, id := range ids {
+			op := st.Deletions[id.String()]
+			audit(st, op.Principal, op.Predicate.Org, controlScrubbedAction, controlScrubbedReason, debts[id].at, []model.ID{id})
+		}
+		return nil
+	})
+	if errors.Is(err, errNothingToSettle) {
+		return nil
+	}
+	return err
+}
+
+var errNothingToSettle = errors.New("no scrub to settle")
+
+func (s *Store) scrubChunk(ctx context.Context, file *os.File, first, last, pageSize uint64) error {
+	zero := make([]byte, pageSize*scrubZeroRunPage)
+	for attempt := 0; ; attempt++ {
+		zeroed := uint64(0)
+		err := s.db.Update(func(tx *bolt.Tx) error {
+			// bolt counts a reader only after it registered it (and can already be walking pages), so
+			// the stat alone may read zero for a reader about to begin: the store's own count
+			// (trackedDB) is taken before bolt sees the reader.
+			if s.db.openReaders() > 0 || s.db.Stats().OpenTxN > 0 {
+				return errScrubBusy
+			}
+			for id := first; id < last; {
+				info, err := tx.Page(int(id))
+				if err != nil {
+					return err
+				}
+				if info == nil { // beyond this transaction's high-water mark
+					break
+				}
+				if info.Type != "free" {
+					id++
+					continue
+				}
+				start := id
+				for id < last {
+					if info, err = tx.Page(int(id)); err != nil {
+						return err
+					}
+					if info == nil || info.Type != "free" {
+						break
+					}
+					id++
+				}
+				for run := start; run < id; {
+					n := min(id-run, scrubZeroRunPage)
+					if _, err := file.WriteAt(zero[:n*pageSize], int64(run*pageSize)); err != nil {
+						return err
+					}
+					run += n
+				}
+				zeroed += id - start
+			}
+			if zeroed > 0 {
+				return file.Sync()
+			}
+			return nil
+		})
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, errScrubBusy):
+			if attempt+1 >= scrubAttempts {
+				return model.Fail(model.Unavailable) // a reader stayed open: the scrub is still owed
+			}
+			select {
+			case <-ctx.Done():
+				return model.Fail(model.Cancelled)
+			case <-time.After(scrubBackoff):
+			}
+		default:
+			return err
+		}
+	}
+}

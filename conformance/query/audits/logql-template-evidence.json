@@ -1,0 +1,713 @@
+{
+  "profile": "logql-loki-3.5.2",
+  "purpose": "Factual function names/locations/hashes, no upstream bodies; behavioral obligations are independently authored in logql.json.",
+  "whitelist": [
+    "Replace",
+    "ToLower",
+    "ToUpper",
+    "Trim",
+    "TrimLeft",
+    "TrimPrefix",
+    "TrimRight",
+    "TrimSpace",
+    "TrimSuffix",
+    "__line__",
+    "__timestamp__",
+    "add",
+    "addf",
+    "alignLeft",
+    "alignRight",
+    "b64dec",
+    "b64enc",
+    "bytes",
+    "ceil",
+    "contains",
+    "count",
+    "date",
+    "default",
+    "div",
+    "divf",
+    "duration",
+    "duration_seconds",
+    "float64",
+    "floor",
+    "fromJson",
+    "hasPrefix",
+    "hasSuffix",
+    "indent",
+    "int",
+    "lower",
+    "max",
+    "maxf",
+    "min",
+    "minf",
+    "mod",
+    "mul",
+    "mulf",
+    "nindent",
+    "now",
+    "regexReplaceAll",
+    "regexReplaceAllLiteral",
+    "repeat",
+    "replace",
+    "round",
+    "sub",
+    "subf",
+    "substr",
+    "title",
+    "toDate",
+    "toDateInZone",
+    "trim",
+    "trimAll",
+    "trimPrefix",
+    "trimSuffix",
+    "trunc",
+    "unixEpoch",
+    "unixEpochMillis",
+    "unixEpochNanos",
+    "unixToTime",
+    "upper",
+    "urldecode",
+    "urlencode"
+  ],
+  "source_locators": [
+    {
+      "path": "pkg/logql/log/fmt.go",
+      "sha256": "65beeb56487e1af5c5d1fa7e2f367eddbc32786c8d68430248bdb9e58697caf5",
+      "functions": [
+        {
+          "name": "addLineAndTimestampFunctions",
+          "line": 122
+        },
+        {
+          "name": "unixToTime",
+          "line": 137
+        },
+        {
+          "name": "unixEpochMillis",
+          "line": 165
+        },
+        {
+          "name": "unixEpochNanos",
+          "line": 169
+        },
+        {
+          "name": "toDateInZone",
+          "line": 173
+        },
+        {
+          "name": "init",
+          "line": 182
+        },
+        {
+          "name": "NewFormatter",
+          "line": 201
+        },
+        {
+          "name": "Process",
+          "line": 233
+        },
+        {
+          "name": "RequiredLabelNames",
+          "line": 260
+        },
+        {
+          "name": "listNodeFields",
+          "line": 264
+        },
+        {
+          "name": "listNodeFieldsFromBranch",
+          "line": 285
+        },
+        {
+          "name": "listNodeFieldsFromPipe",
+          "line": 310
+        },
+        {
+          "name": "NewRenameLabelFmt",
+          "line": 327
+        },
+        {
+          "name": "NewTemplateLabelFmt",
+          "line": 336
+        },
+        {
+          "name": "NewLabelsFormatter",
+          "line": 360
+        },
+        {
+          "name": "validate",
+          "line": 391
+        },
+        {
+          "name": "Process",
+          "line": 407
+        },
+        {
+          "name": "RequiredLabelNames",
+          "line": 436
+        },
+        {
+          "name": "trunc",
+          "line": 448
+        },
+        {
+          "name": "alignLeft",
+          "line": 460
+        },
+        {
+          "name": "alignRight",
+          "line": 473
+        },
+        {
+          "name": "NewDecolorizer",
+          "line": 493
+        },
+        {
+          "name": "Process",
+          "line": 497
+        },
+        {
+          "name": "RequiredLabelNames",
+          "line": 500
+        },
+        {
+          "name": "substring",
+          "line": 509
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/functions.go",
+      "sha256": "e8965eeef01361ac86be9467b9034f8894445a525c2d8df19a78b0bd15242f8e",
+      "functions": [
+        {
+          "name": "FuncMap",
+          "line": 26
+        },
+        {
+          "name": "HermeticTxtFuncMap",
+          "line": 31
+        },
+        {
+          "name": "HermeticHtmlFuncMap",
+          "line": 40
+        },
+        {
+          "name": "TxtFuncMap",
+          "line": 49
+        },
+        {
+          "name": "HtmlFuncMap",
+          "line": 54
+        },
+        {
+          "name": "GenericFuncMap",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/numeric.go",
+      "sha256": "5465d61e984077478688b63cef6c73caf2550fd3d1d77a871775f03d147f63ff",
+      "functions": [
+        {
+          "name": "toFloat64",
+          "line": 14
+        },
+        {
+          "name": "toInt",
+          "line": 18
+        },
+        {
+          "name": "toInt64",
+          "line": 23
+        },
+        {
+          "name": "max",
+          "line": 27
+        },
+        {
+          "name": "maxf",
+          "line": 38
+        },
+        {
+          "name": "min",
+          "line": 47
+        },
+        {
+          "name": "minf",
+          "line": 58
+        },
+        {
+          "name": "until",
+          "line": 67
+        },
+        {
+          "name": "untilStep",
+          "line": 75
+        },
+        {
+          "name": "floor",
+          "line": 97
+        },
+        {
+          "name": "ceil",
+          "line": 102
+        },
+        {
+          "name": "round",
+          "line": 107
+        },
+        {
+          "name": "toDecimal",
+          "line": 128
+        },
+        {
+          "name": "seq",
+          "line": 136
+        },
+        {
+          "name": "intArrayToString",
+          "line": 172
+        },
+        {
+          "name": "execDecimalOp",
+          "line": 178
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/strings.go",
+      "sha256": "4fd5d874e57fbe3491a16c828e1e3e43e3f01e8756cfcad7c9d3d098e4668fa6",
+      "functions": [
+        {
+          "name": "base64encode",
+          "line": 14
+        },
+        {
+          "name": "base64decode",
+          "line": 18
+        },
+        {
+          "name": "base32encode",
+          "line": 26
+        },
+        {
+          "name": "base32decode",
+          "line": 30
+        },
+        {
+          "name": "abbrev",
+          "line": 38
+        },
+        {
+          "name": "abbrevboth",
+          "line": 46
+        },
+        {
+          "name": "initials",
+          "line": 53
+        },
+        {
+          "name": "randAlphaNumeric",
+          "line": 58
+        },
+        {
+          "name": "randAlpha",
+          "line": 64
+        },
+        {
+          "name": "randAscii",
+          "line": 69
+        },
+        {
+          "name": "randNumeric",
+          "line": 74
+        },
+        {
+          "name": "untitle",
+          "line": 79
+        },
+        {
+          "name": "quote",
+          "line": 83
+        },
+        {
+          "name": "squote",
+          "line": 93
+        },
+        {
+          "name": "cat",
+          "line": 103
+        },
+        {
+          "name": "indent",
+          "line": 109
+        },
+        {
+          "name": "nindent",
+          "line": 114
+        },
+        {
+          "name": "replace",
+          "line": 118
+        },
+        {
+          "name": "plural",
+          "line": 122
+        },
+        {
+          "name": "strslice",
+          "line": 129
+        },
+        {
+          "name": "removeNilElements",
+          "line": 164
+        },
+        {
+          "name": "strval",
+          "line": 174
+        },
+        {
+          "name": "trunc",
+          "line": 189
+        },
+        {
+          "name": "join",
+          "line": 199
+        },
+        {
+          "name": "split",
+          "line": 203
+        },
+        {
+          "name": "splitn",
+          "line": 212
+        },
+        {
+          "name": "substring",
+          "line": 228
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/defaults.go",
+      "sha256": "65893cbfa3ac451bf36593c39c5ed47bbbf23e986857528ddabda0772f043886",
+      "functions": [
+        {
+          "name": "init",
+          "line": 12
+        },
+        {
+          "name": "dfault",
+          "line": 26
+        },
+        {
+          "name": "empty",
+          "line": 35
+        },
+        {
+          "name": "coalesce",
+          "line": 63
+        },
+        {
+          "name": "all",
+          "line": 74
+        },
+        {
+          "name": "any",
+          "line": 85
+        },
+        {
+          "name": "fromJson",
+          "line": 95
+        },
+        {
+          "name": "mustFromJson",
+          "line": 101
+        },
+        {
+          "name": "toJson",
+          "line": 108
+        },
+        {
+          "name": "mustToJson",
+          "line": 113
+        },
+        {
+          "name": "toPrettyJson",
+          "line": 122
+        },
+        {
+          "name": "mustToPrettyJson",
+          "line": 127
+        },
+        {
+          "name": "toRawJson",
+          "line": 136
+        },
+        {
+          "name": "mustToRawJson",
+          "line": 145
+        },
+        {
+          "name": "ternary",
+          "line": 157
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/Masterminds/sprig/v3/date.go",
+      "sha256": "db6ac4b6f9a6445769b9ccaa36bb53f74b14f07bd04512a18dcd5d21b81d0540",
+      "functions": [
+        {
+          "name": "date",
+          "line": 13
+        },
+        {
+          "name": "htmlDate",
+          "line": 17
+        },
+        {
+          "name": "htmlDateInZone",
+          "line": 21
+        },
+        {
+          "name": "dateInZone",
+          "line": 25
+        },
+        {
+          "name": "dateModify",
+          "line": 50
+        },
+        {
+          "name": "mustDateModify",
+          "line": 58
+        },
+        {
+          "name": "dateAgo",
+          "line": 66
+        },
+        {
+          "name": "duration",
+          "line": 84
+        },
+        {
+          "name": "durationRound",
+          "line": 97
+        },
+        {
+          "name": "toDate",
+          "line": 141
+        },
+        {
+          "name": "mustToDate",
+          "line": 146
+        },
+        {
+          "name": "unixEpoch",
+          "line": 150
+        }
+      ]
+    },
+    {
+      "path": "vendor/github.com/spf13/cast/caste.go",
+      "sha256": "0e941606bffa7a92547f9d3584df08e4c76d1e4698e510b85f2557c21db6693d",
+      "functions": [
+        {
+          "name": "ToTimeE",
+          "line": 30
+        },
+        {
+          "name": "ToTimeInDefaultLocationE",
+          "line": 37
+        },
+        {
+          "name": "ToDurationE",
+          "line": 69
+        },
+        {
+          "name": "ToBoolE",
+          "line": 103
+        },
+        {
+          "name": "ToFloat64E",
+          "line": 151
+        },
+        {
+          "name": "ToFloat32E",
+          "line": 209
+        },
+        {
+          "name": "ToInt64E",
+          "line": 267
+        },
+        {
+          "name": "ToInt32E",
+          "line": 319
+        },
+        {
+          "name": "ToInt16E",
+          "line": 371
+        },
+        {
+          "name": "ToInt8E",
+          "line": 423
+        },
+        {
+          "name": "ToIntE",
+          "line": 475
+        },
+        {
+          "name": "ToUintE",
+          "line": 527
+        },
+        {
+          "name": "ToUint64E",
+          "line": 603
+        },
+        {
+          "name": "ToUint32E",
+          "line": 679
+        },
+        {
+          "name": "ToUint16E",
+          "line": 755
+        },
+        {
+          "name": "ToUint8E",
+          "line": 831
+        },
+        {
+          "name": "indirect",
+          "line": 910
+        },
+        {
+          "name": "indirectToStringerOrError",
+          "line": 930
+        },
+        {
+          "name": "ToStringE",
+          "line": 946
+        },
+        {
+          "name": "ToStringMapStringE",
+          "line": 1004
+        },
+        {
+          "name": "ToStringMapStringSliceE",
+          "line": 1034
+        },
+        {
+          "name": "ToStringMapBoolE",
+          "line": 1098
+        },
+        {
+          "name": "ToStringMapE",
+          "line": 1123
+        },
+        {
+          "name": "ToStringMapIntE",
+          "line": 1143
+        },
+        {
+          "name": "ToStringMapInt64E",
+          "line": 1184
+        },
+        {
+          "name": "ToSliceE",
+          "line": 1224
+        },
+        {
+          "name": "ToBoolSliceE",
+          "line": 1241
+        },
+        {
+          "name": "ToStringSliceE",
+          "line": 1270
+        },
+        {
+          "name": "ToIntSliceE",
+          "line": 1330
+        },
+        {
+          "name": "ToDurationSliceE",
+          "line": 1359
+        },
+        {
+          "name": "StringToDate",
+          "line": 1390
+        },
+        {
+          "name": "StringToDateInDefaultLocation",
+          "line": 1397
+        },
+        {
+          "name": "hasTimezone",
+          "line": 1416
+        },
+        {
+          "name": "parseDateWith",
+          "line": 1450
+        },
+        {
+          "name": "jsonStringToObject",
+          "line": 1474
+        },
+        {
+          "name": "toInt",
+          "line": 1482
+        },
+        {
+          "name": "trimZeroDecimal",
+          "line": 1495
+        }
+      ]
+    }
+  ],
+  "standard_template_primitives": [
+    "and",
+    "or",
+    "not",
+    "eq",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "len",
+    "index",
+    "slice",
+    "call",
+    "print",
+    "printf",
+    "println",
+    "html",
+    "js",
+    "urlquery"
+  ],
+  "forbidden_unregistered_helpers": [
+    "env",
+    "expandenv",
+    "getHostByName",
+    "readFile",
+    "get",
+    "dict",
+    "list",
+    "toJson",
+    "mustFromJson",
+    "dateInZone",
+    "trimall",
+    "randAlphaNum",
+    "uuidv4"
+  ],
+  "important_distinctions": [
+    "ToLower/ToUpper and lowercase variants are both installed.",
+    "Legacy Trim/Replace signatures are not interchangeable with pipeline-first lowercase variants.",
+    "trunc/substr bind Sprig byte-oriented functions, not same-named rune-oriented helpers elsewhere in fmt.go.",
+    "duration binds Loki conversion, not Sprig duration formatter.",
+    "fromJson returns arbitrary JSON shape rather than labels-only scalar data.",
+    "now reads clock; __timestamp__ reads entry time."
+  ]
+}

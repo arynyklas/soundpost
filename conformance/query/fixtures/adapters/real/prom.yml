@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 1s
+  scrape_protocols: [OpenMetricsText1.0.0]
+  convert_classic_histograms_to_nhcb: true
+scrape_configs:
+- job_name: fixture
+  static_configs:
+  - targets: ['cap:9000']
+remote_write:
+- url: http://cap:9000/write/v1
+  send_exemplars: true
+  send_native_histograms: true
+  metadata_config: {send: true, send_interval: 2s}
+  queue_config: {batch_send_deadline: 2s}
+- url: http://cap:9000/write/v2
+  protobuf_message: io.prometheus.write.v2.Request
+  send_exemplars: true
+  send_native_histograms: true
+  queue_config: {batch_send_deadline: 2s}

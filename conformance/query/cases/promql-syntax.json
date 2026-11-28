@@ -1,0 +1,6427 @@
+{
+  "schema": "soundpost-authored-syntax-cases-v1",
+  "phase": "syntax",
+  "cases": [
+    {
+      "id": "promql-prometheus-3.1.0/function/abs/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/abs"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/abs/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/abs"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/absent"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/absent"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/absent_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/absent_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acos/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acos(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/acos"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acos/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acos(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/acos"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acosh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acosh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/acosh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acosh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acosh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/acosh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asin/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asin(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/asin"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asin/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asin(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/asin"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asinh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asinh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/asinh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asinh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asinh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/asinh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atan/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atan(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/atan"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atan/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atan(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/atan"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atanh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atanh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/atanh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atanh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atanh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/atanh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/avg_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "avg_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/avg_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/avg_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "avg_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/avg_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ceil/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ceil(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/ceil"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ceil/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ceil(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/ceil"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/changes/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "changes(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/changes"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/changes/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "changes(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/changes"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp/arity-3",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(fixture_metric{job=\"fixture\"}, 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(\"wrong\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_max/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_max(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp_max"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_max/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_max(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp_max"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_min/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp_min"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_min/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/clamp_min"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cos/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cos(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/cos"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cos/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cos(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/cos"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cosh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cosh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/cosh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cosh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cosh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/cosh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/count_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/count_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/count_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/count_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/days_in_month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/days_in_month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/days_in_month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_week/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_week/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_week/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_year/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_year/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_year/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deg/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deg(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/deg"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deg/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deg(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/deg"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/delta/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "delta(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/delta"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/delta/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "delta(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/delta"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deriv/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deriv(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/deriv"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deriv/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deriv(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/deriv"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/exp/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "exp(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/exp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/exp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "exp(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/exp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/floor/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "floor(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/floor"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/floor/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "floor(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/floor"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_avg/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_avg(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_avg"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_avg/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_avg(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_avg"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_count/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_count(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_count"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_count/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_count(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_count"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_sum/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_sum(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_sum"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_sum/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_sum(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_sum"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stddev/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stddev(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stddev"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stddev/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stddev(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stddev"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stdvar/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stdvar(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stdvar"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stdvar/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stdvar(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stdvar"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_fraction/arity-3",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_fraction(0.25, 0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_fraction"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_fraction/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_fraction(\"wrong\", 0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_fraction"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_quantile/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_quantile"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_quantile/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(\"wrong\", fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/histogram_quantile"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/arity-3",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "double_exponential_smoothing(fixture_metric{job=\"fixture\"}[5m], 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "double_exponential_smoothing(\"wrong\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "double_exponential_smoothing(fixture_metric{job=\"fixture\"}[5m], 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/hour/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/hour/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/hour/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/idelta/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "idelta(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/idelta"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/idelta/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "idelta(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/idelta"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/increase/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "increase(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/increase"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/increase/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "increase(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/increase"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/info/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/info/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"}, {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/info/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(\"wrong\", {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/info/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"}, {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.1.0/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/irate/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "irate(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/irate"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/irate/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "irate(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/irate"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_replace/arity-5",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_replace"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_replace/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(\"wrong\", \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_replace"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_join/arity-3",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_join/arity-4",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_join/arity-6",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_join/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(\"wrong\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/last_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "last_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/last_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "last_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ln/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ln(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/ln"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ln/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ln(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/ln"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log10/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log10(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/log10"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log10/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log10(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/log10"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log2/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log2(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/log2"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log2/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log2(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/log2"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/mad_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "mad_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/mad_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "mad_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/mad_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "mad_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/max_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/max_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/min_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "min_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/min_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "min_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/minute/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/minute/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/minute/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/pi/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "pi()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/pi"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/pi/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "pi(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/pi"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/predict_linear/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "predict_linear(fixture_metric{job=\"fixture\"}[5m], 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/predict_linear"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/predict_linear/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "predict_linear(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/predict_linear"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/present_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "present_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/present_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/present_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "present_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/present_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/quantile_over_time/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile_over_time(0.25, fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/quantile_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/quantile_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile_over_time(\"wrong\", fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/quantile_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rad/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rad(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/rad"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rad/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rad(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/rad"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rate/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/rate"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rate/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/rate"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/resets/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "resets(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/resets"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/resets/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "resets(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/resets"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/round/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/round/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/round/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/scalar/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "scalar(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/scalar"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/scalar/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "scalar(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/scalar"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sgn/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sgn(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sgn"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sgn/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sgn(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sgn"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sin/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sin(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sin"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sin/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sin(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sin"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sinh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sinh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sinh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sinh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sinh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sinh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_desc/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_desc(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_desc/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_desc(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label/arity-4",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(\"wrong\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-2",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-4",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(\"wrong\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sqrt/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sqrt(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sqrt"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sqrt/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sqrt(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sqrt"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stddev_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stddev_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/stddev_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stddev_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stddev_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/stddev_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stdvar_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stdvar_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/stdvar_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stdvar_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stdvar_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/stdvar_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sum_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sum_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sum_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/sum_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tan/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tan(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/tan"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tan/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tan(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/tan"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tanh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tanh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/tanh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tanh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tanh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/tanh"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/time/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/time"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/timestamp/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "timestamp(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/timestamp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/timestamp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "timestamp(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/timestamp"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/vector/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/vector"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/vector/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/vector"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/year/arity-0",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/year"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/year/arity-1",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/year"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/year/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.1.0/function/year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/abs/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/abs"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/abs/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/abs"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/absent"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/absent"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/absent_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "absent_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/absent_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acos/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acos(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/acos"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acos/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acos(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/acos"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acosh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acosh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/acosh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acosh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "acosh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/acosh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asin/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asin(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/asin"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asin/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asin(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/asin"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asinh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asinh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/asinh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asinh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "asinh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/asinh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atan/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atan(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/atan"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atan/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atan(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/atan"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atanh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atanh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/atanh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atanh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "atanh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/atanh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/avg_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "avg_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/avg_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/avg_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "avg_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/avg_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ceil/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ceil(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ceil"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ceil/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ceil(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ceil"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/changes/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "changes(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/changes"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/changes/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "changes(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/changes"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp/arity-3",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(fixture_metric{job=\"fixture\"}, 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(\"wrong\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_max/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_max(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp_max"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_max/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_max(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp_max"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_min/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp_min"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_min/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/clamp_min"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cos/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cos(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/cos"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cos/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cos(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/cos"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cosh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cosh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/cosh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cosh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "cosh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/cosh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/count_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/count_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/count_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/count_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/days_in_month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/days_in_month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/days_in_month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "days_in_month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_week/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_week/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_week/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_week(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_year/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_year/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_year/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "day_of_year(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deg/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deg(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/deg"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deg/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deg(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/deg"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/end/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "end()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/end"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/end/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "end(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/end"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/end/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "end()"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/end"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/delta/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "delta(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/delta"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/delta/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "delta(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/delta"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deriv/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deriv(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/deriv"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deriv/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "deriv(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/deriv"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/exp/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "exp(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/exp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/exp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "exp(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/exp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/first_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "first_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/first_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "first_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/first_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "first_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/floor/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "floor(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/floor"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/floor/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "floor(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/floor"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_avg/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_avg(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_avg"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_avg/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_avg(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_avg"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_count/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_count(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_count"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_count/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_count(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_count"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_sum/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_sum(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_sum"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_sum/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_sum(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_sum"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stddev/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stddev(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stddev"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stddev/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stddev(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stddev"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stdvar/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stdvar(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stdvar"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stdvar/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_stdvar(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stdvar"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_fraction/arity-3",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_fraction(0.25, 0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_fraction"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_fraction/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_fraction(\"wrong\", 0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_fraction"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantile/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(0.25, fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantile"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantile/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(\"wrong\", fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantile"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantiles/arity-3",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "histogram_quantiles(fixture_metric{job=\"fixture\"}, \"fixture\", 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantiles/arity-12",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "histogram_quantiles(fixture_metric{job=\"fixture\"}, \"fixture\", 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantiles/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "histogram_quantiles(\"wrong\", \"fixture\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantiles/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantiles(fixture_metric{job=\"fixture\"}, \"fixture\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/arity-3",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "double_exponential_smoothing(fixture_metric{job=\"fixture\"}[5m], 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "double_exponential_smoothing(\"wrong\", 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "double_exponential_smoothing(fixture_metric{job=\"fixture\"}[5m], 0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/hour/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/hour/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/hour/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "hour(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/hour"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/idelta/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "idelta(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/idelta"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/idelta/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "idelta(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/idelta"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/increase/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "increase(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/increase"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/increase/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "increase(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/increase"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/info/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/info/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"}, {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/info/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(\"wrong\", {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/info/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "info(fixture_metric{job=\"fixture\"}, {job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/info"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/irate/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "irate(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/irate"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/irate/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "irate(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/irate"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_replace/arity-5",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_replace"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_replace/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(\"wrong\", \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_replace"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_join/arity-3",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_join/arity-4",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_join/arity-6",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_join/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(\"wrong\", \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/label_join"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_of/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "max_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "source_context_correction": {
+        "prior_expected": {
+          "accepted": true,
+          "type": "scalar"
+        },
+        "reason": "Standalone ordinary call requires experimental-functions; duration-expr alone applies only inside duration productions.",
+        "observed_evidence": ".superpowers/sdd/approved-product/02.02-real-differential.json",
+        "source_refs": [
+          "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+          "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+        ]
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_of/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "max_of(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_of"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_of/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_of"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/last_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "last_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/last_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "last_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_of/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "min_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "source_context_correction": {
+        "prior_expected": {
+          "accepted": true,
+          "type": "scalar"
+        },
+        "reason": "Standalone ordinary call requires experimental-functions; duration-expr alone applies only inside duration productions.",
+        "observed_evidence": ".superpowers/sdd/approved-product/02.02-real-differential.json",
+        "source_refs": [
+          "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+          "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+        ]
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_of/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "min_of(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_of"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_of/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "min_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_of"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ln/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ln(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ln"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ln/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ln(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ln"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log10/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log10(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/log10"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log10/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log10(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/log10"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log2/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log2(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/log2"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log2/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "log2(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/log2"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/mad_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "mad_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/mad_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "mad_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/mad_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "mad_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "min_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "min_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_first_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_first_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ts_of_first_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_max_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_max_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ts_of_max_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_min_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_min_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ts_of_min_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_last_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "ts_of_last_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "ts_of_last_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/minute/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/minute/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/minute/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "minute(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/minute"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/month/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/month/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/month/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "month(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/month"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/pi/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "pi()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/pi"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/pi/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "pi(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/pi"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/predict_linear/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "predict_linear(fixture_metric{job=\"fixture\"}[5m], 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/predict_linear"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/predict_linear/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "predict_linear(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/predict_linear"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/present_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "present_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/present_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/present_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "present_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/present_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/quantile_over_time/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile_over_time(0.25, fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/quantile_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/quantile_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile_over_time(\"wrong\", fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/quantile_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rad/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rad(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/rad"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rad/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rad(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/rad"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/range/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "range()"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "source_context_correction": {
+        "prior_expected": {
+          "accepted": true,
+          "type": "scalar"
+        },
+        "reason": "Standalone ordinary call requires experimental-functions; duration-expr alone applies only inside duration productions.",
+        "observed_evidence": ".superpowers/sdd/approved-product/02.02-real-differential.json",
+        "source_refs": [
+          "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+          "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+        ]
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/range/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "range(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/range"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/range/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "range()"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/range"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rate/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/rate"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rate/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/rate"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/resets/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "resets(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/resets"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/resets/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "resets(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/resets"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/round/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/round/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(fixture_metric{job=\"fixture\"}, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/round/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(\"wrong\", 0.25)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/round"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/scalar/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "scalar(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/scalar"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/scalar/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "scalar(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/scalar"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sgn/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sgn(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sgn"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sgn/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sgn(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sgn"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sin/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sin(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sin"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sin/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sin(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sin"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sinh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sinh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sinh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sinh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sinh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sinh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_desc/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_desc(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_desc/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_desc(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label/arity-4",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label(\"wrong\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_by_label(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-4",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\", \"fixture\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "sort_by_label_desc(\"wrong\", \"fixture\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sort_by_label_desc(fixture_metric{job=\"fixture\"}, \"fixture\")"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sqrt/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sqrt(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sqrt"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sqrt/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sqrt(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sqrt"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/start/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "start()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/start"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/start/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "start(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/start"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/start/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "start()"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/start"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/step/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "step()"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "source_context_correction": {
+        "prior_expected": {
+          "accepted": true,
+          "type": "scalar"
+        },
+        "reason": "Standalone ordinary call requires experimental-functions; duration-expr alone applies only inside duration productions.",
+        "observed_evidence": ".superpowers/sdd/approved-product/02.02-real-differential.json",
+        "source_refs": [
+          "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+          "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+        ]
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/step/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "step(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/step"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/step/disabled-gate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "step()"
+      },
+      "expected": {
+        "accepted": false
+      },
+      "obligation": "promql-prometheus-3.13.5/function/step"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stddev_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stddev_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/stddev_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stddev_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stddev_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/stddev_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stdvar_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stdvar_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/stdvar_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stdvar_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "stdvar_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/stdvar_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sum_over_time/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(fixture_metric{job=\"fixture\"}[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sum_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sum_over_time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/sum_over_time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tan/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tan(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/tan"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tan/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tan(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/tan"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tanh/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tanh(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/tanh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tanh/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "tanh(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/tanh"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/time/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/time/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/time"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/timestamp/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "timestamp(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/timestamp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/timestamp/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "timestamp(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/timestamp"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/vector/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/vector"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/vector/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/vector"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/year/arity-0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/year/arity-1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year(fixture_metric{job=\"fixture\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/year"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/year/wrong-argument-or-arity",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "year(\"wrong\")"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/year"
+    },
+    {
+      "id": "grammar/precedence",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "1 + 2 * 3 ^ 4 ^ 5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "grammar/comparison-bool",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "1 <= bool 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "grammar/utf8-metric-and-label",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "{\"\u6d4b\u91cf\", \"\u6807\u7b7e\"=\"\u503c\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/quoted-label-group",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "sum without (\"\u6807\u7b7e\") (fixture_metric)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/negative-offset-and-start",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric[5m:1m] offset -1h @ start()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/at-end-offset-order",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric @ end() offset 1d"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/subquery-default-step",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "(fixture_left + fixture_right)[5m:]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/group-left",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_left / on(job) group_left(instance) fixture_right"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/group-right",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_left * ignoring(instance) group_right(job) fixture_right"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/regex-newline",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric{job=~\"a.*b\",instance!~\"\",service!=\"\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/string-raw",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "`fixture\\nraw`"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "string"
+      }
+    },
+    {
+      "id": "grammar/string-single",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "'fixture\\nline'"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "string"
+      }
+    },
+    {
+      "id": "grammar/signed-zero",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "-0"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "grammar/nonfinite",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "-Inf + NaN"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "grammar/hex",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "0x2a"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "grammar/compound-duration",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric[1w2d3h4m5s6ms]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/info-label-only",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "info(fixture_metric,{job=~\".*\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/dynamic-duration",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "fixture_metric[max_of(step() * 2, range())]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/fill-both",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "fixture_left + fill(0) fixture_right"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/fill-separate",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "fixture_left + fill_right(1) fill_left(0.5) fixture_right"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "grammar/anchored",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "fixture_metric[5m] anchored"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/smoothed",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "fixture_metric[5m] smoothed"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "grammar/empty-selector-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "{job=~\".*\"}"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/zero-window-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric[0s]"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/grouping-set-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_left or on(job) group_left fixture_right"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/grouping-collision-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_left + on(job) group_right(job) fixture_right"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/scalar-comparison-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "1 < 2"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/duplicate-at-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric @ 1 @ 2"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/matrix-binary-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric[5m] + fixture_metric"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "grammar/regex-invalid-reject",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "input": {
+        "expression": "fixture_metric{job=~\"[\"}"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_of/arity-2/experimental-enabled",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "max_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_of/arity-2/experimental-enabled",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "min_of(0.25, 0.25)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/range/arity-0/experimental-enabled",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "range()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/step/arity-0/experimental-enabled",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "step()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      },
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    }
+  ]
+}

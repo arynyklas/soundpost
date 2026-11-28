@@ -1,0 +1,243 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package main
+
+import (
+	"context"
+	"crypto/x509"
+	"errors"
+	"flag"
+	"fmt"
+	"net"
+	"net/netip"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify/providers"
+	"github.com/arynyklas/soundpost/internal/rules"
+)
+
+// workerOptions is the serve flag surface of the leader-only background runner:
+// the node's own notification delivery environment. What is delivered where is
+// organization configuration (the `destination` admin command), not a flag; see
+// docs/operations/background-workers.md and notification-channels.md.
+type workerOptions struct {
+	interval        *time.Duration
+	publicOrigin    *string
+	egressAllow     *string
+	caFile          *string
+	telegramAPI     *string
+	sendTimeout     *time.Duration
+	smtpHost        *string
+	smtpPort        *int
+	smtpTLS         *string
+	smtpUser        *string
+	smtpFrom        *string
+	smtpServerName  *string
+	smtpRequireAuth *bool
+	recordingSource *string
+}
+
+func addWorkerFlags(f *flag.FlagSet) workerOptions {
+	return workerOptions{
+		interval:        f.Duration("worker-interval", 5*time.Second, "pause between background runner passes (rules, conditions, issues, jobs, notification delivery; at least 10ms)"),
+		publicOrigin:    f.String("public-origin", "", "https origin links in notifications are built from (default: https://<--listen>, localhost for a wildcard host)"),
+		egressAllow:     f.String("notify-egress-allow", "", "comma-separated PRIVATE CIDR prefixes notification delivery may reach (RFC 1918, CGNAT, unique-local); loopback, link-local and metadata ranges can never be allowed"),
+		caFile:          f.String("notify-ca-file", "", "PEM file of extra trust roots for webhook, Telegram and SMTP TLS (system roots otherwise); verification is never disabled"),
+		telegramAPI:     f.String("notify-telegram-api", "", "Telegram Bot API https origin (the public API by default)"),
+		sendTimeout:     f.Duration("notify-send-timeout", 0, "bound of one notification send attempt (the providers' default when zero)"),
+		smtpHost:        f.String("notify-smtp-host", "", "SMTP submission relay host; enables the e-mail channel (needs --notify-smtp-from)"),
+		smtpPort:        f.Int("notify-smtp-port", 587, "SMTP submission port"),
+		smtpTLS:         f.String("notify-smtp-tls", "starttls", "SMTP TLS mode: starttls or implicit"),
+		smtpUser:        f.String("notify-smtp-user", "", "SMTP AUTH PLAIN identity; the destination's sealed secret is the password"),
+		smtpFrom:        f.String("notify-smtp-from", "", "SMTP envelope and header sender address"),
+		smtpServerName:  f.String("notify-smtp-server-name", "", "name the relay's certificate must match (the host by default)"),
+		smtpRequireAuth: f.Bool("notify-smtp-require-auth", false, "refuse to submit without AUTH credentials"),
+		recordingSource: f.String("recording-source-credential-file", "", "file holding the credential of the registered source recording rules write their samples through (the secret issued when the source was onboarded; read once at start, never stored by the node); without it recording rules cannot be saved and their outputs stay pending"),
+	}
+}
+
+// workerSettings is a validated runner configuration.
+type workerSettings struct {
+	interval        time.Duration
+	notify          appcore.NotificationConfig
+	recordingSecret string // credential of the recording source, "" when none is configured
+}
+
+// settings validates the flags before storage opens, so a bad value fails startup
+// with a static reason and nothing else.
+func (o workerOptions) settings(listen, dir string) (workerSettings, error) {
+	origin := *o.publicOrigin
+	if origin == "" {
+		derived, err := originOf(listen)
+		if err != nil {
+			return workerSettings{}, err
+		}
+		origin = derived
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return workerSettings{}, errors.New("--public-origin must be an https origin")
+	}
+	cfg := appcore.NotificationConfig{PublicOrigin: "https://" + u.Host, StateDir: filepath.Join(dir, "notify"), TelegramAPI: *o.telegramAPI, Timeout: *o.sendTimeout}
+	for _, part := range strings.Split(*o.egressAllow, ",") {
+		if part = strings.TrimSpace(part); part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			return workerSettings{}, errors.New("--notify-egress-allow: not a CIDR prefix")
+		}
+		cfg.Egress.AllowPrefixes = append(cfg.Egress.AllowPrefixes, prefix)
+	}
+	if *o.caFile != "" {
+		pem, err := os.ReadFile(*o.caFile)
+		if err != nil {
+			return workerSettings{}, errors.New("--notify-ca-file: unreadable")
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return workerSettings{}, errors.New("--notify-ca-file: no certificate")
+		}
+		cfg.RootCAs = pool
+	}
+	if *o.smtpHost != "" {
+		mode := providers.SMTPTLS(*o.smtpTLS)
+		if mode != providers.SMTPStartTLS && mode != providers.SMTPImplicitTLS {
+			return workerSettings{}, errors.New("--notify-smtp-tls must be starttls or implicit")
+		}
+		cfg.SMTP = &appcore.SMTPSettings{Host: *o.smtpHost, Port: *o.smtpPort, TLS: mode, Username: *o.smtpUser, RequireAuth: *o.smtpRequireAuth, From: *o.smtpFrom, ServerName: *o.smtpServerName}
+	}
+	if err := appcore.ValidateNotificationConfig(cfg); err != nil {
+		return workerSettings{}, fmt.Errorf("notification delivery: %w", err)
+	}
+	secret := ""
+	if *o.recordingSource != "" {
+		raw, err := os.ReadFile(*o.recordingSource)
+		if err != nil {
+			return workerSettings{}, errors.New("--recording-source-credential-file: unreadable")
+		}
+		if secret = strings.TrimSpace(string(raw)); secret == "" || strings.ContainsAny(secret, "\r\n") {
+			return workerSettings{}, errors.New("--recording-source-credential-file: must hold one credential")
+		}
+	}
+	return workerSettings{interval: *o.interval, notify: cfg, recordingSecret: secret}, nil
+}
+
+// originOf derives the default public origin from the listen address.
+func originOf(listen string) (string, error) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", errors.New("--listen: not a host:port address")
+	}
+	if ip, perr := netip.ParseAddr(host); host == "" || perr == nil && ip.IsUnspecified() {
+		host = "localhost"
+	}
+	return "https://" + net.JoinHostPort(host, port), nil
+}
+
+// startWorkers runs the leader-only background runner under ctx and returns at
+// once. The runner acts as the in-process system principal of each organization
+// (no session, no stored token); it delivers through the real providers.
+//
+// ready, when not nil, holds the first pass back until the node reports ready (health.Ready): after a
+// start the producers catch up on everything admitted since they last ran, a pass that decodes the
+// control state again and again and commits to it, and on a busy installation that competed with the
+// probe of readiness for the same cores and the same state until it timed out (the restart took more
+// than twice as long right after a load as on an idle installation). Nothing the runner does is owed
+// before the node serves.
+func startWorkers(ctx context.Context, core *appcore.App, s workerSettings, ready func(context.Context) (health.Readiness, error)) error {
+	sender, err := core.NotificationSender(s.notify)
+	if err != nil {
+		return fmt.Errorf("notification delivery: %w", err)
+	}
+	cfg := appcore.WorkerConfig{
+		Interval: s.interval,
+		Routing:  core.OrgRouting(),
+		Sender:   sender,
+		// The event producer runs last, so it sees what the other producers committed in
+		// the same pass (docs/operations/event-webhooks.md).
+		Producers: append(core.Producers(), core.EventProducer()),
+		Observe:   observeWorkers(),
+	}
+	// The rules a node evaluates are the catalogue administrators save over
+	// POST /api/v1/rules. Recording rules also need the node's recording source: its
+	// credential admits their samples, its policy bounds their labels.
+	var catalogueOptions []rules.CatalogueOption
+	if s.recordingSecret != "" {
+		recording, err := core.NewRecordingSource(ctx, s.recordingSecret)
+		if err != nil {
+			return errors.New("recording source: the credential was refused")
+		}
+		cfg.Admission, cfg.Producer = recording, recording.Producer
+		catalogueOptions = append(catalogueOptions, rules.WithRecordingSource(recording))
+		core.Policies.UseRecordingSource(recording)
+	}
+	if cfg.Rules, err = core.RuleCatalogue(catalogueOptions...); err != nil {
+		return fmt.Errorf("rule catalogue: %w", err)
+	}
+	if _, err = core.NewWorkers(cfg); err != nil {
+		return fmt.Errorf("background workers: %w", err)
+	}
+	// The passes read the control state every interval and never look at the admission books, which grow
+	// with every batch admitted: they run without them (model.WithoutBooks).
+	run := func() { _ = core.RunWorkers(model.WithoutBooks(ctx), cfg) }
+	if ready == nil {
+		go run()
+		return nil
+	}
+	afterReady(ctx, ready, readyPoll, run)
+	return nil
+}
+
+// readyPoll is how often afterReady asks whether the node is ready yet.
+const readyPoll = 250 * time.Millisecond
+
+// afterReady calls run, in its own goroutine, once probe reports the node ready, and never if ctx ends
+// first. A probe that fails or times out (5 s) is a node that is not ready yet.
+func afterReady(ctx context.Context, probe func(context.Context) (health.Readiness, error), every time.Duration, run func()) {
+	go func() {
+		for {
+			asked, cancel := context.WithTimeout(ctx, 5*time.Second)
+			r, err := probe(asked)
+			cancel()
+			if err == nil && r.Ready {
+				run()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(every):
+			}
+		}
+	}()
+}
+
+// observeWorkers logs, to stderr, each distinct set of failing stages once (closed
+// stage and fault codes only, never text), and that they recovered.
+func observeWorkers() func(appcore.PassReport) {
+	var last string
+	return func(r appcore.PassReport) {
+		var parts []string
+		for _, e := range r.Errors {
+			parts = append(parts, e.Stage+"="+e.Code)
+		}
+		sig := strings.Join(parts, " ")
+		if sig == last {
+			return
+		}
+		if sig == "" {
+			fmt.Fprintln(os.Stderr, "workers: recovered")
+		} else {
+			fmt.Fprintln(os.Stderr, "workers: failing stages: "+sig)
+		}
+		last = sig
+	}
+}
